@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模板中心 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item active" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">模板中心</span>
+      <span class="crumb">字幕样式 · 封面版式 · BGM 默认组合</span>
+      <div class="search">🔍 搜索模板</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：模板属 ①IP 建档 的资产准备 -->
+      <div class="flow-bar">
+        <a class="fstep here" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 资产二级导航 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:12.5px;color:var(--text-3);margin-right:4px;">IP 资产</span>
+        <a class="chip" href="profile.html">◉ IP 档案</a>
+        <a class="chip" href="avatars.html">♟ 数字人</a>
+        <a class="chip" href="voices.html">♪ 声音</a>
+        <a class="chip on" href="templates.html">✦ 模板</a>
+        <a class="chip" href="assets.html">▦ 素材库</a>
+      </div>
+
+      <!-- 首屏：当前 IP 正在使用的模板 -->
+      <div class="card" style="display:flex;align-items:center;gap:20px;">
+        <div class="thumb" style="width:84px;height:126px;flex-shrink:0;">模板<br>预览</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:18px;font-weight:700;">知识口播 A</span>
+            <span class="tag brand">李老师讲财税 · 默认</span>
+          </div>
+          <div style="color:var(--text-2);font-size:13px;margin-top:6px;">白底描边大字幕（底部安全区）· 红底标题封面 · 轻快商务 BGM · 李老师角标水印</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <span class="tag">字幕：粗体 44px</span><span class="tag">封面：红底大字</span><span class="tag">BGM：-18dB 避让</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <a class="btn primary sm">✎ 编辑模板</a>
+          <a class="btn sm ghost">应用于全部 IP</a>
+        </div>
+      </div>
+
+      <!-- 模板库 -->
+      <div class="sec"><h2>模板库（6）</h2><span class="hint">点击卡片即可预览并设为默认</span><a class="more" href="#">＋ 新建模板</a></div>
+      <div class="grid c3">
+        <div class="card hover" style="border-color:rgba(34,211,238,.5);">
+          <div class="thumb" style="height:130px;">大字幕 · 红封面</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <b>知识口播 A</b><span class="tag brand" style="margin-left:auto;">使用中</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">适合政策解读、干货科普</div>
+        </div>
+        <div class="card hover">
+          <div class="thumb" style="height:130px;">黄黑警示风</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <b>避坑指南 B</b><a class="btn sm ghost" style="margin-left:auto;">设为默认</a>
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">适合避坑、风险提示类选题</div>
+        </div>
+        <div class="card hover">
+          <div class="thumb" style="height:130px;">访谈双字幕</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <b>对话访谈 C</b><a class="btn sm ghost" style="margin-left:auto;">设为默认</a>
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">适合双人问答、连麦切片</div>
+        </div>
+        <div class="card hover">
+          <div class="thumb" style="height:130px;">商品挂车版式</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <b>带货种草 D</b><span class="tag" style="margin-left:auto;">王姐带货 · 默认</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">含价格贴片与挂车锚点位</div>
+        </div>
+        <div class="card hover">
+          <div class="thumb" style="height:130px;">课程章节版式</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+            <b>系列课程 E</b><a class="btn sm ghost" style="margin-left:auto;">设为默认</a>
+          </div>
+          <div style="font-size:12px;color:var(--text-3);margin-top:6px;">含章节编号与进度条</div>
+        </div>
+        <div class="card hover" style="border-style:dashed;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:196px;color:var(--text-3);gap:8px;">
+          <div style="font-size:22px;">＋</div>从成片反建模板
+        </div>
+      </div>
+
+      <!-- 模板组成说明 -->
+      <div class="card" style="opacity:.85;">
+        <div class="card-title">模板由什么组成</div>
+        <div class="grid c4" style="gap:12px;">
+          <div><div style="font-weight:600;font-size:13px;">字幕样式</div><div style="font-size:12px;color:var(--text-3);margin-top:4px;">字体/字号/描边/位置/关键词高亮</div></div>
+          <div><div style="font-weight:600;font-size:13px;">封面版式</div><div style="font-size:12px;color:var(--text-3);margin-top:4px;">底图/标题排版/IP 角标</div></div>
+          <div><div style="font-weight:600;font-size:13px;">声音组合</div><div style="font-size:12px;color:var(--text-3);margin-top:4px;">默认 BGM 与音量避让策略</div></div>
+          <div><div style="font-weight:600;font-size:13px;">发布预设</div><div style="font-size:12px;color:var(--text-3);margin-top:4px;">默认话题标签与@账号</div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a class="cur" href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

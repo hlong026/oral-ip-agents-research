@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文案工坊 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item active" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">文案工坊</span>
+      <span class="crumb">转写 → 仿写 → 去重</span>
+      <div class="search">🔍 搜索文案</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：文案工坊属 ②一键成片 的创作环节 -->
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep here" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start;">
+
+        <!-- 左：文案列表 -->
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <a class="btn primary" href="create.html" style="justify-content:center;">＋ 从链接新建</a>
+          <div class="card hover" style="border-color:rgba(34,211,238,.5);padding:14px;">
+            <div style="font-weight:600;font-size:13.5px;">3 个技巧让口播不冷场</div>
+            <div style="display:flex;gap:6px;margin-top:8px;"><span class="tag green">去重 82</span><span class="tag">已确认</span></div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:8px;">来源：抖音爆款 · 2 小时前</div>
+          </div>
+          <div class="card hover" style="padding:14px;">
+            <div style="font-weight:600;font-size:13.5px;">小规模纳税人 5 个优惠</div>
+            <div style="display:flex;gap:6px;margin-top:8px;"><span class="tag yellow">去重 61</span><span class="tag">待确认</span></div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:8px;">来源：关键词选题 · 5 小时前</div>
+          </div>
+          <div class="card hover" style="padding:14px;">
+            <div style="font-weight:600;font-size:13.5px;">个体户报税全流程</div>
+            <div style="display:flex;gap:6px;margin-top:8px;"><span class="tag green">去重 88</span><span class="tag">已发布</span></div>
+            <div style="font-size:11.5px;color:var(--text-3);margin-top:8px;">来源：快手爆款 · 昨天</div>
+          </div>
+        </div>
+
+        <!-- 右：详情（转写/仿写双栏 + 去重） -->
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card">
+            <div class="card-title">原片转写 <span class="tag" style="margin-left:8px;">Whisper large-v3</span><span class="more">字数 486 · 时长 58s</span></div>
+            <div class="textarea" style="min-height:110px;color:var(--text-2);">大家好，我是李老师。很多老板问我，公司刚成立要不要请会计？今天用 3 个真实案例告诉你，90% 的初创公司都在这上面多花了几万块冤枉钱……</div>
+            <div style="display:flex;gap:8px;margin-top:12px;">
+              <a class="btn sm">✎ 人工修正</a>
+              <a class="btn sm ghost">编辑锚点时间轴（8 个锚点）</a>
+              <a class="btn sm ghost">✦ 加入选题库</a>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">IP 仿写稿
+              <span class="tag brand" style="margin-left:8px;">人设：李老师 · 专业但接地气</span>
+              <span class="more">模型：DeepSeek-V3</span>
+            </div>
+            <div class="textarea" style="min-height:110px;">你的公司刚起步，会计这笔钱到底该不该花？我是李老师，做财税 12 年，今天不绕弯子，直接给你算一笔账——看完这条视频，至少帮你省下 2 万块……</div>
+            <div style="display:flex;gap:8px;margin-top:12px;align-items:center;">
+              <a class="btn sm">✎ 编辑</a>
+              <a class="btn sm">↻ 再生成一版</a>
+              <a class="btn sm ghost">调节强度</a>
+              <div style="flex:1;display:flex;align-items:center;gap:10px;padding:0 10px;">
+                <span style="font-size:11.5px;color:var(--text-3);">轻度</span>
+                <input type="range" class="slider" value="60">
+                <span style="font-size:11.5px;color:var(--text-3);">重度</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">去重与原创度 <span class="more">阈值 ≥70 分可发布</span></div>
+            <div style="display:flex;align-items:center;gap:24px;">
+              <div class="ring">
+                <svg width="92" height="92">
+                  <circle cx="46" cy="46" r="40" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="8"/>
+                  <circle cx="46" cy="46" r="40" fill="none" stroke="url(#g1)" stroke-width="8" stroke-linecap="round" stroke-dasharray="251.2" stroke-dashoffset="45"/>
+                  <defs><linearGradient id="g1"><stop offset="0%" stop-color="#6366F1"/><stop offset="100%" stop-color="#22D3EE"/></linearGradient></defs>
+                </svg>
+                <div class="num"><b>82</b><span>综合评分</span></div>
+              </div>
+              <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;"><span style="color:var(--text-2);">语义相似度</span><span>78 分</span></div>
+                <div class="progress"><i style="width:78%"></i></div>
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;"><span style="color:var(--text-2);">结构差异度</span><span>85 分</span></div>
+                <div class="progress"><i style="width:85%"></i></div>
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;"><span style="color:var(--text-2);">违禁词检测</span><span class="tag green">通过</span></div>
+              </div>
+              <a class="btn primary">✓ 确认文案，继续生成</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a class="cur" href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

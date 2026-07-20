@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>发布管理 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item active" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">发布管理</span>
+      <span class="crumb">多平台分发 · 定时 · 登录态</span>
+      <div class="search">🔍 搜索发布记录</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：当前在 ⑤发布管理 -->
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep here" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 首屏最重要的告警 -->
+      <div class="notice red" style="justify-content:space-between;">
+        <span>⚠ 抖音账号「李老师讲财税」登录态已过期，2 条待发布任务被阻塞。</span>
+        <a class="btn sm primary">一键重新授权</a>
+      </div>
+
+      <!-- 平台账号健康状态（账号绑定/巡检收敛到账号管理页） -->
+      <div class="sec" style="margin-bottom:0;"><h2>平台账号</h2><span class="hint">登录态每日 06:00 自动巡检</span><a class="more" href="accounts.html">账号管理 →</a></div>
+      <div class="grid c4">
+        <div class="card" style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:20px;">🎵</div>
+          <div style="flex:1;"><div style="font-weight:600;">抖音</div><div style="font-size:12px;color:var(--danger);">登录态失效</div></div>
+          <span class="tag red">异常</span>
+        </div>
+        <div class="card" style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:20px;">⚡</div>
+          <div style="flex:1;"><div style="font-weight:600;">快手</div><div style="font-size:12px;color:var(--text-3);">Cookie 28 天后到期</div></div>
+          <span class="tag green">正常</span>
+        </div>
+        <div class="card" style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:20px;">📕</div>
+          <div style="flex:1;"><div style="font-weight:600;">小红书</div><div style="font-size:12px;color:var(--text-3);">Cookie 12 天后到期</div></div>
+          <span class="tag green">正常</span>
+        </div>
+        <div class="card" style="display:flex;align-items:center;gap:12px;opacity:.75;">
+          <div style="font-size:20px;">📹</div>
+          <div style="flex:1;"><div style="font-weight:600;">视频号</div><div style="font-size:12px;color:var(--text-3);">仅支持手动上传</div></div>
+          <span class="tag">半自动</span>
+        </div>
+      </div>
+
+      <!-- 待发布 -->
+      <div class="sec"><h2>待发布（2）</h2><a class="more" href="#">发布日历 →</a></div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div class="thumb" style="width:60px;height:90px;flex-shrink:0;">封面</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;">3 个技巧让口播不冷场</div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <span class="chip on">抖音</span><span class="chip on">快手</span><span class="chip">小红书</span>
+              <span class="tag" style="margin-left:6px;">定时：今晚 20:00</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a class="btn sm ghost" href="editor.html">✂ 剪辑微调</a>
+            <a class="btn sm ghost">编辑文案/标签</a>
+            <a class="btn sm primary">立即发布</a>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:16px;">
+          <div class="thumb" style="width:60px;height:90px;flex-shrink:0;">封面</div>
+          <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;">个体户报税全流程</div>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <span class="chip on">抖音</span><span class="chip on">快手</span><span class="chip on">小红书</span>
+              <span class="tag" style="margin-left:6px;">成片就绪 · 等待发布</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <a class="btn sm ghost" href="editor.html">✂ 剪辑微调</a>
+            <a class="btn sm ghost">仅导出 MP4</a>
+            <a class="btn sm ghost">导出剪映草稿</a>
+            <a class="btn sm primary">立即发布</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 最近发布记录 -->
+      <div class="sec"><h2>最近发布</h2><a class="more" href="analytics.html">查看数据回流 →</a></div>
+      <div class="card">
+        <table class="table">
+          <thead><tr><th>视频</th><th>平台</th><th>发布时间</th><th>状态</th><th>24h 播放</th></tr></thead>
+          <tbody>
+            <tr><td>老板必看的 3 个节税思路</td><td>抖音</td><td>07-17 20:00</td><td><span class="tag green">成功</span></td><td>12,400</td></tr>
+            <tr><td>老板必看的 3 个节税思路</td><td>快手</td><td>07-17 20:05</td><td><span class="tag green">成功</span></td><td>8,200</td></tr>
+            <tr><td>新公司法 5 大变化</td><td>小红书</td><td>07-16 19:30</td><td><span class="tag green">成功</span></td><td>21,700</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a class="cur" href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

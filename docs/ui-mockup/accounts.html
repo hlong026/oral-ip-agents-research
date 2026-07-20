@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>账号管理 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item active" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">账号管理</span>
+      <span class="crumb">平台账号绑定 · 登录态巡检 · 授权续期</span>
+      <div class="search">🔍 搜索账号</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：账号是 ⑤发布管理 的前提 -->
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep here" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 首屏：登录态告警（与发布管理数据一致） -->
+      <div class="notice red" style="justify-content:space-between;">
+        <span>⚠ 抖音账号「李老师讲财税」登录态已过期（07-18 14:02），2 条待发布任务被阻塞。</span>
+        <a class="btn sm primary">扫码重新授权</a>
+      </div>
+
+      <!-- 账号列表 -->
+      <div class="card">
+        <div class="card-title">已绑定账号（5）<span class="more">每日 06:00 自动巡检登录态</span></div>
+        <table class="table">
+          <thead><tr><th>平台</th><th>账号</th><th>所属 IP</th><th>登录态</th><th>有效期</th><th>操作</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>🎵 抖音</td><td>李老师讲财税</td><td><span class="tag">李老师讲财税</span></td>
+              <td><span class="tag red">已过期</span></td><td>07-18 14:02 失效</td>
+              <td><a class="btn sm primary">重新授权</a></td>
+            </tr>
+            <tr>
+              <td>⚡ 快手</td><td>李老师财税课堂</td><td><span class="tag">李老师讲财税</span></td>
+              <td><span class="tag green">正常</span></td><td>Cookie 28 天后到期</td>
+              <td><a class="btn sm ghost">续期</a> <a class="btn sm ghost">解绑</a></td>
+            </tr>
+            <tr>
+              <td>📕 小红书</td><td>李老师聊财税</td><td><span class="tag">李老师讲财税</span></td>
+              <td><span class="tag green">正常</span></td><td>Cookie 12 天后到期</td>
+              <td><a class="btn sm ghost">续期</a> <a class="btn sm ghost">解绑</a></td>
+            </tr>
+            <tr>
+              <td>🎵 抖音</td><td>王姐好物</td><td><span class="tag">王姐带货</span></td>
+              <td><span class="tag green">正常</span></td><td>Cookie 21 天后到期</td>
+              <td><a class="btn sm ghost">续期</a> <a class="btn sm ghost">解绑</a></td>
+            </tr>
+            <tr>
+              <td>📹 视频号</td><td>李老师讲财税</td><td><span class="tag">李老师讲财税</span></td>
+              <td><span class="tag yellow">半自动</span></td><td>仅支持手动上传</td>
+              <td><a class="btn sm ghost">查看指引</a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start;">
+        <!-- 绑定新账号 -->
+        <div class="card">
+          <div class="card-title">绑定新账号</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <a class="btn">🎵 绑定抖音</a>
+            <a class="btn">⚡ 绑定快手</a>
+            <a class="btn">📕 绑定小红书</a>
+            <a class="btn ghost">📹 视频号（手动）</a>
+          </div>
+          <div class="notice blue" style="margin-top:14px;">ℹ 绑定时使用手机扫码，Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。</div>
+        </div>
+
+        <!-- 巡检设置 -->
+        <div class="card">
+          <div class="card-title">登录态巡检与提醒</div>
+          <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span>每日自动巡检</span><span class="tag green">已开启 · 06:00</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span>到期前提醒</span><span class="tag green">提前 3 天 · 站内+微信</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span>过期自动暂停发布</span><span class="tag green">已开启</span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;"><span>解绑后保留历史数据</span><span class="tag">保留 90 天</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a class="cur" href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

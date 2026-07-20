@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: 后端质量（ruff / mypy / pytest）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: uv sync --extra dev
+      - name: Ruff
+        run: uv run ruff check .
+      - name: mypy
+        run: uv run mypy app
+      - name: pytest 冒烟
+        run: uv run pytest -q
+
+  frontend:
+    name: 前端构建（typecheck + vite build）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+      - name: Vitest 组件测试
+        run: pnpm test
+      - name: 构建
+        run: pnpm build
+
+  contract:
+    name: 契约零漂移（OpenAPI → TS 类型）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: 安装依赖
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --directory server
+      - name: 启动后端
+        run: |
+          cd server
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/healthz && break || sleep 1
+          done
+      - name: 零漂移校验（不一致则失败，须先执行 pnpm gen:api 并提交产物）
+        run: node scripts/gen-api-types.mjs --check

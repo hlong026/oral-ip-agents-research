@@ -1,0 +1,15 @@
+{
+  "name": "@oral/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "口播IP智能体桌面壳（Tauri 2 纯壳，加载 Web 构建产物，算力全在云端）",
+  "scripts": {
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}

@@ -1,0 +1,35 @@
+"""voice 模块 ORM（F-201~F-204，异步克隆 + 试听确认流程）"""
+import uuid
+from datetime import UTC, datetime
+
+from sqlalchemy import DateTime, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.core.db import Base
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex
+
+
+class Voice(Base):
+    __tablename__ = "voices"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(16), default="clone")  # clone
+    provider: Mapped[str] = mapped_column(String(32), default="")  # 内部用，不暴露给用户
+    provider_voice_id: Mapped[str] = mapped_column(String(64), default="")
+    provider_task_id: Mapped[str] = mapped_column(String(64), default="")  # 异步克隆任务 ID
+    gender: Mapped[str] = mapped_column(String(16), default="")
+    emotion: Mapped[str] = mapped_column(String(32), default="")
+    language: Mapped[str] = mapped_column(String(16), default="zh")  # zh/en/jp/ko 等
+    sample_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    demo_key: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 试听音频存储 key
+    rate: Mapped[str] = mapped_column(String(8), default="1.0")  # 语速
+    volume: Mapped[str] = mapped_column(String(8), default="1.0")  # 音量
+    pitch: Mapped[str] = mapped_column(String(8), default="1.0")  # 语调
+    # status: training → pending_confirm → ready / rejected / failed
+    status: Mapped[str] = mapped_column(String(20), default="training")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

@@ -1,0 +1,48 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# storage / data
+data/
+storage/
+!server/storage/seed/
+!server/storage/seed/**
+minio-data/
+
+# tauri
+apps/desktop/src-tauri/target/
+
+# playwright
+test-results/
+playwright-report/
+
+# sqlite 本地库
+server/*.db
+
+# os / ide
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

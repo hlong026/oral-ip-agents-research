@@ -1,0 +1,187 @@
+"""pipeline 业务编排（F-405/406：批量扇出、单步重跑/覆盖、manual 确认）
+日志：任务生命周期（§10.6.8-B #1）
+"""
+import json
+import uuid
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.logging import get_logger
+
+from . import repository as repo
+from .engine import schedule_run
+from .models import STEP_ORDER, PipelineTask
+from .schemas import CreatePipelineIn, StatsOut, StepStateOut, TaskOut, TaskPageOut
+
+logger = get_logger("oral.pipeline.service")
+
+
+def _default_steps() -> list[dict]:
+    return [
+        {"step": s, "status": "pending", "progress": 0, "message": "",
+         "compute": "cloud", "provider": "", "quotaCost": 0.0, "artifacts": {},
+         "startedAt": None, "finishedAt": None}
+        for s in STEP_ORDER
+    ]
+
+
+async def create(db: AsyncSession, user_id: str, inp: CreatePipelineIn) -> list[TaskOut]:
+    """创建任务；count>1 时批量扇出共享 batch_id（F-406）"""
+    if not (inp.sourceUrl or inp.topic or inp.scriptText):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={"code": "INPUT_REQUIRED", "message": "链接/选题/文案至少填一项"})
+    count = max(1, min(inp.count, 20))
+    batch_id = uuid.uuid4().hex[:12] if count > 1 else None
+    title_src = (inp.topic or inp.scriptText or inp.sourceUrl or "未命名任务")[:24]
+    tasks: list[PipelineTask] = []
+    for i in range(count):
+        title = f"{title_src} ·{i + 1}" if count > 1 else title_src
+        t = await repo.create(
+            db,
+            user_id=user_id,
+            ip_id=inp.ipId,
+            title=title,
+            source_url=inp.sourceUrl or "",
+            topic=inp.topic or "",
+            script_text=inp.scriptText or "",
+            voice_id=inp.voiceId or "",
+            avatar_id=inp.avatarId or "",
+            platforms_json=json.dumps(inp.platforms, ensure_ascii=False),
+            mode="manual" if inp.mode == "manual" else "auto",
+            randomize=inp.randomize or (count > 1),  # 批量默认开差异化随机化（C5）
+            batch_id=batch_id,
+            publish_at=inp.publishAt or "",
+            steps_json=json.dumps(_default_steps(), ensure_ascii=False),
+        )
+        tasks.append(t)
+        schedule_run(t.id)
+    # 任务创建：记录 INFO（§10.6.8-B #1）
+    logger.info(
+        "task_created",
+        user_id=user_id,
+        task_id=tasks[0].id if tasks else "",
+        mode=inp.mode or "auto",
+        batch_size=count,
+        source_type="url" if inp.sourceUrl else ("topic" if inp.topic else "script"),
+    )
+    return [to_out(t) for t in tasks]
+
+
+async def list_tasks(db: AsyncSession, user_id: str, status_: str | None,
+                     page: int, page_size: int) -> TaskPageOut:
+    items, total = await repo.list_by_user(db, user_id, status_, page, page_size)
+    return TaskPageOut(items=[to_out(t) for t in items], total=total, page=page, pageSize=page_size)
+
+
+async def get_task(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
+    t = await _must_get(db, task_id, user_id)
+    return to_out(t)
+
+
+async def retry_step(db: AsyncSession, task_id: str, step: str, user_id: str) -> TaskOut:
+    """单步重跑：重置该步及后续步骤，从断点续跑（F-405）"""
+    _check_step(step)
+    t = await _must_get(db, task_id, user_id)
+    if t.status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"})
+    t.status = "pending"
+    t.error = ""
+    await repo.save(db, t)
+    schedule_run(t.id, from_step=step)
+    # 单步重跑：记录 INFO（§10.6.8-B #1）
+    logger.info("task_retry", task_id=task_id, step=step, user_id=user_id)
+    return to_out(t)
+
+
+async def override_step(db: AsyncSession, task_id: str, step: str, user_id: str,
+                        artifacts: dict[str, str]) -> TaskOut:
+    """人工覆盖：写入该步产物并标记完成，从下一步续跑（F-405 人工干预）"""
+    _check_step(step)
+    t = await _must_get(db, task_id, user_id)
+    if t.status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"})
+    steps = json.loads(t.steps_json or "[]") or _default_steps()
+    ctx = json.loads(t.artifacts_json or "{}")
+    ctx.update(artifacts)
+    idx = STEP_ORDER.index(step)
+    now = datetime.now(UTC).isoformat()
+    steps[idx].update({"status": "done", "progress": 100, "message": "人工覆盖",
+                       "artifacts": {k: str(v)[:200] for k, v in artifacts.items()},
+                       "finishedAt": now})
+    t.steps_json = json.dumps(steps, ensure_ascii=False)
+    t.artifacts_json = json.dumps(ctx, ensure_ascii=False)
+    t.status = "pending"
+    t.error = ""
+    await repo.save(db, t)
+    if idx + 1 < len(STEP_ORDER):
+        schedule_run(t.id, from_step=STEP_ORDER[idx + 1])
+    return to_out(t)
+
+
+async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
+    """manual 模式逐步确认（waiting_confirm → 续跑下一步）"""
+    t = await _must_get(db, task_id, user_id)
+    if t.status != "waiting_confirm":
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            detail={"code": "NOT_WAITING", "message": "任务不在待确认状态"})
+    t.status = "pending"
+    await repo.save(db, t)
+    schedule_run(t.id)  # 不传 from_step：自动跳过已 done 步骤
+    # manual 确认：记录 INFO（§10.6.8-B #1）
+    logger.info("task_confirmed", task_id=task_id, user_id=user_id)
+    return to_out(t)
+
+
+async def cancel(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
+    t = await _must_get(db, task_id, user_id)
+    if t.status in ("done", "failed", "canceled"):
+        return to_out(t)
+    t.status = "canceled"
+    await repo.save(db, t)
+    # 任务取消：记录 INFO（§10.6.8-B #1）
+    logger.info("task_canceled", task_id=task_id, user_id=user_id)
+    return to_out(t)
+
+
+async def stats(db: AsyncSession, user_id: str) -> StatsOut:
+    return StatsOut(**await repo.stats(db, user_id))
+
+
+def _check_step(step: str) -> None:
+    if step not in STEP_ORDER:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={"code": "BAD_STEP", "message": f"非法步骤：{step}"})
+
+
+async def _must_get(db: AsyncSession, task_id: str, user_id: str) -> PipelineTask:
+    t = await repo.get(db, task_id, user_id)
+    if t is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            detail={"code": "NOT_FOUND", "message": "任务不存在"})
+    return t
+
+
+def to_out(t: PipelineTask) -> TaskOut:
+    steps_raw = json.loads(t.steps_json or "[]") or _default_steps()
+    ctx = json.loads(t.artifacts_json or "{}")
+    cover = ctx.get("cover_key")
+    return TaskOut(
+        id=t.id,
+        ipId=t.ip_id,
+        title=t.title,
+        coverUrl=f"/media/{cover}" if cover else None,
+        sourceUrl=t.source_url,
+        mode=t.mode,
+        status=t.status,
+        steps=[StepStateOut(**s) for s in steps_raw],
+        currentStep=t.current_step or None,
+        compute=t.compute,
+        quotaCost=t.quota_cost,
+        batchId=t.batch_id,
+        createdAt=t.created_at.astimezone(UTC).isoformat(),
+        updatedAt=t.updated_at.astimezone(UTC).isoformat(),
+    )

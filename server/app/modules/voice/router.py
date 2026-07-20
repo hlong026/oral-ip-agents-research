@@ -1,0 +1,91 @@
+"""voice HTTP 层：音色库 / 克隆 / 试听确认 / TTS（白标：不暴露供应商品牌）"""
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.core.deps import get_current_user_id
+from app.core.storage import save_bytes
+
+from .schemas import CloneStatusOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, VoiceOut
+from .service import (
+    clone_voice,
+    confirm_voice,
+    edit_voice_params,
+    get_clone_status,
+    list_voices,
+    reject_voice,
+    synthesize,
+)
+
+router = APIRouter(prefix="/voices", tags=["voice"])
+
+
+@router.get("", response_model=list[VoiceOut])
+async def api_list(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
+    """我的声音列表"""
+    return await list_voices(db, user_id)
+
+
+@router.post("/clone", response_model=VoiceOut)
+async def api_clone(
+    name: str = Form(...),
+    consentToken: str = Form(...),
+    language: str = Form(default="zh"),
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """提交声音克隆（异步，返回 status=training）"""
+    data = await file.read()
+    key = await save_bytes("voice-samples", file.filename or "sample.wav", data)
+    return await clone_voice(db, user_id, name, consentToken, key, language)
+
+
+@router.get("/{voice_id}/status", response_model=CloneStatusOut)
+async def api_clone_status(
+    voice_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询克隆进度（完成后返回 demoUrl 试听链接）"""
+    return await get_clone_status(db, user_id, voice_id)
+
+
+@router.post("/{voice_id}/confirm", response_model=VoiceOut)
+async def api_confirm(
+    voice_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户试听确认通过"""
+    return await confirm_voice(db, user_id, voice_id)
+
+
+@router.post("/{voice_id}/reject", response_model=VoiceOut)
+async def api_reject(
+    voice_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """用户拒绝克隆结果"""
+    return await reject_voice(db, user_id, voice_id)
+
+
+@router.post("/{voice_id}/edit", status_code=204)
+async def api_edit(
+    voice_id: str,
+    body: VoiceEditIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """调整语速/音量/语调"""
+    await edit_voice_params(db, user_id, voice_id, body.rate, body.volume, body.pitch)
+    return Response(status_code=204)
+
+
+@router.post("/synthesize", response_model=SynthesizeOut)
+async def api_synthesize(body: SynthesizeIn, user_id: str = Depends(get_current_user_id),
+                         db: AsyncSession = Depends(get_db)):
+    """TTS 合成试听"""
+    return await synthesize(db, user_id, body.voiceId, body.text, body.speed)

@@ -1,0 +1,74 @@
+"""avatar HTTP 层：形象库 / 视频克隆 / 图片克隆 / 状态查询 / 删除（白标）"""
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import Response
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.core.deps import get_current_user_id
+from app.core.storage import save_bytes
+
+from .schemas import AvatarOut, AvatarStatusOut
+from .service import clone_avatar_by_image, clone_avatar_by_video, delete_avatar, get_clone_status, list_avatars
+
+router = APIRouter(prefix="/avatars", tags=["avatar"])
+
+
+@router.get("", response_model=list[AvatarOut])
+async def api_list(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
+    """我的数字人列表"""
+    return await list_avatars(db, user_id)
+
+
+@router.post("/clone", response_model=AvatarOut)
+async def api_clone_video(
+    name: str = Form(...),
+    consentToken: str = Form(...),
+    scene: str = Form(default=""),
+    file: UploadFile = File(...),
+    cover: UploadFile | None = File(default=None),
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """视频数字人克隆（异步，返回 status=training）"""
+    data = await file.read()
+    key = await save_bytes("avatar-samples", file.filename or "sample.mp4", data)
+    cover_key = None
+    if cover is not None and cover.filename:
+        cover_key = await save_bytes("avatar-covers", cover.filename, await cover.read())
+    return await clone_avatar_by_video(db, user_id, name, consentToken, key, scene, cover_key)
+
+
+@router.post("/create-by-image", response_model=AvatarOut)
+async def api_clone_image(
+    name: str = Form(...),
+    consentToken: str = Form(...),
+    scene: str = Form(default=""),
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """图片数字人克隆（异步，返回 status=training）"""
+    data = await file.read()
+    key = await save_bytes("avatar-samples", file.filename or "image.jpg", data)
+    return await clone_avatar_by_image(db, user_id, name, consentToken, key, scene)
+
+
+@router.get("/{avatar_id}/status", response_model=AvatarStatusOut)
+async def api_clone_status(
+    avatar_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询克隆进度"""
+    return await get_clone_status(db, user_id, avatar_id)
+
+
+@router.delete("/{avatar_id}", status_code=204)
+async def api_delete(
+    avatar_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除数字人"""
+    await delete_avatar(db, user_id, avatar_id)
+    return Response(status_code=204)

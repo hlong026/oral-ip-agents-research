@@ -1,0 +1,76 @@
+version: "3.9"
+
+# 口播IP智能体 — 基础设施（06 文档 §6.1 数据层）
+# 起步：PG16 + Redis7 + MinIO；GPU Worker 后续单独编排
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: oral-postgres
+    environment:
+      POSTGRES_USER: oral
+      POSTGRES_PASSWORD: oral_dev_pass
+      POSTGRES_DB: oral
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oral"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: oral-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: oral-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: oral
+      MINIO_ROOT_PASSWORD: oral_dev_minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: oral-server
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app
+      - oral-storage:/app/storage
+
+volumes:
+  pg-data:
+  redis-data:
+  minio-data:
+  oral-storage:

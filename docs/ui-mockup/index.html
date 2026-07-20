@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>工作台 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <!-- 左侧栏 -->
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+
+    <a class="cta" href="create.html">＋ 一键成片</a>
+
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item active" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+
+    <div class="spacer"></div>
+
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <div class="main">
+    <header class="topbar">
+      <span class="title">工作台</span>
+      <span class="crumb">当前 IP：李老师讲财税</span>
+      <div class="search">🔍 全局搜索（文案 / 任务 / 资产）</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：工作台是流程枢纽，六步随时可达 -->
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 首屏 Hero：粘贴链接即可行动（一键成片 / 提取文案 双入口） -->
+      <section class="hero hero-home">
+        <div class="hello">早上好，陈默 · 今天是「李老师讲财税」连续更新的第 12 天</div>
+        <h1>粘贴一个爆款链接，<span class="grad">5 分钟后它就是你的原创视频。</span></h1>
+        <div class="mega-input hero-input">
+          <button class="upload-ico" id="btnUpload" type="button" title="上传视频文件（视频号等平台）">⤒</button>
+          <input id="heroLink" type="url" placeholder="粘贴视频链接，自动识别平台，回车一键成片">
+          <button class="btn outline" id="btnExtract" type="button" title="跳转文案工坊，仅提取与仿写文案">✎ 提取文案</button>
+          <button class="btn primary hero-cta" id="btnCreate" type="button" title="进入一键成片全流程">⚡ 一键成片</button>
+          <input type="file" id="heroFile" accept="video/*" hidden>
+        </div>
+        <div class="hero-hint" id="heroHint"><span class="dim">支持抖音 / 快手 / 小红书链接自动解析；视频号及其他平台请直接上传视频文件</span></div>
+      </section>
+
+      <!-- 关键数据概览：3 个结果指标 + 1 个可行动指标 -->
+      <div class="grid c4">
+        <div class="card stat-card">
+          <div class="k"><span class="k-ico">▶</span>今日成片</div>
+          <div class="v">8</div>
+          <div class="d"><span class="up">↑ 较昨日 +3</span></div>
+        </div>
+        <div class="card stat-card">
+          <div class="k"><span class="k-ico">☰</span>队列中</div>
+          <div class="v">3</div>
+          <div class="d">预计 9 分钟内全部完成</div>
+        </div>
+        <div class="card stat-card">
+          <div class="k"><span class="k-ico">⇪</span>累计已发布</div>
+          <div class="v">156</div>
+          <div class="d"><span class="up">↑ 本周 +21 条</span></div>
+        </div>
+        <a class="card stat-card alert" href="publish.html" title="前往发布管理处理">
+          <div class="k"><span class="k-ico">⚠</span>待处理</div>
+          <div class="v">1</div>
+          <div class="d">抖音登录态过期 · 去处理 →</div>
+        </a>
+      </div>
+
+      <!-- 双栏主区：左 = 任务与 IP，右 = 动态流与快捷入口 -->
+      <div class="board">
+        <div class="board-main">
+
+          <!-- 进行中的任务：一眼看到头 -->
+          <div class="sec"><h2>正在进行</h2><span class="hint"><span class="live-dot"></span>实时同步</span><a class="more" href="tasks.html">进入任务中心 →</a></div>
+          <div class="card task-card hover">
+            <div class="thumb tc-cover">封面</div>
+            <div class="tc-body">
+              <div class="tc-title"><b>3 个技巧让口播不冷场</b><span class="tag blue">☁ 云端</span></div>
+              <div class="mini-pipe">
+                <span class="st ok">✓ 解析</span><span class="arrow">→</span>
+                <span class="st ok">✓ 文案</span><span class="arrow">→</span>
+                <span class="st ok">✓ 声音</span><span class="arrow">→</span>
+                <span class="st run">▶ 数字人 67%</span><span class="arrow">→</span>
+                <span class="st">合成</span><span class="arrow">→</span>
+                <span class="st">剪辑</span><span class="arrow">→</span>
+                <span class="st">发布</span>
+              </div>
+              <div class="progress shimmer"><i style="width:67%"></i></div>
+            </div>
+            <div class="tc-side">
+              <div class="meta">剩余约 1 分钟</div>
+              <div class="actions"><a class="btn sm ghost" href="tasks.html">暂停</a><a class="btn sm" href="tasks.html">详情</a></div>
+            </div>
+          </div>
+          <div class="card task-card hover">
+            <div class="thumb tc-cover">封面</div>
+            <div class="tc-body">
+              <div class="tc-title"><b>个体户报税全流程 · 仿写稿 v2</b><span class="tag">排队第 1 位</span></div>
+              <div class="mini-pipe">
+                <span class="st">解析</span><span class="arrow">→</span>
+                <span class="st">文案</span><span class="arrow">→</span>
+                <span class="st">声音</span><span class="arrow">→</span>
+                <span class="st">数字人</span><span class="arrow">→</span>
+                <span class="st">合成</span><span class="arrow">→</span>
+                <span class="st">剪辑</span><span class="arrow">→</span>
+                <span class="st">发布</span>
+              </div>
+              <div class="progress"><i style="width:2%"></i></div>
+            </div>
+            <div class="tc-side">
+              <div class="meta">预计 3 分钟后开始<br>算力：☁ 云端</div>
+              <div class="actions"><a class="btn sm ghost" href="tasks.html">取消</a><a class="btn sm" href="tasks.html">详情</a></div>
+            </div>
+          </div>
+
+          <!-- 我的 IP：快速切换与档案直达 -->
+          <div class="sec"><h2>我的 IP</h2><span class="hint">点击卡片即可切换当前 IP</span><a class="more" href="profile.html">管理档案 →</a></div>
+          <div class="ip-row">
+            <a class="ip-card active" href="profile.html">
+              <div class="avatar" style="background:linear-gradient(135deg,#F59E0B,#EF4444);">李</div>
+              <div class="ip-meta"><div class="nm">李老师讲财税</div><div class="mt">知识科普 · 今日已更 3 条</div></div>
+              <span class="cur-tag">当前</span>
+            </a>
+            <a class="ip-card" href="profile.html">
+              <div class="avatar" style="background:linear-gradient(135deg,#22D3EE,#34D399);">王</div>
+              <div class="ip-meta"><div class="nm">王姐带货</div><div class="mt">带货种草 · 今日已更 5 条</div></div>
+            </a>
+            <a class="ip-card" href="profile.html">
+              <div class="avatar" style="background:linear-gradient(135deg,#8B5CF6,#EC4899);">阿</div>
+              <div class="ip-meta"><div class="nm">阿伟说车</div><div class="mt">汽车评测 · 3 天前更新</div></div>
+            </a>
+            <a class="ip-card new" href="profile.html">＋ 新建 IP</a>
+          </div>
+
+        </div>
+
+        <div class="board-side">
+
+          <!-- 任务动态流：全量事件时间线 -->
+          <div class="sec"><h2>任务动态</h2><a class="more" href="tasks.html">全部 →</a></div>
+          <div class="card feed">
+            <div class="feed-item"><i class="fdot ok"></i><div class="fbody"><div class="ft">「3 个技巧让口播不冷场」发布成功 · 抖音</div><div class="fs">2 分钟前</div></div></div>
+            <div class="feed-item"><i class="fdot brand"></i><div class="fbody"><div class="ft">「小规模纳税人 5 个优惠」数字人渲染完成，进入合成</div><div class="fs">18 分钟前</div></div></div>
+            <div class="feed-item"><i class="fdot info"></i><div class="fbody"><div class="ft">「个体户报税全流程」去重评分 82 分，文案已确认</div><div class="fs">1 小时前</div></div></div>
+            <div class="feed-item"><i class="fdot err"></i><div class="fbody"><div class="ft">「财税合规 3 误区」发布失败：抖音登录态过期 <a href="publish.html">去重新授权 →</a></div><div class="fs">3 小时前</div></div></div>
+            <div class="feed-item"><i class="fdot ok"></i><div class="fbody"><div class="ft">批量复刻队列完成 20/20，全部进入待发布</div><div class="fs">昨天 22:41</div></div></div>
+          </div>
+
+          <!-- 快捷入口：资产与数据一步直达 -->
+          <div class="sec"><h2>快捷入口</h2></div>
+          <div class="quick-grid">
+            <a class="quick" href="templates.html"><span class="qi">▦</span>模板中心</a>
+            <a class="quick" href="avatars.html"><span class="qi">◉</span>数字人训练</a>
+            <a class="quick" href="voices.html"><span class="qi">♪</span>声音克隆</a>
+            <a class="quick" href="analytics.html"><span class="qi">↗</span>数据看板</a>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- 效果图页面切换 -->
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a class="cur" href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+
+<script>
+/* 工作台 Hero：平台自动识别 + 链接直达 + 手动上传 */
+(function () {
+  var input = document.getElementById('heroLink');
+  var file = document.getElementById('heroFile');
+  var hint = document.getElementById('heroHint');
+  var btnCreate = document.getElementById('btnCreate');
+  var btnExtract = document.getElementById('btnExtract');
+  var btnUpload = document.getElementById('btnUpload');
+  var DEFAULT_HINT = '<span class="dim">支持抖音 / 快手 / 小红书链接自动解析；视频号及其他平台请直接上传视频文件</span>';
+  /* 平台域名特征：前三者自动解析；视频号需手动上传；未识别走通用解析尝试 */
+  var PLATFORMS = [
+    { re: /douyin\.com|iesdouyin/i, name: '抖音' },
+    { re: /kuaishou\.com|gifshow/i, name: '快手' },
+    { re: /xiaohongshu\.com|xhslink/i, name: '小红书' },
+    { re: /channels\.weixin|weixin\.qq\.com|finder\.video/i, name: '视频号', manual: true }
+  ];
+  var fileName = null;
+
+  function detect(v) {
+    for (var i = 0; i < PLATFORMS.length; i++) if (PLATFORMS[i].re.test(v)) return PLATFORMS[i];
+    return null;
+  }
+  function setActions(enabled) {
+    btnCreate.disabled = !enabled;
+    btnExtract.disabled = !enabled;
+  }
+  function render() {
+    var v = input.value.trim();
+    if (v && fileName) { fileName = null; file.value = ''; } /* 输入链接优先，清除已选文件 */
+    if (!v) { hint.innerHTML = DEFAULT_HINT; setActions(true); btnUpload.classList.remove('glow'); return; }
+    var p = detect(v);
+    if (p && p.manual) {
+      hint.innerHTML = '<span class="tag yellow">已识别：' + p.name + '</span><span>该平台暂不支持链接解析，请上传视频文件 →</span>';
+      setActions(false);
+      btnUpload.classList.add('glow');
+    } else if (p) {
+      hint.innerHTML = '<span class="tag green">已识别：' + p.name + '</span><span>将自动提取文案 · 回车立即一键成片</span>';
+      setActions(true);
+      btnUpload.classList.remove('glow');
+    } else {
+      hint.innerHTML = '<span class="tag">未识别平台</span><span>将尝试通用解析；若失败请改用上传视频</span>';
+      setActions(true);
+      btnUpload.classList.remove('glow');
+    }
+  }
+  function go(base) {
+    var v = input.value.trim();
+    var q = fileName ? '?upload=' + encodeURIComponent(fileName)
+           : v ? '?link=' + encodeURIComponent(v) : '';
+    location.href = base + q;
+  }
+  input.addEventListener('input', render);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !btnCreate.disabled) go('create.html'); });
+  btnCreate.addEventListener('click', function () { go('create.html'); });
+  btnExtract.addEventListener('click', function () { go('scripts.html'); });
+  btnUpload.addEventListener('click', function () { file.click(); });
+  file.addEventListener('change', function () {
+    if (!file.files.length) return;
+    fileName = file.files[0].name;
+    input.value = ''; /* 文件优先，清空链接输入 */
+    hint.innerHTML = '<span class="tag green">已选择视频</span><span class="file-name">' + fileName + '</span><span>· 点击「一键成片」或「提取文案」继续</span>';
+    setActions(true);
+    btnUpload.classList.remove('glow');
+  });
+})();
+</script>
+</body>
+</html>

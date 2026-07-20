@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字人中心 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item active" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">数字人中心</span>
+      <span class="crumb">形象分身 · 训练状态 · 合规授权</span>
+      <div class="search">🔍 搜索数字人</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：数字分身属 ①IP 建档 的资产准备 -->
+      <div class="flow-bar">
+        <a class="fstep here" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 资产二级导航 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:12.5px;color:var(--text-3);margin-right:4px;">IP 资产</span>
+        <a class="chip" href="profile.html">◉ IP 档案</a>
+        <a class="chip on" href="avatars.html">♟ 数字人</a>
+        <a class="chip" href="voices.html">♪ 声音</a>
+        <a class="chip" href="templates.html">✦ 模板</a>
+        <a class="chip" href="assets.html">▦ 素材库</a>
+      </div>
+
+      <!-- 首屏：当前 IP 的主数字人 + 一键训练 -->
+      <div style="display:grid;grid-template-columns:280px 1fr;gap:16px;align-items:start;">
+        <div class="card" style="padding:14px;">
+          <div class="video-preview" style="max-height:420px;">
+            <div class="play">▶</div>
+            <span style="font-size:12px;">分身效果预览</span>
+            <div class="subtitle-demo">今天这条视频帮你省 2 万块</div>
+          </div>
+          <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;">
+            <div><b>李老师 · 正装版</b><div style="font-size:12px;color:var(--text-3);margin-top:2px;">默认分身</div></div>
+            <span class="tag green">就绪</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card">
+            <div class="card-title">训练一个新的数字分身 <span class="more">飞影 API · 黑金版</span></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+              <div class="field"><span class="lb">分身名称</span><input class="input" placeholder="例：李老师 · 休闲版"></div>
+              <div class="field"><span class="lb">使用场景</span>
+                <div style="display:flex;gap:8px;"><span class="chip on">口播</span><span class="chip">带货</span><span class="chip">课程</span></div>
+              </div>
+            </div>
+            <div class="field" style="margin-top:14px;"><span class="lb">训练素材（30s–3min 正面口播视频，1080P）</span>
+              <div class="thumb" style="height:90px;border-style:dashed;">⬆ 拖拽上传或点击选择 · 支持 MP4/MOV</div>
+            </div>
+            <div class="notice blue" style="margin-top:14px;">ℹ 上传即代表您已确认拥有该形象的合法授权（F-302 合规要求），授权凭证 consent_token 将随训练任务一并存证。</div>
+            <div style="display:flex;gap:10px;margin-top:14px;">
+              <a class="btn primary">开始训练（约 2 小时）</a>
+              <a class="btn ghost">查看训练规范</a>
+            </div>
+          </div>
+
+          <!-- 分身列表 -->
+          <div class="card">
+            <div class="card-title">我的分身（3）<span class="more">按 IP 筛选 ▾</span></div>
+            <table class="table">
+              <thead><tr><th>分身</th><th>所属 IP</th><th>状态</th><th>已产出视频</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td>李老师 · 正装版</td><td><span class="tag">李老师讲财税</span></td>
+                  <td><span class="tag green">就绪</span></td><td>86 条</td>
+                  <td><a class="btn sm ghost">预览</a> <a class="btn sm ghost">设为默认</a></td>
+                </tr>
+                <tr>
+                  <td>李老师 · 休闲版</td><td><span class="tag">李老师讲财税</span></td>
+                  <td><span class="tag yellow">训练中 62%</span></td><td>—</td>
+                  <td><a class="btn sm ghost">查看进度</a></td>
+                </tr>
+                <tr>
+                  <td>王姐 · 居家版</td><td><span class="tag">王姐带货</span></td>
+                  <td><span class="tag green">就绪</span></td><td>42 条</td>
+                  <td><a class="btn sm ghost">预览</a> <a class="btn sm ghost">设为默认</a></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a class="cur" href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

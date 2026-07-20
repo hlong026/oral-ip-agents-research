@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频剪辑 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">视频剪辑</span>
+      <span class="crumb">成片微调 · 字幕校对 · 封面选择 · 导出分发</span>
+      <div class="search">🔍 搜索成片</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：当前在 ④视频剪辑 -->
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep here" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 首屏：剪辑台（预览 + 快速信息） -->
+      <div style="display:grid;grid-template-columns:300px 1fr;gap:16px;align-items:start;">
+        <div class="card" style="padding:14px;">
+          <div class="video-preview" style="max-height:440px;">
+            <div class="play">▶</div>
+            <span style="font-size:12px;">00:24 / 00:58</span>
+            <div class="subtitle-demo">直接给你算一笔账</div>
+          </div>
+          <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div style="min-width:0;"><b>3 个技巧让口播不冷场</b><div style="font-size:12px;color:var(--text-3);margin-top:2px;">合成完成 · 待微调</div></div>
+            <span class="tag blue">1080P</span>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card">
+            <div class="card-title">当前片段 <span class="more">片段 2/3 · 00:18–00:41</span></div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+              <a class="btn sm">✂ 分割片段</a>
+              <a class="btn sm">↔ 调整顺序</a>
+              <a class="btn sm">🗑 删除片段</a>
+              <a class="btn sm ghost">⟲ 撤销</a>
+              <div style="margin-left:auto;display:flex;gap:10px;">
+                <a class="btn sm ghost">导出剪映草稿</a>
+                <a class="btn sm">导出 MP4</a>
+                <a class="btn sm primary" href="publish.html">去发布 →</a>
+              </div>
+            </div>
+            <div class="notice blue" style="margin-top:14px;">ℹ 本页只做轻量微调（裁剪/字幕/封面/BGM）。深度剪辑可导出剪映草稿，在剪映中继续编辑后回传发布。</div>
+          </div>
+
+          <!-- 封面选择 -->
+          <div class="card">
+            <div class="card-title">封面选择 <span class="more">AI 已生成 3 候选</span></div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+              <div class="cover-pick sel"><div class="thumb" style="height:120px;">封面 A · 大字标题</div></div>
+              <div class="cover-pick"><div class="thumb" style="height:120px;">封面 B · 人物特写</div></div>
+              <div class="cover-pick"><div class="thumb" style="height:120px;">封面 C · 对比数字</div></div>
+            </div>
+          </div>
+
+          <!-- 声音调整 -->
+          <div class="card">
+            <div class="card-title">声音与背景音乐</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;">
+              <div class="field"><span class="lb">人声音量（李老师 · 克隆声）</span><input type="range" class="slider" value="90"></div>
+              <div class="field"><span class="lb">BGM 音量（轻快商务 · 已自动避让人声）</span><input type="range" class="slider" value="30"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 时间线 -->
+      <div class="card">
+        <div class="card-title">时间线 <span class="more">总时长 58s · 3 个片段</span></div>
+        <div class="timeline">
+          <div class="tl-ruler"><span>00:00</span><span>00:15</span><span>00:30</span><span>00:45</span><span>00:58</span></div>
+          <div class="tl-track">
+            <div class="playhead"></div>
+            <div class="tl-clip" style="width:31%;">片段 1 · 开场钩子</div>
+            <div class="tl-clip sel" style="width:40%;">片段 2 · 算一笔账</div>
+            <div class="tl-clip" style="width:29%;">片段 3 · 行动号召</div>
+          </div>
+          <div class="tl-track audio">
+            <div class="tl-clip bgm" style="width:100%;">♪ BGM：轻快商务（-18dB 自动避让）</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 字幕校对 -->
+      <div class="card">
+        <div class="card-title">字幕校对 <span class="tag green" style="margin-left:8px;">ASR 对齐完成</span><span class="more">点击任意行跳转播放头</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div class="sub-row"><span class="t">00:00–00:04</span>你的公司刚起步，会计这笔钱到底该不该花？</div>
+          <div class="sub-row"><span class="t">00:04–00:09</span>我是李老师，做财税 12 年，今天不绕弯子，</div>
+          <div class="sub-row cur"><span class="t">00:09–00:14</span>直接给你算一笔账——看完这条视频，至少帮你省下 2 万块。</div>
+          <div class="sub-row"><span class="t">00:14–00:19</span>第一个案例，上个月一个做餐饮的老板找到我……</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a class="cur" href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

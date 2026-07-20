@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IP 档案 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item active" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">IP 档案</span>
+      <span class="crumb">人设是仿写的灵魂 · 改这里影响所有后续生成</span>
+      <div class="search">🔍 搜索选题</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <!-- 全局动线：当前在 ①IP 建档 -->
+      <div class="flow-bar">
+        <a class="fstep here" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep" href="editor.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 资产二级导航：数字人/声音/模板/素材 收敛于此，不占侧栏一级位 -->
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span style="font-size:12.5px;color:var(--text-3);margin-right:4px;">IP 资产</span>
+        <a class="chip on" href="profile.html">◉ IP 档案</a>
+        <a class="chip" href="avatars.html">♟ 数字人</a>
+        <a class="chip" href="voices.html">♪ 声音</a>
+        <a class="chip" href="templates.html">✦ 模板</a>
+        <a class="chip" href="assets.html">▦ 素材库</a>
+      </div>
+
+      <!-- 首屏：IP 身份卡 + 资产绑定状态 -->
+      <div class="card" style="display:flex;align-items:center;gap:20px;">
+        <div class="avatar" style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#F59E0B,#EF4444);display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff;flex-shrink:0;">李</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:18px;font-weight:700;">李老师讲财税</span>
+            <span class="tag green">运行中</span>
+          </div>
+          <div style="color:var(--text-2);font-size:13px;margin-top:6px;">面向中小微企业主的财税科普 IP · 口号：让财税不再难懂</div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <span class="tag">🎵 抖音 12.4w 粉</span><span class="tag">⚡ 快手 3.1w 粉</span><span class="tag">📕 小红书 5.8w 粉</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+          <a class="btn primary sm">✎ 编辑档案</a>
+          <div style="display:flex;gap:6px;">
+            <span class="tag blue">♟ 分身已绑</span><span class="tag blue">♪ 声音已绑</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;align-items:start;">
+
+        <!-- 左列：人设记忆 -->
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card">
+            <div class="card-title">人设记忆 <span class="tag brand" style="margin-left:8px;">LLM 仿写必读</span><span class="more">✎ 编辑</span></div>
+            <div style="display:flex;flex-direction:column;gap:14px;font-size:13px;line-height:1.8;">
+              <div>
+                <div style="color:var(--text-3);font-size:12px;margin-bottom:4px;">身份背景</div>
+                12 年财税顾问，服务过 300+ 中小微企业，前四大会计师事务所经理。
+              </div>
+              <div>
+                <div style="color:var(--text-3);font-size:12px;margin-bottom:4px;">说话风格</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <span class="chip on">专业但接地气</span><span class="chip on">爱算账</span><span class="chip on">直接给结论</span><span class="chip">不绕弯子</span>
+                </div>
+              </div>
+              <div>
+                <div style="color:var(--text-3);font-size:12px;margin-bottom:4px;">口头禅 / 高频句式</div>
+                「我是李老师，做财税 12 年」·「直接给你算一笔账」·「看完这条视频至少帮你省 X 万」
+              </div>
+              <div>
+                <div style="color:var(--text-3);font-size:12px;margin-bottom:4px;">目标受众</div>
+                25–45 岁中小微企业主、个体户、初创公司创始人；痛点：怕多缴税、怕被稽查、不懂政策。
+              </div>
+            </div>
+          </div>
+
+          <!-- 选题库 -->
+          <div class="card">
+            <div class="card-title">选题库（6）<span class="more">＋ 添加选题</span></div>
+            <table class="table">
+              <thead><tr><th>选题</th><th>热度</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr><td>新公司法 5 大变化系列</td><td><span class="tag green">🔥 高</span></td><td><span class="tag">已更 2/5</span></td></tr>
+                <tr><td>个体户报税全流程</td><td><span class="tag green">🔥 高</span></td><td><span class="tag blue">已发布</span></td></tr>
+                <tr><td>小规模纳税人优惠</td><td><span class="tag yellow">中</span></td><td><span class="tag">草稿</span></td></tr>
+                <tr><td>老板必看的节税思路</td><td><span class="tag green">🔥 高</span></td><td><span class="tag blue">已发布</span></td></tr>
+                <tr><td>金税四期避坑指南</td><td><span class="tag yellow">中</span></td><td><span class="tag">待启动</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 右列：禁说清单 + 绑定资产 -->
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card" style="border-color:rgba(248,113,113,.3);">
+            <div class="card-title">🚫 禁说清单 <span class="more">✎ 编辑</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px;font-size:13px;">
+              <div class="notice red" style="padding:10px 12px;">绝对化用语：「最省钱」「100% 避税」「 guaranteed 」</div>
+              <div class="notice red" style="padding:10px 12px;">承诺收益：「保证退税到账」「稳赚不赔」</div>
+              <div class="notice red" style="padding:10px 12px;">竞品贬损：不提及其他财税机构名称</div>
+            </div>
+            <div style="font-size:12px;color:var(--text-3);margin-top:10px;">生成文案时将自动拦截并替换命中词，同步进入违禁词检测。</div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">绑定资产</div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div style="display:flex;align-items:center;gap:12px;">
+                    <div class="thumb" style="width:44px;height:66px;flex-shrink:0;">分身</div>
+                <div style="flex:1;"><div style="font-weight:600;font-size:13.5px;">李老师 · 正装版</div><div style="font-size:12px;color:var(--text-3);">默认数字分身 · 已产出 86 条</div></div>
+                <a class="btn sm ghost" href="avatars.html">更换</a>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div class="thumb" style="width:44px;height:44px;flex-shrink:0;border-radius:50%;">♪</div>
+                <div style="flex:1;"><div style="font-weight:600;font-size:13.5px;">李老师声音 · 沉稳男声</div><div style="font-size:12px;color:var(--text-3);">MiniMax 克隆 · consent 已存证</div></div>
+                <a class="btn sm ghost" href="voices.html">更换</a>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div class="thumb" style="width:44px;height:44px;flex-shrink:0;">✦</div>
+                <div style="flex:1;"><div style="font-weight:600;font-size:13.5px;">默认模板：知识口播 A</div><div style="font-size:12px;color:var(--text-3);">字幕样式 · 封面版式 · BGM</div></div>
+                <a class="btn sm ghost" href="templates.html">更换</a>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="opacity:.85;">
+            <div class="card-title">数据速写 <span class="more">近 30 天</span></div>
+            <div class="grid c3" style="gap:10px;">
+              <div style="text-align:center;"><div style="font-size:20px;font-weight:700;">42</div><div style="font-size:11.5px;color:var(--text-3);">已发布</div></div>
+              <div style="text-align:center;"><div style="font-size:20px;font-weight:700;">86.2w</div><div style="font-size:11.5px;color:var(--text-3);">总播放</div></div>
+              <div style="text-align:center;"><div style="font-size:20px;font-weight:700;">+3,418</div><div style="font-size:11.5px;color:var(--text-3);">涨粉</div></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a class="cur" href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>

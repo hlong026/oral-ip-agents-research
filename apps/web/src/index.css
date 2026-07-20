@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+  body {
+    @apply bg-bg-0 text-text-1 font-sans antialiased;
+    background-image: theme("backgroundImage.app-bg");
+    background-attachment: fixed;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-white/10;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-white/20;
+  }
+}
+
+@layer components {
+  /* 玻璃拟态卡片（对齐 ui-mockup style.css） */
+  .glass {
+    @apply rounded-card border border-stroke bg-glass backdrop-blur-md;
+  }
+  .glass-strong {
+    @apply rounded-card border border-stroke-strong bg-glass-strong backdrop-blur-md;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand-grad text-white shadow-cta hover:shadow-cta-hover hover:brightness-110;
+  }
+  .btn-ghost {
+    @apply btn border border-stroke bg-white/5 text-text-2 hover:border-stroke-strong hover:text-text-1;
+  }
+  .btn-danger {
+    @apply btn border border-danger/30 bg-danger/10 text-danger hover:bg-danger/20;
+  }
+  .input {
+    @apply w-full rounded-xl border border-stroke bg-white/5 px-4 py-2.5 text-sm text-text-1 outline-none transition-colors placeholder:text-text-3 focus:border-brand-from/60 focus:bg-white/[0.07];
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-text-2;
+  }
+  /* 原生 select 深色适配：箭头与弹出列表按深色渲染，避免文字不可辨 */
+  select.input {
+    @apply cursor-pointer;
+    color-scheme: dark;
+  }
+  select.input option {
+    @apply bg-bg-1 text-text-1;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-stroke bg-white/5 px-2.5 py-0.5 text-xs text-text-2;
+  }
+  .card-hover {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-stroke-strong hover:bg-glass-strong;
+  }
+  .text-grad {
+    @apply bg-brand-grad-x bg-clip-text text-transparent;
+  }
+}
