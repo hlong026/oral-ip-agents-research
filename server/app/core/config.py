@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # 流水线并发闸门（F-406）
     pipeline_max_concurrency: int = 5
 
+    # 发布模块（social-auto-upload 浏览器自动化）
+    publish_browser_headless: bool = False  # 复用本地 Chrome，默认有头模式
+    publish_max_concurrency: int = 2  # 浏览器并发槽位数
+    publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
+
     # 抖音 IM 私信（#11: APP_KEY 移入配置，未配置时自动降级到 MockIMProvider）
     douyin_im_app_key: str = ""
     douyin_im_aid: str = "6383"
