@@ -9,6 +9,7 @@ from datetime import UTC
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit
 from app.core.events import CHANNEL_ALERT, publish
 from app.core.logging import get_logger
 
@@ -59,6 +60,8 @@ async def charge(
             balance=acc.balance,
             required=price,
         )
+        await write_audit("quota_exhausted", user_id=user_id, trace_id=trace_id, task_id=task_id,
+                          detail=f"step={step},balance={acc.balance},required={price}")
         await publish(CHANNEL_ALERT, {"level": "warn", "message": f"额度不足，步骤 {step} 扣费失败",
                                       "userId": user_id, "traceId": trace_id})
         raise HTTPException(status.HTTP_402_PAYMENT_REQUIRED,
@@ -78,6 +81,8 @@ async def charge(
         points=price,
         balance_after=acc.balance,
     )
+    await write_audit("quota_charged", user_id=user_id, trace_id=trace_id, task_id=task_id,
+                      detail=f"step={step},points={price},balance_after={acc.balance}")
     return price
 
 
@@ -105,6 +110,8 @@ async def refund(db: AsyncSession, user_id: str, trace_id: str, task_id: str, st
         points=price,
         balance_after=acc.balance,
     )
+    await write_audit("quota_refunded", user_id=user_id, trace_id=trace_id, task_id=task_id,
+                      detail=f"step={step},points={price},balance_after={acc.balance}")
 
 
 def usage_to_out(u: QuotaUsage) -> UsageItemOut:

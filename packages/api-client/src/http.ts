@@ -84,7 +84,16 @@ async function rawFetch<T>(path: string, init: RequestInit = {}, retried = false
   if (!res.ok) {
     let body: ApiError = { code: "UNKNOWN", message: `请求失败 (${res.status})` };
     try {
-      body = (await res.json()) as ApiError;
+      const raw = await res.json();
+      // FastAPI 错误格式: {"detail": {"code": "...", "message": "..."}}
+      const detail = raw?.detail;
+      if (detail && typeof detail === "object" && "code" in detail) {
+        body = detail as ApiError;
+      } else if (typeof detail === "string") {
+        body = { code: "UNKNOWN", message: detail };
+      } else if (raw?.code) {
+        body = raw as ApiError;
+      }
     } catch {
       /* ignore */
     }

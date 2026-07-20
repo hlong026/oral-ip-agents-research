@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_ALERT, CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
@@ -206,6 +207,8 @@ async def _run_job(job_id: str) -> None:
                 account_id=job.account_id,
                 job_id=job.id,
             )
+            await write_audit("account_expired", user_id=job.user_id,
+                              detail=f"platform={job.platform},account_id={job.account_id},job_id={job.id}")
             await emit(CHANNEL_ALERT, {"level": "error", "userId": job.user_id,
                                        "message": f"{PLATFORM_NAMES.get(job.platform)}登录态失效", "jobId": job.id})
             return
@@ -237,6 +240,8 @@ async def _run_job(job_id: str) -> None:
                 error=str(e)[:200],
                 retry_count=job.retry_count,
             )
+            await write_audit("publish_failed", user_id=job.user_id,
+                              detail=f"job_id={job_id},platform={job.platform},error={str(e)[:200]}")
             job.status = "failed"
             job.error = str(e)[:300]
             await repo.save_job(db, job)

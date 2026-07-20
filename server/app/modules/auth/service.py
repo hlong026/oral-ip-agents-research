@@ -6,6 +6,7 @@ from datetime import UTC
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit
 from app.core.config import get_settings
 from app.core.logging import get_logger, user_id_var
 from app.core.security import (
@@ -34,7 +35,8 @@ def _tokens(user_id: str, device_id: str | None) -> TokensOut:
 
 def _refresh_jti(tokens: TokensOut) -> str:
     payload = decode_token(tokens.refreshToken, "refresh")
-    assert payload is not None  # 自签令牌必然可解
+    if payload is None:
+        raise RuntimeError("自签 refresh_token 解码失败")
     return str(payload["jti"])
 
 
@@ -54,6 +56,7 @@ async def register(db: AsyncSession, phone: str, password: str, nickname: str) -
 
     await create_default_persona(db, user.id, user.nickname)
     logger.info("user_registered", user_id=user.id, phone=phone)
+    await write_audit("user_registered", user_id=user.id, detail=f"phone={phone}")
     return tokens
 
 
@@ -62,6 +65,7 @@ async def login(db: AsyncSession, phone: str, password: str, device_id: str | No
     if not user or not verify_password(password, user.password_hash):
         # 登录失败：记录 WARNING（安全审计）
         logger.warning("login_failed", phone=phone, reason="BAD_CREDENTIALS")
+        await write_audit("login_failed", detail=f"phone={phone},reason=BAD_CREDENTIALS")
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
             detail={"code": "BAD_CREDENTIALS", "message": "手机号或密码错误"},
@@ -77,6 +81,7 @@ async def login(db: AsyncSession, phone: str, password: str, device_id: str | No
     # 登录成功：记录 INFO + 设置 user_id 上下文
     user_id_var.set(user.id)
     logger.info("user_login", user_id=user.id, phone=phone, device=device)
+    await write_audit("user_login", user_id=user.id, detail=f"phone={phone},device={device}")
     return tokens
 
 

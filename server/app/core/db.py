@@ -35,6 +35,7 @@ async def init_models() -> None:
     from app.modules.publish import models as _publish  # noqa: F401
     from app.modules.settings import models as _settings  # noqa: F401
     from app.modules.voice import models as _voice  # noqa: F401
+    from app.core.audit import AuditLog as _audit  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
