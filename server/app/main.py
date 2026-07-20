@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # #7 恢复 IM 监听
     from app.workers.im_listener import restore_listeners
     await restore_listeners()
+    # 发布模块：启动 Cookie 心跳检测后台任务
+    from app.providers.publish.heartbeat import start_heartbeat
+    start_heartbeat()
     logger.info("oral-ip-agents server ready")
     yield
     # #7 shutdown 清理 IM 监听

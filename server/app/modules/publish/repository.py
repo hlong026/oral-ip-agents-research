@@ -38,6 +38,12 @@ async def active_account_for(db: AsyncSession, user_id: str, platform: str) -> P
     return res.scalar_one_or_none()
 
 
+async def save_account(db: AsyncSession, account: PublishAccount) -> PublishAccount:
+    await db.commit()
+    await db.refresh(account)
+    return account
+
+
 async def delete_account(db: AsyncSession, account: PublishAccount) -> None:
     await db.delete(account)
     await db.commit()

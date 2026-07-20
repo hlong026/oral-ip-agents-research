@@ -216,11 +216,27 @@ async def _run_job(job_id: str) -> None:
         try:
             driver = registry.publish_driver(job.platform)
             session = json.loads(account.session_json or "{}")
-            post_id = await driver.publish(session, job.video_key, job.title,
-                                           json.loads(job.topics_json or "[]"), job.cover_key or None)
+            post_id = await driver.publish(
+                session, job.video_key, job.title,
+                json.loads(job.topics_json or "[]"), job.cover_key or None,
+                scheduled_at=job.scheduled_at or None,
+                account_id=account.id,
+            )
+            # SAU 发布过程中可能刷新 Cookie，回写 DB
+            if session:
+                account.session_json = json.dumps(session, ensure_ascii=False)
+                await repo.save_account(db, account)
             job.status = "success"
             job.post_id = post_id
             await repo.save_job(db, job)
+            # 发布成功日志（§10.6.8-B #7）
+            logger.info(
+                "publish_success",
+                job_id=job.id,
+                user_id=job.user_id,
+                platform=job.platform,
+                post_id=post_id,
+            )
             await emit(CHANNEL_TASKS, {"kind": "publish_updated", "jobId": job.id,
                                        "userId": job.user_id, "status": "success"})
             await emit(CHANNEL_FEED, {"kind": "feed", "userId": job.user_id, "event": {
