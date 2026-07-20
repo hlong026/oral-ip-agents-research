@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-20T00:47:43.814Z
+ * API 版本：1.0.0 · 生成时间：2026-07-20T01:26:29.750Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -94,6 +94,7 @@ export interface CreatePipelineIn {
   "voiceId"?: string | null;
   "avatarId"?: string | null;
   "mode"?: string;
+  "intensity"?: string;
   "platforms"?: string[];
   "publishAt"?: string | null;
   "randomize"?: boolean;

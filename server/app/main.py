@@ -48,9 +48,17 @@ app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
 
 # TraceMiddleware 必须在 CORS 之前添加（确保 trace_id 注入）
 app.add_middleware(TraceMiddleware)
+_allowed_origins = (
+    ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
+    if settings.app_env == "dev"
+    else [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+)
+if not _allowed_origins and settings.app_env != "dev":
+    import warnings
+    warnings.warn("CORS_ORIGINS 未配置，生产环境跨域请求将被拒绝", stacklevel=1)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,8 +69,10 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def unhandled_exc(request: Request, exc: Exception) -> JSONResponse:
     logger.exception(f"unhandled: {request.method} {request.url.path}")
+    # 生产环境不向客户端泄露内部错误详情
+    msg = str(exc)[:200] if settings.app_env == "dev" else "服务器内部错误"
     return JSONResponse(status_code=500,
-                        content={"detail": {"code": "INTERNAL", "message": str(exc)[:200]}})
+                        content={"detail": {"code": "INTERNAL", "message": msg}})
 
 
 @app.get("/healthz")

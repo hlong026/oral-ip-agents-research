@@ -55,8 +55,8 @@ def _broadcast_local(channel: str, payload: dict) -> None:
             pass
 
 
-async def subscribe(channel: str) -> Callable[[], Awaitable[dict | None]]:
-    """返回一个异步 get() 函数供 WS 网关消费；本地模式用队列，Redis 模式用 pubsub"""
+async def subscribe(channel: str) -> tuple[Callable[[], Awaitable[dict | None]], Callable[[], None]]:
+    """返回 (get_fn, unsubscribe_fn)；WS 网关在 finally 中调用 unsubscribe 防止内存泄漏"""
     if _redis is not None:
         pubsub = _redis.pubsub()
         await pubsub.subscribe(channel)
@@ -70,7 +70,14 @@ async def subscribe(channel: str) -> Callable[[], Awaitable[dict | None]]:
                     return None
             return None
 
-        return get_redis
+        def unsub_redis() -> None:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(pubsub.unsubscribe(channel))
+            except RuntimeError:
+                pass
+
+        return get_redis, unsub_redis
 
     q: asyncio.Queue = asyncio.Queue(maxsize=256)
     _local_subs.setdefault(channel, set()).add(q)
@@ -81,4 +88,7 @@ async def subscribe(channel: str) -> Callable[[], Awaitable[dict | None]]:
         except TimeoutError:
             return None
 
-    return get_local
+    def unsub_local() -> None:
+        _local_subs.get(channel, set()).discard(q)
+
+    return get_local, unsub_local

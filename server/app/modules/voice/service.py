@@ -90,6 +90,8 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
                 v.demo_key = demo_key
                 v.status = "pending_confirm"
                 await db.commit()
+                logger.info("voice_clone_done", user_id=user_id, voice_id=v.id,
+                            provider_voice_id=voice_id_remote)
             elif task_status == 4:
                 v.status = "failed"
                 await db.commit()
@@ -209,6 +211,8 @@ async def handle_voice_callback(db: AsyncSession, task_id: str, status_code: int
         v.provider_voice_id = voice_id_remote
         v.demo_key = demo_key
         v.status = "pending_confirm"
+        logger.info("voice_clone_done", user_id=v.user_id, voice_id=v.id,
+                    provider_voice_id=voice_id_remote)
     else:
         v.status = "failed"
     await db.commit()

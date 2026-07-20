@@ -3,8 +3,10 @@ Provider 注册表（06 文档 §10.3）
 - 三级解析：用户配置 → 租户默认 → 系统默认
 - 降级链自动切换并记事件（任务中心可见）
 - 新增供应商 = 新建文件实现 Protocol + 在此注册一行
-- 日志：降级链 WARNING/ERROR（§10.6.8-A #4）
+- 日志：降级链 WARNING/ERROR（§10.6.8-A #4）+ 调用耗时（§10.6.8-B #5）
 """
+import time
+
 from app.core.config import get_settings
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
@@ -57,7 +59,19 @@ class ProviderRegistry:
         last_err: Exception | None = None
         for idx, provider in enumerate(chain):
             try:
+                t0 = time.perf_counter()
                 result = await getattr(provider, fn_name)(*args, **kwargs)
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                # Provider API 调用耗时日志（§10.6.8-B #5）
+                logger.info(
+                    "provider_api_call",
+                    kind=kind,
+                    provider_name=provider.name,
+                    fn_name=fn_name,
+                    duration_ms=elapsed_ms,
+                    trace_id=trace_id,
+                    task_id=task_id,
+                )
                 if idx > 0:
                     # 降级成功：记录 WARNING
                     logger.warning(

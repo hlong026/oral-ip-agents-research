@@ -113,12 +113,12 @@ async def _listen_loop(account_id: str, user_id: str) -> None:
 
     max_retries = 5
     retry_count = 0
-    last_heartbeat_time = asyncio.get_event_loop().time()
+    last_heartbeat_time = asyncio.get_running_loop().time()
 
     while account_id in _active_listeners:
         try:
             # #8 Cookie 心跳检测
-            now = asyncio.get_event_loop().time()
+            now = asyncio.get_running_loop().time()
             if now - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                 valid = await _check_cookie_validity(session)
                 last_heartbeat_time = now

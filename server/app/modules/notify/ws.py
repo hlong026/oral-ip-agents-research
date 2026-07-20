@@ -25,7 +25,9 @@ async def tasks_ws(ws: WebSocket) -> None:
         await ws.close(code=4401)
         return
     await ws.accept()
-    getters = [await subscribe(ch) for ch in (CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM)]
+    subs = [await subscribe(ch) for ch in (CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM)]
+    getters = [s[0] for s in subs]
+    unsubscribers = [s[1] for s in subs]
 
     async def pump() -> None:
         while True:
@@ -59,3 +61,5 @@ async def tasks_ws(ws: WebSocket) -> None:
     finally:
         pump_task.cancel()
         hb_task.cancel()
+        for unsub in unsubscribers:
+            unsub()

@@ -10,6 +10,7 @@ class CreatePipelineIn(BaseModel):
     voiceId: str | None = None
     avatarId: str | None = None
     mode: str = "auto"
+    intensity: str = "structure"  # light | structure | theme
     platforms: list[str] = []
     publishAt: str | None = None
     randomize: bool = False

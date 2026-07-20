@@ -39,6 +39,7 @@ class PipelineTask(Base):
     avatar_id: Mapped[str] = mapped_column(String(64), default="")
     platforms_json: Mapped[str] = mapped_column(String(128), default="[]")
     mode: Mapped[str] = mapped_column(String(8), default="auto")  # auto | manual（F-405）
+    intensity: Mapped[str] = mapped_column(String(16), default="structure")  # light | structure | theme
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     # pending | running | waiting_confirm | done | failed | canceled
     current_step: Mapped[str] = mapped_column(String(16), default="")

@@ -209,6 +209,7 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
 
     # ---- 校验闭环：禁忌词 + 去重检测（最多2轮再改写） ----
     validation_passed = True
+    final_score = 0.0
     for _round in range(2):
         issues = []
         # 禁忌词检测
@@ -222,6 +223,7 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         # 去重检测
         sim_result, _ = await registry.run_with_fallback(
             "llm", registry.llm_chain, "check_similarity", result)
+        final_score = sim_result.score
         if sim_result.score > 60:
             issues.append(f"与原文相似度偏高（{sim_result.score:.0f}分），需降低重复度")
             if sim_result.duplicated_spans:
@@ -234,9 +236,10 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         # 带反馈再改写
         result = await llm.validation_rewrite(result, persona_ctx, "\n".join(issues))
     else:
-        # 最终去重分
+        # 循环耗尽（文本被重写过），重新检测最终相似度
         sim_result, _ = await registry.run_with_fallback(
             "llm", registry.llm_chain, "check_similarity", result)
+        final_score = sim_result.score
         validation_passed = sim_result.score <= 60
 
     # 落库
@@ -246,10 +249,6 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
             s.rewritten_text = result
             await repo.save(db, s)
 
-    # 最终去重分
-    final_sim, _ = await registry.run_with_fallback(
-        "llm", registry.llm_chain, "check_similarity", result)
-
     # 仿写完成：记录 INFO（§10.6.8-B #3）
     duration_ms = int((time.perf_counter() - start_time) * 1000)
     logger.info(
@@ -258,14 +257,14 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         intensity=intensity,
         duration_ms=duration_ms,
         text_len=len(result),
-        similarity=final_sim.score,
+        similarity=final_score,
     )
 
     return RewriteOut(
         text=result,
         structure=structure,
         outline=outline,
-        similarity=final_sim.score,
+        similarity=final_score,
         validationPassed=validation_passed,
     )
 

@@ -50,6 +50,7 @@ async def create(db: AsyncSession, user_id: str, inp: CreatePipelineIn) -> list[
             avatar_id=inp.avatarId or "",
             platforms_json=json.dumps(inp.platforms, ensure_ascii=False),
             mode="manual" if inp.mode == "manual" else "auto",
+            intensity=inp.intensity if inp.intensity in ("light", "structure", "theme") else "structure",
             randomize=inp.randomize or (count > 1),  # 批量默认开差异化随机化（C5）
             batch_id=batch_id,
             publish_at=inp.publishAt or "",

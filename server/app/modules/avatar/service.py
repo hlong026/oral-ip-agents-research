@@ -109,6 +109,8 @@ async def get_clone_status(db: AsyncSession, user_id: str, avatar_id: str) -> Av
                 a.status = "ready"
                 progress = 100
                 await db.commit()
+                logger.info("avatar_clone_done", user_id=user_id, avatar_id=a.id,
+                            provider_avatar_id=a.provider_avatar_id)
             elif task_status == 4:
                 a.status = "failed"
                 progress = 100
@@ -158,6 +160,8 @@ async def handle_avatar_callback(db: AsyncSession, task_id: str, status_code: in
     if status_code == 3:
         a.provider_avatar_id = avatar_id_remote
         a.status = "ready"
+        logger.info("avatar_clone_done", user_id=a.user_id, avatar_id=a.id,
+                    provider_avatar_id=avatar_id_remote)
     else:
         a.status = "failed"
     await db.commit()

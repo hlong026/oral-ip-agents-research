@@ -9,6 +9,7 @@ mode=manual 时每步完成暂停等待用户确认（F-405 单步干预）
 """
 import asyncio
 import json
+import time
 from datetime import UTC, datetime
 
 from app.core.config import get_settings
@@ -27,6 +28,7 @@ logger = get_logger("oral.pipeline.engine")
 settings = get_settings()
 
 # 并发闸门（F-406：任务级并发 ≥5）
+# 注意：asyncio.Semaphore 仅单进程内生效；生产环境多 Worker 时应替换为 Redis 分布式信号量
 _gate = asyncio.Semaphore(settings.pipeline_max_concurrency)
 _running: set[str] = set()
 
@@ -138,8 +140,17 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
         ctx["topic_candidates"] = topics
 
     text_source = source or task.script_text
+    intensity = getattr(task, "intensity", "structure") or "structure"
 
     # 三阶段仿写引擎（走降级链，确保主 Provider 故障时自动切换）
+    if intensity == "light":
+        # light 模式：跳过结构拆解和大纲，直接人设润色
+        text, provider = await registry.run_with_fallback(
+            "llm", registry.llm_chain, "polish_light", text_source, persona_ctx,
+            trace_id=task.trace_id, task_id=task.id)
+        return {"script": text, "similarity": 0, "provider": provider,
+                "_validation_passed": True}
+
     if not text_source and ctx.get("topic"):
         # 选题模式：无原文，使用 theme 模式从主题创作
         structure, provider = await registry.run_with_fallback(
@@ -148,7 +159,16 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
         outline, _ = await registry.run_with_fallback(
             "llm", registry.llm_chain, "generate_outline", structure, persona_ctx, "theme", duration,
             trace_id=task.trace_id, task_id=task.id)
+    elif intensity == "theme":
+        # theme 模式：仅提取主题关键词，全新创作
+        structure, provider = await registry.run_with_fallback(
+            "llm", registry.llm_chain, "analyze_structure", text_source, "theme",
+            trace_id=task.trace_id, task_id=task.id)
+        outline, _ = await registry.run_with_fallback(
+            "llm", registry.llm_chain, "generate_outline", structure, persona_ctx, "theme", duration,
+            trace_id=task.trace_id, task_id=task.id)
     else:
+        # structure 模式：完整拆解 + IP化大纲
         structure, provider = await registry.run_with_fallback(
             "llm", registry.llm_chain, "analyze_structure", text_source, "full",
             trace_id=task.trace_id, task_id=task.id)
@@ -355,7 +375,9 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                     await _emit(task)
 
                     try:
+                        step_start = time.perf_counter()
                         result = await STEP_RUNNERS[step_name](task, ctx)
+                        step_ms = int((time.perf_counter() - step_start) * 1000)
                         skipped = bool(result.pop("skipped", False))
                         provider = result.pop("provider", "")
                         ctx.update({k: v for k, v in result.items() if not k.startswith("_")})
@@ -375,6 +397,15 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             "artifacts": {k: str(v)[:200] for k, v in result.items()},
                             "finishedAt": _now(),
                         })
+                        # 步骤完成性能日志（§10.6.9 Phase 3 B#2）
+                        logger.info(
+                            "step_done",
+                            task_id=task_id,
+                            step=step_name,
+                            provider=provider,
+                            duration_ms=step_ms,
+                            skipped=skipped,
+                        )
                     except Exception as e:  # noqa: BLE001
                         # 步骤失败：记录 ERROR + 结构化字段（§10.6.8-A #3）
                         logger.error(
@@ -422,14 +453,13 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                 await repo_save(db, task)
                 await _emit(task)
                 await _feed(task.user_id, "ok", f"「{task.title}」全流程完成")
+                logger.info("task_done", task_id=task_id, user_id=task.user_id,
+                            quota_cost=task.quota_cost)
     finally:
         _running.discard(task_id)
 
 
 def schedule_run(task_id: str, from_step: str | None = None) -> None:
     """异步调度（单体进程内；生产环境由 Dramatiq Worker 消费同一入口）"""
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.create_task(run_task(task_id, from_step))

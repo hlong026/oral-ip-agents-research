@@ -174,10 +174,7 @@ async def export_job(db: AsyncSession, user_id: str, job_id: str) -> ExportOut:
 # ============ 发布执行器（进程内调度；生产由 Dramatiq 定时器接管） ============
 
 def _schedule_job(job_id: str) -> None:
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     loop.create_task(_run_job(job_id))
 
 
