@@ -75,6 +75,21 @@ async def create_message(db: AsyncSession, **fields) -> IMMessage:
     return m
 
 
+async def get_message(db: AsyncSession, message_id: str, user_id: str) -> IMMessage | None:
+    result = await db.execute(
+        select(IMMessage).where(
+            IMMessage.id == message_id,
+            IMMessage.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def save_message(db: AsyncSession, message: IMMessage) -> None:
+    await db.commit()
+    await db.refresh(message)
+
+
 async def list_messages(
     db: AsyncSession, conversation_id: str, user_id: str, page: int = 1, page_size: int = 50
 ) -> tuple[list[IMMessage], int]:

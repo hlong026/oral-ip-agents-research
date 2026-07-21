@@ -335,6 +335,10 @@ export interface IMMessage {
   content: string;
   autoReplied: boolean;
   replyContent: string;
+  sendStatus: "received" | "pending" | "sent" | "failed" | "manual";
+  sendError: string;
+  retryCount: number;
+  manualTakeover: boolean;
   createdAt: string;
 }
 
@@ -387,6 +391,10 @@ export const imApi = {
       content,
       msgType,
     }),
+  retryMessage: (messageId: string) =>
+    http.post<IMMessage>(`/im/messages/${messageId}/retry`),
+  takeOverMessage: (messageId: string) =>
+    http.post<IMMessage>(`/im/messages/${messageId}/takeover`),
   markRead: (conversationId: string) =>
     http.put<void>(`/im/conversations/${conversationId}/read`),
   rules: () => http.get<IMAutoReplyRule[]>("/im/rules"),

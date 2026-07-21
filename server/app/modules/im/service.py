@@ -67,6 +67,10 @@ def msg_to_out(m: IMMessage) -> MessageOut:
         content=m.content,
         autoReplied=m.auto_replied,
         replyContent=m.reply_content,
+        sendStatus=m.send_status,
+        sendError=m.send_error,
+        retryCount=m.retry_count,
+        manualTakeover=m.manual_takeover,
         createdAt=m.created_at.astimezone(UTC).isoformat(),
     )
 
@@ -112,24 +116,124 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
-    # 通过 Provider 发送
-    im_provider = registry.im_driver(conv.platform)
     content_json = json.dumps({"text": inp.content}, ensure_ascii=False)
-    session = await _load_account_session(conv.account_id, user_id)
-    await im_provider.send_message(
-        session=session,
-        conversation_id=conv.dy_conversation_id,
-        conversation_short_id=conv.dy_conversation_short_id,
-        ticket=conv.dy_ticket,
-        content=inp.content,
-    )
-    # 落库
     msg = await repo.create_message(
-        db, conversation_id=conv.id, user_id=user_id, direction="out", msg_type=inp.msgType, content=content_json
+        db,
+        conversation_id=conv.id,
+        user_id=user_id,
+        direction="out",
+        msg_type=inp.msgType,
+        content=content_json,
+        send_status="pending",
     )
-    conv.last_message_at = datetime.now(UTC)
-    await repo.save_conversation(db, conv)
-    return msg_to_out(msg)
+    try:
+        await _send_existing_message(db, conv, msg, inp.content)
+        return msg_to_out(msg)
+    except Exception as error:  # noqa: BLE001
+        raise _send_failure(msg) from error
+
+
+async def retry_message(db: AsyncSession, user_id: str, message_id: str) -> MessageOut:
+    message = await repo.get_message(db, message_id, user_id)
+    if message is None or message.direction != "out":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "消息不存在"})
+    if message.manual_takeover or message.send_status == "manual":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MANUAL_TAKEOVER", "message": "消息已转人工处理，不能自动重试"},
+        )
+    if message.send_status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_NOT_FAILED", "message": "只有发送失败的消息可以重试"},
+        )
+    conversation = await repo.get_conversation(db, message.conversation_id, user_id)
+    if conversation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+
+    message.retry_count += 1
+    message.send_status = "pending"
+    message.send_error = ""
+    await repo.save_message(db, message)
+    try:
+        await _send_existing_message(db, conversation, message, _message_text(message))
+        return msg_to_out(message)
+    except Exception as error:  # noqa: BLE001
+        raise _send_failure(message) from error
+
+
+async def take_over_message(db: AsyncSession, user_id: str, message_id: str) -> MessageOut:
+    message = await repo.get_message(db, message_id, user_id)
+    if message is None or message.direction != "out":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "消息不存在"})
+    if message.send_status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_NOT_FAILED", "message": "只有发送失败的消息可以转人工处理"},
+        )
+    message.send_status = "manual"
+    message.manual_takeover = True
+    await repo.save_message(db, message)
+    return msg_to_out(message)
+
+
+async def _send_existing_message(
+    db: AsyncSession,
+    conversation: IMConversation,
+    message: IMMessage,
+    content: str,
+) -> None:
+    try:
+        provider = registry.im_driver(conversation.platform)
+        session = await _load_account_session(conversation.account_id, conversation.user_id)
+        sent = await provider.send_message(
+            session=session,
+            conversation_id=conversation.dy_conversation_id,
+            conversation_short_id=conversation.dy_conversation_short_id,
+            ticket=conversation.dy_ticket,
+            content=content,
+        )
+        if sent is not True:
+            raise RuntimeError("平台未确认私信发送成功")
+    except Exception as error:  # noqa: BLE001
+        message.send_status = "failed"
+        message.send_error = error.__class__.__name__[:256]
+        await repo.save_message(db, message)
+        logger.warning(
+            "IM send failed: account=%s conversation=%s message=%s error=%s",
+            conversation.account_id[:8],
+            conversation.id[:8],
+            message.id[:8],
+            message.send_error,
+        )
+        raise
+
+    message.send_status = "sent"
+    message.send_error = ""
+    await repo.save_message(db, message)
+    conversation.last_message_at = datetime.now(UTC)
+    await repo.save_conversation(db, conversation)
+
+
+def _send_failure(message: IMMessage) -> HTTPException:
+    return HTTPException(
+        status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "code": "IM_SEND_FAILED",
+            "message": "平台未确认发送成功，已记录失败，可重试或转人工处理",
+            "messageId": message.id,
+        },
+    )
+
+
+def _message_text(message: IMMessage) -> str:
+    try:
+        content = json.loads(message.content)
+        if isinstance(content, dict):
+            return str(content.get("text") or "")
+    except (TypeError, ValueError):
+        pass
+    return message.content
 
 
 async def mark_read(db: AsyncSession, user_id: str, conversation_id: str) -> None:
@@ -367,10 +471,6 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
             account_id=conv.account_id,
             user_id=conv.user_id,
             conversation_id=conv.id,
-            platform=conv.platform,
-            dy_conversation_id=conv.dy_conversation_id,
-            dy_conversation_short_id=conv.dy_conversation_short_id,
-            dy_ticket=conv.dy_ticket,
             reply_text=reply_text,
             rule_id=matched_rule.id,
             delay=delay,
@@ -383,35 +483,17 @@ async def _delayed_reply(
     account_id: str,
     user_id: str,
     conversation_id: str,
-    platform: str,
-    dy_conversation_id: str,
-    dy_conversation_short_id: str,
-    dy_ticket: str,
     reply_text: str,
     rule_id: str,
     delay: float,
 ) -> None:
-    """#4 独立 Task：延迟后发送回复并落库"""
+    """Delay, persist the attempt, then send without ever fabricating success."""
     await asyncio.sleep(delay)
-    try:
-        im_provider = registry.im_driver(platform)
-        session = await _load_account_session(account_id, user_id)
-        await im_provider.send_message(
-            session=session,
-            conversation_id=dy_conversation_id,
-            conversation_short_id=dy_conversation_short_id,
-            ticket=dy_ticket,
-            content=reply_text,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"auto reply send failed: {e}")
-        return
-
-    # 记录频率
-    _rate_window[account_id].append(time.time())
-
-    # 落库（重新获取 Session）
     async with _session() as db:
+        conv = await repo.get_conversation(db, conversation_id, user_id)
+        if conv is None:
+            logger.warning("auto reply conversation missing: %s", conversation_id[:8])
+            return
         reply_msg = await repo.create_message(
             db,
             conversation_id=conversation_id,
@@ -421,11 +503,14 @@ async def _delayed_reply(
             content=json.dumps({"text": reply_text}, ensure_ascii=False),
             auto_replied=True,
             rule_id=rule_id,
+            send_status="pending",
         )
-        conv = await repo.get_conversation(db, conversation_id)
-        if conv:
-            conv.last_message_at = datetime.now(UTC)
-            await repo.save_conversation(db, conv)
+        try:
+            await _send_existing_message(db, conv, reply_msg, reply_text)
+        except Exception:  # noqa: BLE001
+            return
+
+    _rate_window[account_id].append(time.time())
 
     # 推送前端
     await emit(

@@ -15,6 +15,7 @@ export default function ImCenterPage() {
   const [activeConv, setActiveConv] = useState<IMConversation | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState("");
   const [filterAccountId, setFilterAccountId] = useState<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -64,15 +65,47 @@ export default function ImCenterPage() {
   const handleSend = async () => {
     if (!input.trim() || !activeConv) return;
     setSending(true);
+    setSendError("");
     try {
       await imApi.send(activeConv.id, input.trim());
       setInput("");
       await queryClient.invalidateQueries({
         queryKey: ["im-messages", activeConv.id],
       });
+    } catch {
+      setSendError(
+        "平台未确认发送成功，失败记录已保留，可在消息气泡中重试或转人工。",
+      );
+      await queryClient.invalidateQueries({
+        queryKey: ["im-messages", activeConv.id],
+      });
     } finally {
       setSending(false);
     }
+  };
+
+  const refreshMessages = async () => {
+    if (!activeConv) return;
+    await queryClient.invalidateQueries({
+      queryKey: ["im-messages", activeConv.id],
+    });
+  };
+
+  const handleRetry = async (messageId: string) => {
+    setSendError("");
+    try {
+      await imApi.retryMessage(messageId);
+    } catch {
+      setSendError("重试仍未得到平台成功确认，可继续重试或转人工。");
+    } finally {
+      await refreshMessages();
+    }
+  };
+
+  const handleTakeover = async (messageId: string) => {
+    setSendError("");
+    await imApi.takeOverMessage(messageId);
+    await refreshMessages();
   };
 
   const parseContent = (content: string): string => {
@@ -191,10 +224,17 @@ export default function ImCenterPage() {
                     key={msg.id}
                     msg={msg}
                     parseContent={parseContent}
+                    onRetry={handleRetry}
+                    onTakeover={handleTakeover}
                   />
                 ))}
                 <div ref={bottomRef} />
               </div>
+              {sendError && (
+                <div className="border-t border-danger/20 bg-danger/10 px-4 py-2 text-xs text-danger">
+                  {sendError}
+                </div>
+              )}
               <div className="flex items-center gap-2 border-t border-stroke px-4 py-3">
                 <input
                   value={input}
@@ -228,9 +268,13 @@ export default function ImCenterPage() {
 function MessageBubble({
   msg,
   parseContent,
+  onRetry,
+  onTakeover,
 }: {
   msg: IMMessage;
   parseContent: (c: string) => string;
+  onRetry: (messageId: string) => Promise<void>;
+  onTakeover: (messageId: string) => Promise<void>;
 }) {
   const isOut = msg.direction === "out";
   const text = parseContent(msg.content);
@@ -252,7 +296,31 @@ function MessageBubble({
           {msg.autoReplied && (
             <span className="text-brand-to">⚡ 自动回复</span>
           )}
+          {isOut && msg.sendStatus === "pending" && <span>发送中</span>}
+          {isOut && msg.sendStatus === "sent" && <span>已发送</span>}
+          {isOut && msg.sendStatus === "failed" && (
+            <span className="text-danger">发送失败 · {msg.sendError}</span>
+          )}
+          {isOut && msg.sendStatus === "manual" && (
+            <span className="text-warning">已转人工</span>
+          )}
         </div>
+        {isOut && msg.sendStatus === "failed" && (
+          <div className="mt-2 flex justify-end gap-2 text-[11px]">
+            <button
+              className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
+              onClick={() => void onRetry(msg.id)}
+            >
+              重试{msg.retryCount > 0 ? `（${msg.retryCount}）` : ""}
+            </button>
+            <button
+              className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
+              onClick={() => void onTakeover(msg.id)}
+            >
+              转人工
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

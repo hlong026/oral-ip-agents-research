@@ -59,6 +59,10 @@ class IMMessage(Base):
     reply_content: Mapped[str] = mapped_column(Text, default="")
     remote_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     remote_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    send_status: Mapped[str] = mapped_column(String(16), default="received", index=True)
+    send_error: Mapped[str] = mapped_column(String(256), default="")
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    manual_takeover: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 

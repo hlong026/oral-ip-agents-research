@@ -36,6 +36,10 @@ class MessageOut(BaseModel):
     content: str
     autoReplied: bool
     replyContent: str
+    sendStatus: str
+    sendError: str
+    retryCount: int
+    manualTakeover: bool
     createdAt: str
 
 

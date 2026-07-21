@@ -64,6 +64,24 @@ async def mark_read(
     return {"ok": True}
 
 
+@router.post("/messages/{message_id}/retry", response_model=MessageOut)
+async def retry_message(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    return await service.retry_message(db, user_id, message_id)
+
+
+@router.post("/messages/{message_id}/takeover", response_model=MessageOut)
+async def take_over_message(
+    message_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    return await service.take_over_message(db, user_id, message_id)
+
+
 # ---- 自动回复规则 ----
 
 
