@@ -58,7 +58,7 @@ async def test_forged_webhook_is_rejected_and_duplicate_event_is_dispatched_once
     assert calls == ["provider-task-once"]
 
 
-async def test_webhook_dispatch_failure_persists_context(monkeypatch) -> None:
+async def test_webhook_dispatch_failure_persists_context(client: AsyncClient, monkeypatch) -> None:
     from app.modules.webhook import service as webhook_service
 
     async def fail_dispatch(_db, _payload: dict) -> None:
@@ -82,7 +82,7 @@ async def test_webhook_dispatch_failure_persists_context(monkeypatch) -> None:
     assert "RuntimeError:provider timeout" in event.error_context
 
 
-async def test_failed_webhook_delivery_can_be_retried(monkeypatch) -> None:
+async def test_failed_webhook_delivery_can_be_retried(client: AsyncClient, monkeypatch) -> None:
     from app.modules.webhook import service as webhook_service
 
     calls = 0
