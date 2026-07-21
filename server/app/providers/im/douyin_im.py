@@ -11,8 +11,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
+from google.protobuf.message import DecodeError
 
 from app.core.config import get_settings
+from app.providers.im.proto.v1 import live_pb2, response_pb2
 
 logger = logging.getLogger(__name__)
 
@@ -113,36 +115,43 @@ class DouyinIMConnection:
                     await asyncio.sleep(10)
 
     def _decode_frame(self, raw: bytes | str) -> dict[str, Any] | None:
-        """Reject frames until a fixed, versioned Proto contract is available.
-
-        Dynamic black-box decoding was both dependency-incompatible and unsafe:
-        arbitrary field guesses cannot prove the sender or message contract.
-        """
-        logger.debug("[DouyinIM] dropped undecodable frame bytes=%d", len(raw))
-        return None
-
-    def _extract_message(self, data: dict) -> dict[str, Any] | None:
-        """从解码后的 protobuf dict 中提取私信字段"""
-        # 结构依赖实际 proto，此处为占位逻辑
-        # 生产需按 PushFrame → Response → new_message_notify.message 路径解析
+        """Decode the fixed v1 PushFrame → Response → message contract."""
+        if isinstance(raw, str):
+            return None
         try:
-            msg_list = data.get("1", {}).get("1", [])
-            if not msg_list:
+            frame = live_pb2.PushFrame()  # type: ignore[attr-defined]
+            frame.ParseFromString(raw)
+            if frame.payloadType != "pb" or not frame.payload:
                 return None
-            msg = msg_list[0] if isinstance(msg_list, list) else msg_list
-            ext = json.loads(msg.get("8", "{}"))
-            content = ext.get("content", "")
+
+            response = response_pb2.Response()  # type: ignore[attr-defined]
+            response.ParseFromString(frame.payload)
+            if response.body.WhichOneof("body") != "new_message_notify":
+                return None
+
+            message = response.body.new_message_notify.message
+            if not message.sender or not message.conversation_id:
+                return None
+
+            content = message.content
+            if message.message_type == 7:
+                decoded_content = json.loads(message.content)
+                content = str(decoded_content.get("text", ""))
+
             return {
-                "remote_uid": str(ext.get("from_uid", "")),
-                "remote_nickname": ext.get("from_nickname", ""),
-                "remote_avatar": ext.get("from_avatar", ""),
-                "msg_type": int(ext.get("msg_type", 7)),
+                "remote_uid": str(message.sender),
+                "remote_nickname": "",
+                "remote_avatar": "",
+                "msg_type": int(message.message_type),
                 "content": content,
-                "dy_conversation_id": str(ext.get("conversation_id", "")),
-                "dy_conversation_short_id": str(ext.get("conversation_short_id", "")),
-                "dy_ticket": str(ext.get("ticket", "")),
+                "dy_conversation_id": message.conversation_id,
+                "dy_conversation_short_id": str(message.conversation_short_id),
+                "dy_ticket": "",
+                "remote_message_id": str(message.server_message_id),
+                "remote_index": int(message.index_in_conversation),
             }
-        except Exception:  # noqa: BLE001
+        except (DecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning("[DouyinIM] invalid protobuf frame: %s", exc)
             return None
 
     async def _fetch_device_id(self, cookie_str: str) -> str:
