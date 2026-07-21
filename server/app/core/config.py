@@ -105,6 +105,8 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings) -> None:
+    if settings.im_enabled and settings.app_env not in {"dev", "test"}:
+        raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED")
     if settings.app_env in {"dev", "test"}:
         return
     missing: list[str] = []
