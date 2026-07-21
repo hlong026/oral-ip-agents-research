@@ -1,4 +1,9 @@
-import { getAccessToken, pipelineApi, TaskSocket, type TaskEvent } from "@oral/api-client";
+import {
+  getAccessToken,
+  pipelineApi,
+  TaskSocket,
+  type TaskEvent,
+} from "@oral/api-client";
 import { useIp, useQuota, useSession, useTasks } from "@oral/stores";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -7,8 +12,8 @@ import FlowBar from "./FlowBar";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 
-/** flow-bar 隐藏页（settings/account 不在动线内，对齐效果图） */
-const NO_FLOW_PATHS = ["/settings", "/account"];
+/** flow-bar 隐藏页（账号/套餐不在创作动线内，对齐效果图） */
+const NO_FLOW_PATHS = ["/account", "/pricing"];
 
 export interface Toast {
   id: number;
@@ -82,7 +87,11 @@ export default function Shell() {
           <div
             key={t.id}
             className={`pointer-events-auto glass-strong px-4 py-3 text-sm ${
-              t.level === "error" ? "border-danger/40 text-danger" : t.level === "warn" ? "border-warning/40 text-warning" : "text-text-1"
+              t.level === "error"
+                ? "border-danger/40 text-danger"
+                : t.level === "warn"
+                  ? "border-warning/40 text-warning"
+                  : "text-text-1"
             }`}
           >
             {t.text}

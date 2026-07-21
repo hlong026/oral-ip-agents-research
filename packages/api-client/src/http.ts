@@ -6,7 +6,10 @@
  */
 import type { ApiError, AuthTokens } from "@oral/types";
 
-const API_BASE = import.meta.env?.VITE_API_BASE ?? "/api/v1";
+type ImportMetaWithEnv = ImportMeta & { env?: { VITE_API_BASE?: string } };
+
+const API_BASE =
+  (import.meta as ImportMetaWithEnv).env?.VITE_API_BASE ?? "/api/v1";
 
 let accessToken: string | null = null;
 let refreshToken: string | null = localStorage.getItem("oral_rt");
@@ -59,9 +62,17 @@ export class HttpError extends Error {
   }
 }
 
-async function rawFetch<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
+async function rawFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  retried = false,
+): Promise<T> {
   const headers = new Headers(init.headers);
-  if (!headers.has("Content-Type") && init.body && !(init.body instanceof FormData)) {
+  if (
+    !headers.has("Content-Type") &&
+    init.body &&
+    !(init.body instanceof FormData)
+  ) {
     headers.set("Content-Type", "application/json");
   }
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
@@ -82,7 +93,10 @@ async function rawFetch<T>(path: string, init: RequestInit = {}, retried = false
   }
 
   if (!res.ok) {
-    let body: ApiError = { code: "UNKNOWN", message: `请求失败 (${res.status})` };
+    let body: ApiError = {
+      code: "UNKNOWN",
+      message: `请求失败 (${res.status})`,
+    };
     try {
       const raw = await res.json();
       // FastAPI 错误格式: {"detail": {"code": "...", "message": "..."}}
@@ -107,7 +121,10 @@ async function rawFetch<T>(path: string, init: RequestInit = {}, retried = false
 export const http = {
   get: <T>(path: string) => rawFetch<T>(path),
   post: <T>(path: string, body?: unknown) =>
-    rawFetch<T>(path, { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body ?? {}) }),
+    rawFetch<T>(path, {
+      method: "POST",
+      body: body instanceof FormData ? body : JSON.stringify(body ?? {}),
+    }),
   put: <T>(path: string, body?: unknown) =>
     rawFetch<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
   patch: <T>(path: string, body?: unknown) =>

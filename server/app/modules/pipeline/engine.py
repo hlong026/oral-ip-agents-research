@@ -7,6 +7,7 @@ mode=manual 时每步完成暂停等待用户确认（F-405 单步干预）
 支持单步重跑 /retry 与人工覆盖产物 /override；批量任务扇出 + 并发闸门(≥5)
 日志：step_failed/task_failed 结构化字段（§10.6.8-A #3）
 """
+
 import asyncio
 import json
 import time
@@ -16,7 +17,6 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
 from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
-from app.modules.billing.service import charge, refund
 from app.providers.base import ComposeInput
 from app.providers.registry import registry
 
@@ -41,9 +41,18 @@ def _load_steps(task: PipelineTask) -> list[dict]:
     steps = json.loads(task.steps_json or "[]")
     if not steps:
         steps = [
-            {"step": s, "status": "pending", "progress": 0, "message": "",
-             "compute": "cloud", "provider": "", "quotaCost": 0.0, "artifacts": {},
-             "startedAt": None, "finishedAt": None}
+            {
+                "step": s,
+                "status": "pending",
+                "progress": 0,
+                "message": "",
+                "compute": "cloud",
+                "provider": "",
+                "quotaCost": 0.0,
+                "artifacts": {},
+                "startedAt": None,
+                "finishedAt": None,
+            }
             for s in STEP_ORDER
         ]
     return steps
@@ -69,24 +78,32 @@ async def _emit(task: PipelineTask) -> None:
 async def _feed(user_id: str, type_: str, text: str) -> None:
     import uuid
 
-    await publish(CHANNEL_FEED, {
-        "kind": "feed",
-        "event": {"id": uuid.uuid4().hex[:12], "type": type_, "text": text, "createdAt": _now()},
-        "userId": user_id,
-    })
+    await publish(
+        CHANNEL_FEED,
+        {
+            "kind": "feed",
+            "event": {"id": uuid.uuid4().hex[:12], "type": type_, "text": text, "createdAt": _now()},
+            "userId": user_id,
+        },
+    )
 
 
 # ============ 各步骤执行（Step.run 统一接口） ============
+
 
 async def step_parse(task: PipelineTask, ctx: dict) -> dict:
     if task.script_text:
         return {"skipped": True, "script": task.script_text}
     if task.source_url:
         result, provider = await registry.run_with_fallback(
-            "parse", registry.parse_chain, "parse_url", task.source_url,
-            trace_id=task.trace_id, task_id=task.id)
-        return {"video_key": result.video_key or "", "title": result.title,
-                "platform": result.platform, "provider": provider}
+            "parse", registry.parse_chain, "parse_url", task.source_url, trace_id=task.trace_id, task_id=task.id
+        )
+        return {
+            "video_key": result.video_key or "",
+            "title": result.title,
+            "platform": result.platform,
+            "provider": provider,
+        }
     if task.topic:
         return {"skipped": True, "topic": task.topic}
     raise RuntimeError("缺少输入（链接/选题/文案至少一项）")
@@ -101,11 +118,13 @@ async def step_asr(task: PipelineTask, ctx: dict) -> dict:
             return {"skipped": True}
         raise RuntimeError("无可转写视频")
     tr, provider = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", video_key,
-        trace_id=task.trace_id, task_id=task.id)
-    return {"transcript": tr.text,
-            "words": [{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
-            "provider": provider}
+        "asr", registry.asr_chain, "transcribe", video_key, trace_id=task.trace_id, task_id=task.id
+    )
+    return {
+        "transcript": tr.text,
+        "words": [{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
+        "provider": provider,
+    }
 
 
 async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
@@ -117,6 +136,7 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
     if task.ip_id:
         from app.modules.ipasset.repository import get as get_persona
         from app.modules.ipasset.service import persona_prompt_context
+
         async with SessionLocal() as db:
             persona = await get_persona(db, task.ip_id, task.user_id)
         if persona:
@@ -128,6 +148,7 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
     avoid_topics: list[str] = []
     if persona:
         import json as _json_mod
+
         taboo_words = "、".join(_json_mod.loads(persona.taboo_words or "[]"))
         cta_style = persona.cta_style or "关注收藏"
         avoid_topics = _json_mod.loads(persona.avoid_topics or "[]")
@@ -135,8 +156,8 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
     # 选题模式：先生成文案
     if not ctx.get("transcript") and ctx.get("topic") and not task.script_text:
         topics, provider = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "generate_topics", ctx["topic"], 5,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm", registry.llm_chain, "generate_topics", ctx["topic"], 5, trace_id=task.trace_id, task_id=task.id
+        )
         ctx["topic_candidates"] = topics
 
     text_source = source or task.script_text
@@ -146,40 +167,82 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
     if intensity == "light":
         # light 模式：跳过结构拆解和大纲，直接人设润色
         text, provider = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "polish_light", text_source, persona_ctx,
-            trace_id=task.trace_id, task_id=task.id)
-        return {"script": text, "similarity": 0, "provider": provider,
-                "_validation_passed": True}
+            "llm", registry.llm_chain, "polish_light", text_source, persona_ctx, trace_id=task.trace_id, task_id=task.id
+        )
+        return {"script": text, "similarity": 0, "provider": provider, "_validation_passed": True}
 
     if not text_source and ctx.get("topic"):
         # 选题模式：无原文，使用 theme 模式从主题创作
         structure, provider = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "analyze_structure", ctx["topic"], "theme",
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "analyze_structure",
+            ctx["topic"],
+            "theme",
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
         outline, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "generate_outline", structure, persona_ctx, "theme", duration,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "generate_outline",
+            structure,
+            persona_ctx,
+            "theme",
+            duration,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
     elif intensity == "theme":
         # theme 模式：仅提取主题关键词，全新创作
         structure, provider = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "analyze_structure", text_source, "theme",
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "analyze_structure",
+            text_source,
+            "theme",
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
         outline, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "generate_outline", structure, persona_ctx, "theme", duration,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "generate_outline",
+            structure,
+            persona_ctx,
+            "theme",
+            duration,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
     else:
         # structure 模式：完整拆解 + IP化大纲
         structure, provider = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "analyze_structure", text_source, "full",
-            trace_id=task.trace_id, task_id=task.id)
+            "llm", registry.llm_chain, "analyze_structure", text_source, "full", trace_id=task.trace_id, task_id=task.id
+        )
         outline, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "generate_outline", structure, persona_ctx, "structure", duration,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "generate_outline",
+            structure,
+            persona_ctx,
+            "structure",
+            duration,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
 
     constraints = {"duration": duration, "cta_style": cta_style, "taboo_words": taboo_words or "无"}
     text, _ = await registry.run_with_fallback(
-        "llm", registry.llm_chain, "generate_script", outline, persona_ctx, constraints,
-        trace_id=task.trace_id, task_id=task.id)
+        "llm",
+        registry.llm_chain,
+        "generate_script",
+        outline,
+        persona_ctx,
+        constraints,
+        trace_id=task.trace_id,
+        task_id=task.id,
+    )
 
     # 校验闭环（最多2轮）
     validation_passed = True
@@ -187,6 +250,7 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
         issues = []
         if persona:
             import json as _j
+
             found_taboo = [w for w in _j.loads(persona.taboo_words or "[]") if w in text]
             if found_taboo:
                 issues.append(f"包含禁忌词：{'、'.join(found_taboo)}")
@@ -194,25 +258,31 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
             if found_avoid:
                 issues.append(f"涉及回避话题：{'、'.join(found_avoid)}")
         sim, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", text,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm", registry.llm_chain, "check_similarity", text, trace_id=task.trace_id, task_id=task.id
+        )
         if sim.score > 60:
             issues.append(f"相似度偏高（{sim.score:.0f}分）")
         if not issues:
             break
         validation_passed = False
         text, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "validation_rewrite", text, persona_ctx, "\n".join(issues),
-            trace_id=task.trace_id, task_id=task.id)
+            "llm",
+            registry.llm_chain,
+            "validation_rewrite",
+            text,
+            persona_ctx,
+            "\n".join(issues),
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
     else:
         # 循环耗尽（文本被重写过），重新检测最终相似度
         sim, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", text,
-            trace_id=task.trace_id, task_id=task.id)
+            "llm", registry.llm_chain, "check_similarity", text, trace_id=task.trace_id, task_id=task.id
+        )
         validation_passed = sim.score <= 60
 
-    return {"script": text, "similarity": sim.score, "provider": provider,
-            "_validation_passed": validation_passed}
+    return {"script": text, "similarity": sim.score, "provider": provider, "_validation_passed": validation_passed}
 
 
 async def step_voice(task: PipelineTask, ctx: dict) -> dict:
@@ -230,11 +300,14 @@ async def step_voice(task: PipelineTask, ctx: dict) -> dict:
                 raise RuntimeError("声音尚未就绪，请先完成克隆确认")
             voice_id = v.provider_voice_id or voice_id
     result, provider = await registry.run_with_fallback(
-        "voice", registry.voice_chain, "synthesize", voice_id, script, 1.0,
-        trace_id=task.trace_id, task_id=task.id)
-    return {"audio_key": result.audio_key,
-            "tts_words": [{"word": w.word, "start": w.start, "end": w.end} for w in result.words],
-            "duration": result.duration, "provider": provider}
+        "voice", registry.voice_chain, "synthesize", voice_id, script, 1.0, trace_id=task.trace_id, task_id=task.id
+    )
+    return {
+        "audio_key": result.audio_key,
+        "tts_words": [{"word": w.word, "start": w.start, "end": w.end} for w in result.words],
+        "duration": result.duration,
+        "provider": provider,
+    }
 
 
 async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
@@ -246,13 +319,19 @@ async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
     # 音频驱动视频生成：上传音频 → 创建任务 → 轮询 → 下载转存
     audio_key = ctx.get("audio_key", "")
     render_task_id, provider = await registry.run_with_fallback(
-        "avatar", registry.avatar_chain, "create_by_audio", avatar_id, audio_key,
-        trace_id=task.trace_id, task_id=task.id)
+        "avatar",
+        registry.avatar_chain,
+        "create_by_audio",
+        avatar_id,
+        audio_key,
+        trace_id=task.trace_id,
+        task_id=task.id,
+    )
 
     # 轮询视频生成任务直到完成
     result, _ = await registry.run_with_fallback(
-        "avatar", registry.avatar_chain, "poll_video_task", render_task_id,
-        trace_id=task.trace_id, task_id=task.id)
+        "avatar", registry.avatar_chain, "poll_video_task", render_task_id, trace_id=task.trace_id, task_id=task.id
+    )
 
     # 下载临时视频 URL 转存到自有存储（白标）
     video_url = result.get("video_url", "")
@@ -260,8 +339,8 @@ async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
     video_key = ""
     if video_url:
         video_key, _ = await registry.run_with_fallback(
-            "avatar", registry.avatar_chain, "download_video", video_url,
-            trace_id=task.trace_id, task_id=task.id)
+            "avatar", registry.avatar_chain, "download_video", video_url, trace_id=task.trace_id, task_id=task.id
+        )
 
     return {"avatar_video_key": video_key, "duration": duration, "provider": provider}
 
@@ -283,10 +362,14 @@ async def step_compose(task: PipelineTask, ctx: dict) -> dict:
 
     inp.subtitle_words = [WordTs(word=w["word"], start=w["start"], end=w["end"]) for w in words]
     result, provider = await registry.run_with_fallback(
-        "compose", registry.compose_chain, "compose", inp,
-        trace_id=task.trace_id, task_id=task.id)
-    return {"final_video_key": result.video_key, "cover_key": result.cover_key,
-            "duration": result.duration, "provider": provider}
+        "compose", registry.compose_chain, "compose", inp, trace_id=task.trace_id, task_id=task.id
+    )
+    return {
+        "final_video_key": result.video_key,
+        "cover_key": result.cover_key,
+        "duration": result.duration,
+        "provider": provider,
+    }
 
 
 async def step_edit(task: PipelineTask, ctx: dict) -> dict:
@@ -304,7 +387,10 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
 
     async with SessionLocal() as db:
         job_ids = await publish_task_video(
-            db, task.user_id, task.id, platforms,
+            db,
+            task.user_id,
+            task.id,
+            platforms,
             title=(ctx.get("script") or task.title)[:30],
             video_key=ctx.get("final_video_key", ""),
             cover_key=ctx.get("cover_key", ""),
@@ -327,6 +413,7 @@ STEP_RUNNERS = {
 
 # ============ 引擎主循环 ============
 
+
 async def run_task(task_id: str, from_step: str | None = None) -> None:
     """从断点续跑：跳过已 done 步骤；manual 模式每步完成挂起等待确认"""
     if task_id in _running:
@@ -339,6 +426,16 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
             async with SessionLocal() as db:
                 task = await repo_get(db, task_id)
                 if task is None or task.status in ("done", "failed", "canceled"):
+                    return
+                if settings.app_env != "dev" and not task.reservation_id:
+                    task.status = "failed"
+                    task.error = "billing: reservation required"
+                    await repo_save(db, task)
+                    logger.error(
+                        "task_rejected_without_reservation",
+                        task_id=task_id,
+                        user_id=task.user_id,
+                    )
                     return
                 # 设置 trace_id 和 user_id 上下文
                 trace_id_var.set(task.trace_id or "")
@@ -353,8 +450,7 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                 # 重跑时重置该步及后续状态
                 if from_step:
                     for i in range(start_idx, len(steps)):
-                        steps[i].update({"status": "pending", "progress": 0, "message": "",
-                                         "finishedAt": None})
+                        steps[i].update({"status": "pending", "progress": 0, "message": "", "finishedAt": None})
 
                 for i in range(start_idx, len(STEP_ORDER)):
                     step_name = STEP_ORDER[i]
@@ -383,20 +479,21 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         ctx.update({k: v for k, v in result.items() if not k.startswith("_")})
                         _dump_artifacts(task, ctx)
 
-                        # 计量扣费（步骤成功后扣费；失败自动退还；本地通道免扣）
+                        # 生产任务在创建时已冻结积分；开发环境无冻结任务只跑 Mock，不产生账单。
                         cost = 0.0
-                        if not skipped:
-                            cost = await charge(db, task.user_id, task.trace_id, task.id,
-                                                step_name, task.compute)
                         task.quota_cost += cost
 
-                        st.update({
-                            "status": "skipped" if skipped else "done",
-                            "progress": 100, "provider": provider, "quotaCost": cost,
-                            "message": result.get("note", ""),
-                            "artifacts": {k: str(v)[:200] for k, v in result.items()},
-                            "finishedAt": _now(),
-                        })
+                        st.update(
+                            {
+                                "status": "skipped" if skipped else "done",
+                                "progress": 100,
+                                "provider": provider,
+                                "quotaCost": cost,
+                                "message": result.get("note", ""),
+                                "artifacts": {k: str(v)[:200] for k, v in result.items()},
+                                "finishedAt": _now(),
+                            }
+                        )
                         # 步骤完成性能日志（§10.6.9 Phase 3 B#2）
                         logger.info(
                             "step_done",
@@ -417,7 +514,10 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             trace_id=task.trace_id,
                             user_id=task.user_id,
                         )
-                        await refund(db, task.user_id, task.trace_id, task.id, step_name, task.compute)
+                        if task.reservation_id:
+                            from app.modules.billing.service import release_reservation
+
+                            await release_reservation(db, task.reservation_id, task.user_id)
                         st.update({"status": "failed", "message": str(e)[:300], "finishedAt": _now()})
                         task.status = "failed"
                         task.error = f"{step_name}: {e}"[:500]
@@ -448,13 +548,41 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         await _feed(task.user_id, "info", f"「{task.title}」{step_name} 步完成，等待确认")
                         return
 
+                if task.reservation_id:
+                    from app.modules.billing.service import (
+                        recover_reservation_after_failure,
+                        settle_reservation,
+                    )
+
+                    try:
+                        settled = await settle_reservation(db, task.reservation_id, task.id)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "task_billing_settlement_failed",
+                            task_id=task.id,
+                            user_id=task.user_id,
+                            reservation_id=task.reservation_id,
+                        )
+                        settled = 0
+                    if settled <= 0:
+                        recovered = await recover_reservation_after_failure(db, task.reservation_id, task.user_id)
+                        if recovered is not None and recovered.status == "settled":
+                            settled = recovered.actualPoints
+                        else:
+                            await db.refresh(task)
+                            task.status = "failed"
+                            task.error = "billing: settlement failed"
+                            await repo_save(db, task)
+                            await _emit(task)
+                            await _feed(task.user_id, "err", f"「{task.title}」积分结算失败")
+                            return
+                    task.quota_cost = float(settled)
                 task.status = "done"
                 task.current_step = ""
                 await repo_save(db, task)
                 await _emit(task)
                 await _feed(task.user_id, "ok", f"「{task.title}」全流程完成")
-                logger.info("task_done", task_id=task_id, user_id=task.user_id,
-                            quota_cost=task.quota_cost)
+                logger.info("task_done", task_id=task_id, user_id=task.user_id, quota_cost=task.quota_cost)
     finally:
         _running.discard(task_id)
 

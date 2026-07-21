@@ -1,4 +1,5 @@
 """notify 模块 ORM（站内信；实时推送走 WS 网关 + 事件总线）"""
+
 import uuid
 from datetime import UTC, datetime
 

@@ -6,13 +6,17 @@ import type {
   Avatar,
   DashboardOverview,
   FeedEvent,
+  ModulePriceCatalog,
   Notification,
   Page,
   ParseResult,
   Persona,
+  PlanSku,
   PipelineMode,
   PipelineTask,
   Platform,
+  PricePreview,
+  PricePreviewRequest,
   PublishAccount,
   PublishJob,
   Quota,
@@ -21,6 +25,7 @@ import type {
   RewriteResult,
   Script,
   SimilarityResult,
+  Subscription,
   TaskStats,
   User,
   Voice,
@@ -30,8 +35,6 @@ import { http } from "./http";
 
 // ---------- auth ----------
 export const authApi = {
-  register: (phone: string, password: string, nickname: string) =>
-    http.post<AuthTokens>("/auth/register", { phone, password, nickname }),
   login: (phone: string, password: string, deviceId?: string) =>
     http.post<AuthTokens>("/auth/login", { phone, password, deviceId }),
   me: () => http.get<User>("/auth/me"),
@@ -62,28 +65,55 @@ export interface RedeemResult {
   newBalance: number;
 }
 
-export interface SubscriptionInfo {
-  planType: string;
-  planExpiresAt: string | null;
-  activatedAt: string | null;
-  quotaBalance: number;
+function activationDeviceFingerprint(): string {
+  const key = "oral_device_id";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  localStorage.setItem(key, created);
+  return created;
 }
 
 export const activationApi = {
   validateCode: (code: string) =>
-    http.post<CodeInfo>("/activation/validate-code", { code }),
-  activate: (code: string, phone: string, password: string, nickname: string, deviceFingerprint = "web") =>
-    http.post<ActivateResult>("/activation/activate", { code, phone, password, nickname, deviceFingerprint }),
+    http.post<CodeInfo>("/activation/validate-code", {
+      code,
+      deviceFingerprint: activationDeviceFingerprint(),
+    }),
+  activate: (
+    code: string,
+    phone: string,
+    password: string,
+    nickname: string,
+    deviceFingerprint = activationDeviceFingerprint(),
+  ) =>
+    http.post<ActivateResult>("/activation/activate", {
+      code,
+      phone,
+      password,
+      nickname,
+      deviceFingerprint,
+    }),
   redeem: (code: string) =>
     http.post<RedeemResult>("/activation/redeem", { code }),
-  subscription: () => http.get<SubscriptionInfo>("/activation/subscription"),
+  subscription: () => http.get<Subscription>("/subscription"),
+};
+
+// ---------- catalog（用户端套餐与积分价格） ----------
+export const catalogApi = {
+  plans: () => http.get<PlanSku[]>("/catalog/plans"),
+  modulePrices: () => http.get<ModulePriceCatalog>("/catalog/module-prices"),
 };
 
 // ---------- billing ----------
 export const billingApi = {
   quota: () => http.get<Quota>("/billing/quota"),
   usage: (page = 1, pageSize = 20) =>
-    http.get<Page<QuotaUsageItem>>(`/billing/usage?page=${page}&pageSize=${pageSize}`),
+    http.get<Page<QuotaUsageItem>>(
+      `/billing/usage?page=${page}&pageSize=${pageSize}`,
+    ),
+  pricePreview: (input: PricePreviewRequest) =>
+    http.post<PricePreview>("/billing/price-preview", input),
   exportCsvUrl: () => `/api/v1/billing/usage?export=csv`,
 };
 
@@ -92,56 +122,91 @@ export const personaApi = {
   list: () => http.get<Persona[]>("/personas"),
   get: (id: string) => http.get<Persona>(`/personas/${id}`),
   create: (data: Partial<Persona>) => http.post<Persona>("/personas", data),
-  update: (id: string, data: Partial<Persona>) => http.put<Persona>(`/personas/${id}`, data),
+  update: (id: string, data: Partial<Persona>) =>
+    http.put<Persona>(`/personas/${id}`, data),
   activate: (id: string) => http.post<Persona>(`/personas/${id}/activate`),
 };
 
 // ---------- content（文案模块 F-101~F-106） ----------
 export const contentApi = {
-  parse: (url?: string, file?: File): Promise<ParseResult> => {
+  probe: (url: string) =>
+    http.post<{ durationSeconds: number }>("/content/probe", { url }),
+  parse: (
+    url?: string,
+    file?: File,
+    quoteId?: string,
+  ): Promise<ParseResult> => {
     if (file) {
       const fd = new FormData();
       fd.append("file", file);
+      if (quoteId) fd.append("quoteId", quoteId);
       return http.post<ParseResult>("/content/parse", fd);
     }
     const fd = new FormData();
     if (url) fd.append("url", url);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<ParseResult>("/content/parse", fd);
   },
-  rewrite: (text: string, intensity: RewriteIntensity, prompt?: string, scriptId?: string) =>
-    http.post<RewriteResult>("/content/rewrite", { text, intensity, prompt, scriptId }),
-  similarity: (text: string) => http.post<SimilarityResult>("/content/similarity", { text }),
-  topics: (keyword: string) => http.post<{ topics: string[] }>("/content/topics", { keyword }),
+  rewrite: (
+    text: string,
+    intensity: RewriteIntensity,
+    prompt?: string,
+    scriptId?: string,
+    quoteId?: string,
+  ) =>
+    http.post<RewriteResult>("/content/rewrite", {
+      text,
+      intensity,
+      prompt,
+      scriptId,
+      quoteId,
+    }),
+  similarity: (text: string, quoteId?: string) =>
+    http.post<SimilarityResult>("/content/similarity", { text, quoteId }),
+  topics: (keyword: string, quoteId?: string) =>
+    http.post<{ topics: string[] }>("/content/topics", { keyword, quoteId }),
   scripts: () => http.get<Script[]>("/content/scripts"),
   script: (id: string) => http.get<Script>(`/content/scripts/${id}`),
-  createScript: (input: { title?: string; text: string; platform?: string; topic?: string }) =>
-    http.post<Script>("/content/scripts", input),
+  createScript: (input: {
+    title?: string;
+    text: string;
+    platform?: string;
+    topic?: string;
+  }) => http.post<Script>("/content/scripts", input),
 };
 
 // ---------- voices / avatars（克隆强制 consent_token；绑定 IP 走 personaApi.update） ----------
 export const voiceApi = {
   list: () => http.get<Voice[]>("/voices"),
-  clone: (name: string, consentToken: string, file: File) => {
+  clone: (name: string, consentToken: string, file: File, quoteId?: string) => {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("consentToken", consentToken);
     fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Voice>("/voices/clone", fd);
   },
-  synthesize: (voiceId: string, text: string, speed = 1.0) =>
+  status: (voiceId: string) =>
+    http.get<Pick<Voice, "id" | "status" | "demoUrl">>(
+      `/voices/${voiceId}/status`,
+    ),
+  confirm: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/confirm`),
+  reject: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/reject`),
+  synthesize: (voiceId: string, text: string, speed = 1.0, quoteId?: string) =>
     http.post<{ audioUrl: string; words: WordTimestamp[] }>(
       "/voices/synthesize",
-      { voiceId, text, speed },
+      { voiceId, text, speed, quoteId },
     ),
 };
 
 export const avatarApi = {
   list: () => http.get<Avatar[]>("/avatars"),
-  clone: (name: string, consentToken: string, file: File) => {
+  clone: (name: string, consentToken: string, file: File, quoteId?: string) => {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("consentToken", consentToken);
     fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
 };
@@ -159,18 +224,23 @@ export interface CreatePipelineInput {
   publishAt?: string;
   randomize?: boolean;
   count?: number;
+  quoteId?: string;
 }
 
 export const pipelineApi = {
-  create: (input: CreatePipelineInput) => http.post<PipelineTask[]>("/pipelines", input),
+  create: (input: CreatePipelineInput) =>
+    http.post<PipelineTask[]>("/pipelines", input),
   list: (status?: string, page = 1, pageSize = 20) =>
     http.get<Page<PipelineTask>>(
       `/pipelines?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
     ),
   get: (id: string) => http.get<PipelineTask>(`/pipelines/${id}`),
-  retryStep: (id: string, step: string) => http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`),
+  retryStep: (id: string, step: string) =>
+    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`),
   overrideStep: (id: string, step: string, artifacts: Record<string, string>) =>
-    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/override`, { artifacts }),
+    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/override`, {
+      artifacts,
+    }),
   confirm: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/confirm`),
   cancel: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/cancel`),
   stats: () => http.get<TaskStats>("/pipelines/stats"),
@@ -190,24 +260,39 @@ export interface CreatePublishInput {
 export const publishApi = {
   accounts: () => http.get<PublishAccount[]>("/publish/accounts"),
   qrcodeStart: (platform: Platform) =>
-    http.post<{ ticket: string; qrcodeUrl: string }>(`/publish/accounts/qrcode?platform=${platform}`),
-  qrcodePoll: (ticket: string, platform: Platform) =>
-    http.get<{ status: "waiting" | "success" | "expired"; account?: PublishAccount | null; qrcodeUrl?: string | null }>(
-      `/publish/accounts/qrcode/${ticket}?platform=${platform}`,
+    http.post<{ ticket: string; qrcodeUrl: string }>(
+      `/publish/accounts/qrcode?platform=${platform}`,
     ),
+  qrcodePoll: (ticket: string, platform: Platform) =>
+    http.get<{
+      status: "waiting" | "success" | "expired";
+      account?: PublishAccount | null;
+      qrcodeUrl?: string | null;
+    }>(`/publish/accounts/qrcode/${ticket}?platform=${platform}`),
   reauth: (accountId: string) =>
-    http.post<{ ticket: string; qrcodeUrl: string }>(`/publish/accounts/${accountId}/reauth`),
-  deleteAccount: (accountId: string) => http.delete<void>(`/publish/accounts/${accountId}`),
+    http.post<{ ticket: string; qrcodeUrl: string }>(
+      `/publish/accounts/${accountId}/reauth`,
+    ),
+  deleteAccount: (accountId: string) =>
+    http.delete<void>(`/publish/accounts/${accountId}`),
   renameAccount: (accountId: string, nickname: string) =>
     http.patch<PublishAccount>(`/publish/accounts/${accountId}`, { nickname }),
   jobs: (status?: string, page = 1, pageSize = 20) =>
     http.get<Page<PublishJob>>(
       `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
     ),
-  logs: (page = 1, pageSize = 50) => http.get<Page<PublishJob>>(`/publish/logs?page=${page}&pageSize=${pageSize}`),
-  createJobs: (input: CreatePublishInput) => http.post<PublishJob[]>("/publish/jobs", input),
-  retryJob: (jobId: string) => http.post<PublishJob>(`/publish/jobs/${jobId}/retry`),
-  exportJob: (jobId: string) => http.post<{ jobId: string; videoUrl: string }>(`/publish/jobs/${jobId}/export`),
+  logs: (page = 1, pageSize = 50) =>
+    http.get<Page<PublishJob>>(
+      `/publish/logs?page=${page}&pageSize=${pageSize}`,
+    ),
+  createJobs: (input: CreatePublishInput) =>
+    http.post<PublishJob[]>("/publish/jobs", input),
+  retryJob: (jobId: string) =>
+    http.post<PublishJob>(`/publish/jobs/${jobId}/retry`),
+  exportJob: (jobId: string) =>
+    http.post<{ jobId: string; videoUrl: string }>(
+      `/publish/jobs/${jobId}/export`,
+    ),
 };
 
 // ---------- notify（站内信） ----------
@@ -272,23 +357,36 @@ export interface IMListenerStatus {
 
 export const imApi = {
   conversations: (page = 1, pageSize = 20) =>
-    http.get<{ items: IMConversation[]; total: number; page: number; pageSize: number }>(
-      `/im/conversations?page=${page}&pageSize=${pageSize}`,
-    ),
+    http.get<{
+      items: IMConversation[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>(`/im/conversations?page=${page}&pageSize=${pageSize}`),
   messages: (conversationId: string, page = 1, pageSize = 50) =>
-    http.get<{ items: IMMessage[]; total: number; page: number; pageSize: number }>(
+    http.get<{
+      items: IMMessage[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>(
       `/im/conversations/${conversationId}/messages?page=${page}&pageSize=${pageSize}`,
     ),
   send: (conversationId: string, content: string, msgType = 7) =>
-    http.post<IMMessage>(`/im/conversations/${conversationId}/send`, { content, msgType }),
+    http.post<IMMessage>(`/im/conversations/${conversationId}/send`, {
+      content,
+      msgType,
+    }),
   markRead: (conversationId: string) =>
     http.put<void>(`/im/conversations/${conversationId}/read`),
   rules: () => http.get<IMAutoReplyRule[]>("/im/rules"),
-  createRule: (data: Partial<IMAutoReplyRule>) => http.post<IMAutoReplyRule>("/im/rules", data),
+  createRule: (data: Partial<IMAutoReplyRule>) =>
+    http.post<IMAutoReplyRule>("/im/rules", data),
   updateRule: (id: string, data: Partial<IMAutoReplyRule>) =>
     http.put<IMAutoReplyRule>(`/im/rules/${id}`, data),
   deleteRule: (id: string) => http.delete<void>(`/im/rules/${id}`),
-  toggleRule: (id: string) => http.put<IMAutoReplyRule>(`/im/rules/${id}/toggle`),
+  toggleRule: (id: string) =>
+    http.put<IMAutoReplyRule>(`/im/rules/${id}/toggle`),
   listenerStatus: () => http.get<IMListenerStatus[]>("/im/listener/status"),
   startListener: (accountId: string) =>
     http.post<IMListenerStatus>("/im/listener/start", { accountId }),
@@ -300,11 +398,4 @@ export const imApi = {
 export const dashboardApi = {
   overview: () => http.get<DashboardOverview>("/dashboard/overview"),
   feed: () => http.get<FeedEvent[]>("/dashboard/feed"),
-};
-
-// ---------- settings（Provider 配置） ----------
-export const settingsApi = {
-  get: () => http.get<{ settings: Record<string, string> }>("/settings"),
-  save: (settings: Record<string, string>) =>
-    http.put<{ settings: Record<string, string> }>("/settings", { settings }),
 };

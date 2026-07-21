@@ -6,6 +6,7 @@
 - 输入：公网可访问的音视频URL（Douyidou 返回的视频直链）
 - 支持格式：aac, amr, flac, flv, m4a, mkv, mov, mp3, mp4, mpeg, ogg, opus, wav, webm, wma, wmv
 """
+
 import asyncio
 import logging
 from typing import Any
@@ -48,7 +49,7 @@ class AliyunASR:
     async def transcribe(self, video_key: str, duration_sec: float | None = None) -> TranscriptResult:
         """
         转写入口：根据时长分流。
-            
+
         Args:
             video_key: 公网可访问的音视频URL（或本地存储key）
             duration_sec: 预估时长(秒)。None时默认走异步模式（安全兖底）
@@ -56,16 +57,17 @@ class AliyunASR:
         cfg = await self._get_config()
         if not cfg["api_key"]:
             raise StepRecoverableError("DashScope api_key 未配置，请在设置页填写")
-    
+
         file_url = video_key
-    
+
         # 按时长分流
         threshold = cfg["threshold"]
         if duration_sec is not None and duration_sec <= threshold:
             logger.info(f"ASR 走 Flash 同步模式（时长 {duration_sec:.0f}s ≤ {threshold}s）")
             return await self._transcribe_flash(file_url, cfg)
         else:
-            logger.info(f"ASR 走异步模式（时长 {'未知' if duration_sec is None else f'{duration_sec:.0f}s'} > {threshold}s）")
+            duration_label = "未知" if duration_sec is None else f"{duration_sec:.0f}s"
+            logger.info(f"ASR 走异步模式（时长 {duration_label} > {threshold}s）")
             return await self._transcribe_async(file_url, cfg)
 
     # ==================== 同步模式：Fun-ASR-Flash ====================
@@ -120,11 +122,13 @@ class AliyunASR:
         words: list[WordTs] = []
         sentence = output.get("sentence", {})
         for w in sentence.get("words", []):
-            words.append(WordTs(
-                word=w.get("text", "") + w.get("punctuation", ""),
-                start=w.get("begin_time", 0) / 1000.0,
-                end=w.get("end_time", 0) / 1000.0,
-            ))
+            words.append(
+                WordTs(
+                    word=w.get("text", "") + w.get("punctuation", ""),
+                    start=w.get("begin_time", 0) / 1000.0,
+                    end=w.get("end_time", 0) / 1000.0,
+                )
+            )
 
         duration = data.get("usage", {}).get("duration", 0)
         return TranscriptResult(text=text, words=words, duration=float(duration), language="zh")
@@ -187,7 +191,7 @@ class AliyunASR:
                     resp.raise_for_status()
                     data = resp.json()
                 except httpx.HTTPError as e:
-                    logger.warning(f"ASR 轮询请求异常(attempt={attempt+1}): {e}")
+                    logger.warning(f"ASR 轮询请求异常(attempt={attempt + 1}): {e}")
                     continue
 
                 output = data.get("output", {})
@@ -207,7 +211,7 @@ class AliyunASR:
 
                 # PENDING / RUNNING → 继续轮询
                 if (attempt + 1) % 10 == 0:
-                    logger.info(f"ASR 轮询中... attempt={attempt+1}, status={status}")
+                    logger.info(f"ASR 轮询中... attempt={attempt + 1}, status={status}")
 
         raise StepRecoverableError(f"ASR 轮询超时（{max_attempts * interval:.0f}s）")
 
@@ -257,11 +261,13 @@ class AliyunASR:
         words: list[WordTs] = []
         for sentence in tr.get("sentences", []):
             for w in sentence.get("words", []):
-                words.append(WordTs(
-                    word=w.get("text", "") + w.get("punctuation", ""),
-                    start=w.get("begin_time", 0) / 1000.0,
-                    end=w.get("end_time", 0) / 1000.0,
-                ))
+                words.append(
+                    WordTs(
+                        word=w.get("text", "") + w.get("punctuation", ""),
+                        start=w.get("begin_time", 0) / 1000.0,
+                        end=w.get("end_time", 0) / 1000.0,
+                    )
+                )
 
         return TranscriptResult(
             text=full_text,
@@ -274,10 +280,21 @@ class AliyunASR:
     def _guess_format(url: str) -> str:
         """从URL推断音频格式"""
         ext_map = {
-            ".mp4": "mp4", ".mp3": "mp3", ".wav": "wav", ".aac": "aac",
-            ".flac": "flac", ".ogg": "ogg", ".opus": "opus", ".m4a": "m4a",
-            ".mov": "mov", ".flv": "flv", ".webm": "webm", ".wma": "wma",
-            ".wmv": "wmv", ".mkv": "mkv", ".amr": "amr",
+            ".mp4": "mp4",
+            ".mp3": "mp3",
+            ".wav": "wav",
+            ".aac": "aac",
+            ".flac": "flac",
+            ".ogg": "ogg",
+            ".opus": "opus",
+            ".m4a": "m4a",
+            ".mov": "mov",
+            ".flv": "flv",
+            ".webm": "webm",
+            ".wma": "wma",
+            ".wmv": "wmv",
+            ".mkv": "mkv",
+            ".amr": "amr",
         }
         lower = url.lower().split("?")[0]  # 去掉查询参数
         for ext, fmt in ext_map.items():

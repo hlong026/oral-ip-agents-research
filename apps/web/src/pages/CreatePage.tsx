@@ -1,12 +1,33 @@
-import { avatarApi, contentApi, HttpError, pipelineApi, voiceApi } from "@oral/api-client";
+import {
+  avatarApi,
+  billingApi,
+  catalogApi,
+  contentApi,
+  HttpError,
+  pipelineApi,
+  voiceApi,
+} from "@oral/api-client";
 import { useIp } from "@oral/stores";
-import { PLATFORM_NAMES, PUBLISH_PLATFORMS, type Platform, type RewriteIntensity } from "@oral/types";
+import {
+  PLATFORM_NAMES,
+  PUBLISH_PLATFORMS,
+  type ModulePrice,
+  type Platform,
+  type PricePreview,
+  type PricePreviewRequest,
+  type RewriteIntensity,
+} from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import LinkSourceInput from "../components/LinkSourceInput";
 import PlatformIcon from "../components/PlatformIcon";
+import {
+  confirmMeteredOperation,
+  mediaDurationSeconds,
+  textOperationUsage,
+} from "../lib/meteredOperation";
 
 const STEPS = [
   { key: "link", label: "链接/选题" },
@@ -50,17 +71,79 @@ const initialWizard: Wizard = {
   title: "",
 };
 
+export function buildPricePreviewRequest(
+  input: Pick<Wizard, "sourceUrl" | "topic" | "scriptText" | "count">,
+  modulePrices: Pick<ModulePrice, "module" | "billingUnit" | "unitSize">[],
+  targetDurationSeconds = 60,
+): PricePreviewRequest {
+  const scriptLength = input.scriptText.trim().length;
+  const durationSeconds = Math.max(
+    1,
+    targetDurationSeconds,
+    Math.ceil(scriptLength * 0.28),
+  );
+  const textLength = Math.max(scriptLength, Math.ceil(durationSeconds / 0.28));
+  const requestedModules = new Set([
+    ...(input.sourceUrl && !input.scriptText.trim() ? ["asr"] : []),
+    ...(input.topic && !input.scriptText.trim() ? ["topic_generation"] : []),
+    "script_generation",
+    "tts",
+    "digital_human",
+    "hd_export",
+  ]);
+
+  const quantityFor = (price: Pick<ModulePrice, "billingUnit">): number => {
+    if (
+      price.billingUnit === "per_minute" ||
+      price.billingUnit === "per_second"
+    ) {
+      return durationSeconds;
+    }
+    if (price.billingUnit === "per_1k_chars") return textLength;
+    if (price.billingUnit === "per_1k_tokens") {
+      return Math.max(1, Math.ceil(textLength / 2));
+    }
+    return 1;
+  };
+
+  return {
+    items: modulePrices
+      .filter((price) => requestedModules.has(price.module))
+      .map((price) => ({ module: price.module, quantity: quantityFor(price) })),
+  };
+}
+
 // ---------------- 第 1 步：链接/选题 ----------------
 
-function StepLink({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
-  const [tab, setTab] = useState<"url" | "topic" | "script">(wiz.topic ? "topic" : wiz.scriptText ? "script" : "url");
+function StepLink({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
+  const [tab, setTab] = useState<"url" | "topic" | "script">(
+    wiz.topic ? "topic" : wiz.scriptText ? "script" : "url",
+  );
   const [uploading, setUploading] = useState(false);
 
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const res = await contentApi.parse(undefined, file);
-      if (res.transcript) setWiz({ ...wiz, scriptText: res.transcript.text, sourceUrl: "", topic: "" });
+      const seconds = await mediaDurationSeconds(file);
+      const quoteId = await confirmMeteredOperation("asr", "上传转写", {
+        seconds,
+        assets: 1,
+      });
+      if (!quoteId) return;
+      const res = await contentApi.parse(undefined, file, quoteId);
+      if (res.transcript)
+        setWiz({
+          ...wiz,
+          scriptText: res.transcript.text,
+          sourceUrl: "",
+          topic: "",
+        });
     } finally {
       setUploading(false);
     }
@@ -90,12 +173,16 @@ function StepLink({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void })
         <div className="space-y-3">
           <LinkSourceInput
             value={wiz.sourceUrl}
-            onChange={(v) => setWiz({ ...wiz, sourceUrl: v, topic: "", scriptText: "" })}
+            onChange={(v) =>
+              setWiz({ ...wiz, sourceUrl: v, topic: "", scriptText: "" })
+            }
             onUpload={(f) => void upload(f)}
             uploading={uploading}
           />
           <p className="text-xs text-text-3">
-            {uploading ? "解析上传中…" : "粘贴链接直接解析，或点输入框左侧图标上传本地视频/音频（视频号、解析失败时降级转写）"}
+            {uploading
+              ? "解析上传中…"
+              : "粘贴链接直接解析，或点输入框左侧图标上传本地视频/音频（视频号、解析失败时降级转写）"}
           </p>
         </div>
       )}
@@ -107,7 +194,14 @@ function StepLink({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void })
             className="input h-14 text-base"
             placeholder="如：个体户报税 3 个坑 / 新房除甲醛真相…"
             value={wiz.topic}
-            onChange={(e) => setWiz({ ...wiz, topic: e.target.value, sourceUrl: "", scriptText: "" })}
+            onChange={(e) =>
+              setWiz({
+                ...wiz,
+                topic: e.target.value,
+                sourceUrl: "",
+                scriptText: "",
+              })
+            }
           />
         </div>
       )}
@@ -119,7 +213,14 @@ function StepLink({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void })
             className="input min-h-40 resize-y"
             placeholder="粘贴你的口播文案…"
             value={wiz.scriptText}
-            onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value, sourceUrl: "", topic: "" })}
+            onChange={(e) =>
+              setWiz({
+                ...wiz,
+                scriptText: e.target.value,
+                sourceUrl: "",
+                topic: "",
+              })
+            }
           />
         </div>
       )}
@@ -129,12 +230,20 @@ function StepLink({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void })
 
 // ---------------- 第 2 步：文案（转写/仿写/去重） ----------------
 
-function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
+function StepScript({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [degraded, setDegraded] = useState(false);
   const [intensity, setIntensity] = useState<RewriteIntensity>("structure");
-  const [structure, setStructure] = useState<Record<string, unknown> | null>(null);
+  const [structure, setStructure] = useState<Record<string, unknown> | null>(
+    null,
+  );
   const [outline, setOutline] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
 
@@ -147,25 +256,77 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
     const run = async () => {
       try {
         if (wiz.sourceUrl) {
-          const res = await contentApi.parse(wiz.sourceUrl);
+          const durationSeconds = (await contentApi.probe(wiz.sourceUrl))
+            .durationSeconds;
+          const parseQuoteId = await confirmMeteredOperation(
+            "asr",
+            "链接转写",
+            {
+              seconds: durationSeconds,
+              assets: 1,
+            },
+          );
+          if (!parseQuoteId) return;
+          const res = await contentApi.parse(
+            wiz.sourceUrl,
+            undefined,
+            parseQuoteId,
+          );
           if (res.degraded) setDegraded(true);
           const text = res.transcript?.text ?? "";
           if (!text) {
             setError("未提取到文案，请检查链接是否有效，或尝试上传本地视频");
             return;
           }
-          const rw = await contentApi.rewrite(text, "structure");
-          setWiz({ ...wiz, scriptText: rw.text, similarity: rw.similarity ?? null });
+          const rewriteQuoteId = await confirmMeteredOperation(
+            "script_generation",
+            "生成仿写文案",
+            textOperationUsage(text),
+          );
+          if (!rewriteQuoteId) return;
+          const rw = await contentApi.rewrite(
+            text,
+            "structure",
+            undefined,
+            undefined,
+            rewriteQuoteId,
+          );
+          setWiz({
+            ...wiz,
+            scriptText: rw.text,
+            similarity: rw.similarity ?? null,
+          });
           if (rw.structure) setStructure(rw.structure);
           if (rw.outline) setOutline(rw.outline);
         } else {
-          const rw = await contentApi.rewrite(`请围绕选题「${wiz.topic}」生成 60 秒口播文案`, "theme");
-          setWiz({ ...wiz, scriptText: rw.text, similarity: rw.similarity ?? null });
+          const prompt = `请围绕选题「${wiz.topic}」生成 60 秒口播文案`;
+          const quoteId = await confirmMeteredOperation(
+            "script_generation",
+            "生成口播文案",
+            textOperationUsage(prompt),
+          );
+          if (!quoteId) return;
+          const rw = await contentApi.rewrite(
+            prompt,
+            "theme",
+            undefined,
+            undefined,
+            quoteId,
+          );
+          setWiz({
+            ...wiz,
+            scriptText: rw.text,
+            similarity: rw.similarity ?? null,
+          });
           if (rw.structure) setStructure(rw.structure);
           if (rw.outline) setOutline(rw.outline);
         }
       } catch (e) {
-        setError(e instanceof HttpError ? e.body.message : "解析失败，请检查链接或稍后重试");
+        setError(
+          e instanceof HttpError
+            ? e.body.message
+            : "解析失败，请检查链接或稍后重试",
+        );
       } finally {
         setLoading(false);
       }
@@ -177,8 +338,24 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
   const rewrite = async () => {
     setLoading(true);
     try {
-      const rw = await contentApi.rewrite(wiz.scriptText, intensity);
-      setWiz({ ...wiz, scriptText: rw.text, similarity: rw.similarity ?? null });
+      const quoteId = await confirmMeteredOperation(
+        "script_generation",
+        "仿写文案",
+        textOperationUsage(wiz.scriptText),
+      );
+      if (!quoteId) return;
+      const rw = await contentApi.rewrite(
+        wiz.scriptText,
+        intensity,
+        undefined,
+        undefined,
+        quoteId,
+      );
+      setWiz({
+        ...wiz,
+        scriptText: rw.text,
+        similarity: rw.similarity ?? null,
+      });
       if (rw.structure) setStructure(rw.structure);
       if (rw.outline) setOutline(rw.outline);
     } finally {
@@ -189,7 +366,13 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
   const checkSim = async () => {
     setLoading(true);
     try {
-      const sim = await contentApi.similarity(wiz.scriptText);
+      const quoteId = await confirmMeteredOperation(
+        "script_generation",
+        "检测相似度",
+        textOperationUsage(wiz.scriptText),
+      );
+      if (!quoteId) return;
+      const sim = await contentApi.similarity(wiz.scriptText, quoteId);
       setWiz({ ...wiz, similarity: sim.score });
     } finally {
       setLoading(false);
@@ -197,7 +380,14 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
   };
 
   const simScore = wiz.similarity;
-  const simColor = simScore === null ? "" : simScore < 30 ? "text-success" : simScore < 60 ? "text-warning" : "text-danger";
+  const simColor =
+    simScore === null
+      ? ""
+      : simScore < 30
+        ? "text-success"
+        : simScore < 60
+          ? "text-warning"
+          : "text-danger";
 
   return (
     <div className="space-y-4">
@@ -219,21 +409,36 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
           </button>
         ))}
         <div className="flex-1" />
-        <button onClick={rewrite} disabled={loading || !wiz.scriptText} className="btn-ghost px-3 py-1 text-xs">
+        <button
+          onClick={rewrite}
+          disabled={loading || !wiz.scriptText}
+          className="btn-ghost px-3 py-1 text-xs"
+        >
           一键再改写
         </button>
-        <button onClick={checkSim} disabled={loading || !wiz.scriptText} className="btn-ghost px-3 py-1 text-xs">
+        <button
+          onClick={checkSim}
+          disabled={loading || !wiz.scriptText}
+          className="btn-ghost px-3 py-1 text-xs"
+        >
           去重检测
         </button>
         {simScore !== null && (
-          <span className={`chip border-current/40 ${simColor}`}>去重分 {simScore.toFixed(0)}</span>
+          <span className={`chip border-current/40 ${simColor}`}>
+            去重分 {simScore.toFixed(0)}
+          </span>
         )}
       </div>
 
-      {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
+      {error && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
       {degraded && !error && (
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          ⚠️ 链接解析已降级处理（第三方服务不可用），结果可能不完整。建议在设置页配置 API Key 或上传本地视频。
+          ⚠️
+          链接解析已降级处理（第三方服务不可用），结果可能不完整。请稍后重试或上传本地视频。
         </div>
       )}
 
@@ -253,11 +458,29 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
                 <div>
                   <div className="mb-1 font-medium text-text-2">爆款结构：</div>
                   <div className="space-y-0.5">
-                    {structure.hook_type != null && <div>钩子：{String(structure.hook_type)} — {String(structure.hook_text ?? "")}</div>}
-                    {Array.isArray(structure.pain_points) && <div>痛点：{(structure.pain_points as string[]).join("、")}</div>}
-                    {Array.isArray(structure.value_points) && <div>价值点：{(structure.value_points as string[]).join("、")}</div>}
-                    {structure.cta_type != null && <div>CTA：{String(structure.cta_type)}</div>}
-                    {structure.emotion_curve != null && <div>情绪曲线：{String(structure.emotion_curve)}</div>}
+                    {structure.hook_type != null && (
+                      <div>
+                        钩子：{String(structure.hook_type)} —{" "}
+                        {String(structure.hook_text ?? "")}
+                      </div>
+                    )}
+                    {Array.isArray(structure.pain_points) && (
+                      <div>
+                        痛点：{(structure.pain_points as string[]).join("、")}
+                      </div>
+                    )}
+                    {Array.isArray(structure.value_points) && (
+                      <div>
+                        价值点：
+                        {(structure.value_points as string[]).join("、")}
+                      </div>
+                    )}
+                    {structure.cta_type != null && (
+                      <div>CTA：{String(structure.cta_type)}</div>
+                    )}
+                    {structure.emotion_curve != null && (
+                      <div>情绪曲线：{String(structure.emotion_curve)}</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -279,15 +502,27 @@ function StepScript({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
         onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value })}
         disabled={loading && !wiz.scriptText}
       />
-      <div className="text-right text-xs text-text-3">{wiz.scriptText.length} 字 · 约 {Math.ceil(wiz.scriptText.length * 0.28)} 秒</div>
+      <div className="text-right text-xs text-text-3">
+        {wiz.scriptText.length} 字 · 约{" "}
+        {Math.ceil(wiz.scriptText.length * 0.28)} 秒
+      </div>
     </div>
   );
 }
 
 // ---------------- 第 3/4 步：声音 / 数字人 ----------------
 
-function StepVoice({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
-  const { data } = useQuery({ queryKey: ["voices"], queryFn: () => voiceApi.list() });
+function StepVoice({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["voices"],
+    queryFn: () => voiceApi.list(),
+  });
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {(data ?? []).map((v) => (
@@ -295,11 +530,15 @@ function StepVoice({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }
           key={v.id}
           onClick={() => setWiz({ ...wiz, voiceId: v.id })}
           className={`rounded-xl border p-4 text-left transition-all ${
-            wiz.voiceId === v.id ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
+            wiz.voiceId === v.id
+              ? "border-brand-from/60 bg-brand-from/10"
+              : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
           }`}
         >
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white">♪</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white">
+              ♪
+            </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{v.name}</div>
               <div className="text-xs text-text-3">
@@ -309,13 +548,26 @@ function StepVoice({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }
           </div>
         </button>
       ))}
-      {(data ?? []).length === 0 && <div className="col-span-full py-8 text-center text-sm text-text-3">加载音色库…</div>}
+      {(data ?? []).length === 0 && (
+        <div className="col-span-full py-8 text-center text-sm text-text-3">
+          加载音色库…
+        </div>
+      )}
     </div>
   );
 }
 
-function StepAvatar({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
-  const { data } = useQuery({ queryKey: ["avatars"], queryFn: () => avatarApi.list() });
+function StepAvatar({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
+  const { data } = useQuery({
+    queryKey: ["avatars"],
+    queryFn: () => avatarApi.list(),
+  });
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {(data ?? []).map((a) => (
@@ -323,15 +575,21 @@ function StepAvatar({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
           key={a.id}
           onClick={() => setWiz({ ...wiz, avatarId: a.id })}
           className={`rounded-xl border p-4 text-left transition-all ${
-            wiz.avatarId === a.id ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
+            wiz.avatarId === a.id
+              ? "border-brand-from/60 bg-brand-from/10"
+              : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
           }`}
         >
           <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">☺</span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">
+              ☺
+            </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{a.name}</div>
               <div className="text-xs text-text-3">
-                {a.source === "clone" ? "克隆形象" : `公共库 · ${a.style ?? "通用"}`}
+                {a.source === "clone"
+                  ? "克隆形象"
+                  : `公共库 · ${a.style ?? "通用"}`}
               </div>
             </div>
           </div>
@@ -343,7 +601,13 @@ function StepAvatar({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void 
 
 // ---------------- 第 5 步：合成参数 ----------------
 
-function StepCompose({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
+function StepCompose({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
   return (
     <div className="space-y-5">
       <div>
@@ -354,14 +618,18 @@ function StepCompose({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void
             className={`rounded-xl border p-4 text-left ${wiz.mode === "auto" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
           >
             <div className="font-medium">⚡ 全自动</div>
-            <div className="mt-1 text-xs text-text-3">8 步流水线一气呵成，适合成熟 IP</div>
+            <div className="mt-1 text-xs text-text-3">
+              8 步流水线一气呵成，适合成熟 IP
+            </div>
           </button>
           <button
             onClick={() => setWiz({ ...wiz, mode: "manual" })}
             className={`rounded-xl border p-4 text-left ${wiz.mode === "manual" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
           >
             <div className="font-medium">✋ 逐步确认</div>
-            <div className="mt-1 text-xs text-text-3">每步完成暂停，可人工干预/覆盖产物</div>
+            <div className="mt-1 text-xs text-text-3">
+              每步完成暂停，可人工干预/覆盖产物
+            </div>
           </button>
         </div>
       </div>
@@ -375,7 +643,12 @@ function StepCompose({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void
             max={20}
             className="input"
             value={wiz.count}
-            onChange={(e) => setWiz({ ...wiz, count: Math.max(1, Math.min(20, Number(e.target.value) || 1)) })}
+            onChange={(e) =>
+              setWiz({
+                ...wiz,
+                count: Math.max(1, Math.min(20, Number(e.target.value) || 1)),
+              })
+            }
           />
         </div>
         <div>
@@ -385,15 +658,20 @@ function StepCompose({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void
             className={`input flex items-center justify-between ${wiz.randomize ? "border-brand-from/60 text-text-1" : "text-text-3"}`}
           >
             {wiz.randomize ? "已开启（变速/镜像/抽帧）" : "已关闭"}
-            <span className={`h-5 w-9 rounded-full p-0.5 transition-colors ${wiz.randomize ? "bg-brand-grad" : "bg-white/10"}`}>
-              <span className={`block h-4 w-4 rounded-full bg-white transition-transform ${wiz.randomize ? "translate-x-4" : ""}`} />
+            <span
+              className={`h-5 w-9 rounded-full p-0.5 transition-colors ${wiz.randomize ? "bg-brand-grad" : "bg-white/10"}`}
+            >
+              <span
+                className={`block h-4 w-4 rounded-full bg-white transition-transform ${wiz.randomize ? "translate-x-4" : ""}`}
+              />
             </span>
           </button>
         </div>
       </div>
 
       <div className="rounded-xl border border-stroke bg-white/[0.02] p-4 text-xs text-text-3">
-        合成内核：FFmpeg 云端 Worker · 字幕双模式（TTS 字级时间戳优先，ASR 校准兜底）· BGM 自动闪避 · 1080p
+        合成内核：FFmpeg 云端 Worker · 字幕双模式（TTS 字级时间戳优先，ASR
+        校准兜底）· BGM 自动闪避 · 1080p
       </div>
     </div>
   );
@@ -408,7 +686,9 @@ function StepEdit({ onSkip }: { onSkip: () => void }) {
       <span className="text-4xl">✂</span>
       <div>
         <div className="font-medium">剪辑步可在成片后精修</div>
-        <p className="mt-1 text-sm text-text-3">字幕样式 / BGM 三模式 / 封面编辑，均可在任务完成后进入剪辑台处理</p>
+        <p className="mt-1 text-sm text-text-3">
+          字幕样式 / BGM 三模式 / 封面编辑，均可在任务完成后进入剪辑台处理
+        </p>
       </div>
       <div className="flex gap-3">
         <button className="btn-ghost" onClick={() => navigate("/editor")}>
@@ -424,24 +704,36 @@ function StepEdit({ onSkip }: { onSkip: () => void }) {
 
 // ---------------- 第 7 步：发布配置 ----------------
 
-function StepPublish({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void }) {
+function StepPublish({
+  wiz,
+  setWiz,
+}: {
+  wiz: Wizard;
+  setWiz: (w: Wizard) => void;
+}) {
   const toggle = (p: Platform) =>
     setWiz({
       ...wiz,
-      platforms: wiz.platforms.includes(p) ? wiz.platforms.filter((x) => x !== p) : [...wiz.platforms, p],
+      platforms: wiz.platforms.includes(p)
+        ? wiz.platforms.filter((x) => x !== p)
+        : [...wiz.platforms, p],
     });
 
   return (
     <div className="space-y-4">
       <div>
-        <label className="label">发布平台（可仅生成不发布，稍后在发布管理手动发）</label>
+        <label className="label">
+          发布平台（可仅生成不发布，稍后在发布管理手动发）
+        </label>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {PUBLISH_PLATFORMS.map((p) => (
             <button
               key={p}
               onClick={() => toggle(p)}
               className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm transition-all ${
-                wiz.platforms.includes(p) ? "border-brand-from/60 bg-brand-from/10 text-text-1" : "border-stroke bg-white/[0.03] text-text-3"
+                wiz.platforms.includes(p)
+                  ? "border-brand-from/60 bg-brand-from/10 text-text-1"
+                  : "border-stroke bg-white/[0.03] text-text-3"
               }`}
             >
               <PlatformIcon platform={p} size={18} />
@@ -481,8 +773,24 @@ export default function CreatePage() {
   const [wiz, setWiz] = useState<Wizard>(initialWizard);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [quote, setQuote] = useState<PricePreview | null>(null);
+  const [quoting, setQuoting] = useState(false);
   const { current } = useIp();
   const navigate = useNavigate();
+  const { data: moduleCatalog } = useQuery({
+    queryKey: ["catalog", "module-prices"],
+    queryFn: () => catalogApi.modulePrices(),
+  });
+
+  useEffect(() => {
+    setQuote(null);
+  }, [
+    wiz.sourceUrl,
+    wiz.topic,
+    wiz.scriptText,
+    wiz.count,
+    current?.videoDuration,
+  ]);
 
   // Hero 入口参数带入；文案工坊「用它成片」带 scriptId 直接载入文案
   useEffect(() => {
@@ -491,7 +799,10 @@ export default function CreatePage() {
     const scriptId = params.get("scriptId");
     if (scriptId) {
       void contentApi.script(scriptId).then((s) => {
-        setWiz((w) => ({ ...w, scriptText: s.rewrittenText || s.originalText }));
+        setWiz((w) => ({
+          ...w,
+          scriptText: s.rewrittenText || s.originalText,
+        }));
       });
       return;
     }
@@ -504,7 +815,8 @@ export default function CreatePage() {
   const goStep = (key: StepKey) => setParams({ step: key });
 
   const canNext = (): boolean => {
-    if (step === "link") return Boolean(wiz.sourceUrl || wiz.topic || wiz.scriptText);
+    if (step === "link")
+      return Boolean(wiz.sourceUrl || wiz.topic || wiz.scriptText);
     if (step === "script") return wiz.scriptText.trim().length >= 10;
     if (step === "voice") return Boolean(wiz.voiceId);
     if (step === "avatar") return Boolean(wiz.avatarId);
@@ -525,6 +837,15 @@ export default function CreatePage() {
       setError("请先在左侧栏选择 IP");
       return;
     }
+    if (!quote) {
+      setError("请先计算并确认预计积分");
+      return;
+    }
+    const estimatedTotal = quote.estimatedPoints * Math.max(1, wiz.count);
+    if (quote.availablePoints < estimatedTotal) {
+      setError("积分余额不足，请先兑换积分包或续费套餐");
+      return;
+    }
     setSubmitting(true);
     setError("");
     try {
@@ -537,15 +858,41 @@ export default function CreatePage() {
         avatarId: wiz.avatarId || undefined,
         mode: wiz.mode,
         platforms: wiz.platforms,
-        publishAt: wiz.publishAt ? new Date(wiz.publishAt).toISOString() : undefined,
+        publishAt: wiz.publishAt
+          ? new Date(wiz.publishAt).toISOString()
+          : undefined,
         randomize: wiz.randomize,
         count: wiz.count,
+        quoteId: quote.quoteId,
       });
       const first = tasks[0];
       navigate(first ? `/tasks/${first.id}` : "/tasks");
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "创建失败，请重试");
       setSubmitting(false);
+    }
+  };
+
+  const requestQuote = async () => {
+    const request = buildPricePreviewRequest(
+      wiz,
+      moduleCatalog?.items ?? [],
+      current?.videoDuration || 60,
+    );
+    if (request.items.length === 0) {
+      setError("当前没有已发布的模块积分价格，请联系管理员配置价格版本");
+      return;
+    }
+    setQuoting(true);
+    setError("");
+    try {
+      setQuote(await billingApi.pricePreview(request));
+    } catch (e) {
+      setError(
+        e instanceof HttpError ? e.body.message : "积分报价失败，请稍后重试",
+      );
+    } finally {
+      setQuoting(false);
     }
   };
 
@@ -564,23 +911,86 @@ export default function CreatePage() {
         {step === "edit" && <StepEdit onSkip={next} />}
         {step === "publish" && <StepPublish wiz={wiz} setWiz={setWiz} />}
 
+        {step === "publish" && (
+          <section className="mt-5 rounded-xl border border-stroke bg-white/[0.03] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-medium">任务积分报价</h2>
+                <p className="mt-1 text-xs text-text-3">
+                  报价有效 10 分钟，创建任务时冻结预计积分，失败或取消自动释放。
+                </p>
+              </div>
+              <button
+                className="btn-ghost"
+                onClick={() => void requestQuote()}
+                disabled={quoting}
+              >
+                {quoting ? "计算中…" : quote ? "重新计算" : "计算预计积分"}
+              </button>
+            </div>
+            {quote && (
+              <div className="mt-4 space-y-2 text-sm">
+                {quote.items.map((item) => (
+                  <div
+                    key={item.module}
+                    className="flex justify-between text-text-2"
+                  >
+                    <span>{item.name || item.module}</span>
+                    <span className="font-mono">{item.points} 点</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-stroke pt-2 font-medium">
+                  <span>预计合计</span>
+                  <span className="font-mono">
+                    {quote.estimatedPoints * Math.max(1, wiz.count)} 点
+                    {wiz.count > 1 ? `（${wiz.count} 条）` : ""}
+                  </span>
+                </div>
+                <div
+                  className={`text-right text-xs ${quote.availablePoints >= quote.estimatedPoints * Math.max(1, wiz.count) ? "text-success" : "text-danger"}`}
+                >
+                  可用积分 {quote.availablePoints.toLocaleString()}
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+
         {error && (
-          <div className="mt-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>
+          <div className="mt-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {error}
+          </div>
         )}
 
         {/* 底部操作条 */}
         {step !== "edit" && (
           <div className="mt-6 flex items-center justify-between border-t border-stroke pt-4">
-            <button className="btn-ghost" onClick={prev} disabled={stepIdx === 0 || submitting}>
+            <button
+              className="btn-ghost"
+              onClick={prev}
+              disabled={stepIdx === 0 || submitting}
+            >
               ← 上一步
             </button>
             {step !== "publish" ? (
-              <button className="btn-primary" onClick={next} disabled={!canNext()}>
+              <button
+                className="btn-primary"
+                onClick={next}
+                disabled={!canNext()}
+              >
                 下一步 →
               </button>
             ) : (
-              <button className="btn-primary px-8" onClick={submit} disabled={submitting}>
-                {submitting ? "创建中…" : wiz.count > 1 ? `⚡ 批量成片 ×${wiz.count}` : "⚡ 开始成片"}
+              <button
+                className="btn-primary px-8"
+                onClick={submit}
+                disabled={submitting || !quote}
+              >
+                {submitting
+                  ? "创建中…"
+                  : wiz.count > 1
+                    ? `⚡ 批量成片 ×${wiz.count}`
+                    : "⚡ 开始成片"}
               </button>
             )}
           </div>

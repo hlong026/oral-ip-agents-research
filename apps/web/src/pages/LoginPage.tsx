@@ -22,7 +22,9 @@ export default function LoginPage() {
       await login(phone, password);
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof HttpError ? err.body.message : "网络异常，请稍后再试");
+      setError(
+        err instanceof HttpError ? err.body.message : "网络异常，请稍后再试",
+      );
     } finally {
       setLoading(false);
     }
@@ -38,7 +40,9 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold">
             口播<span className="text-grad">IP智能体</span>
           </h1>
-          <p className="mt-2 text-sm text-text-3">爆款复刻 · 声音克隆 · 数字人 · 全平台发布</p>
+          <p className="mt-2 text-sm text-text-3">
+            爆款复刻 · 声音克隆 · 数字人 · 全平台发布
+          </p>
         </div>
 
         <form onSubmit={submit} className="glass-strong space-y-4 p-6">
@@ -71,7 +75,11 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
+          <button
+            type="submit"
+            disabled={loading}
+            className="btn-primary w-full py-2.5"
+          >
             {loading ? "请稍候…" : "登录"}
           </button>
 

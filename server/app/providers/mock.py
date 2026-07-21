@@ -2,6 +2,7 @@
 Mock Provider 实现（PROVIDER_MODE=mock，开箱即用端到端演示）
 - 模拟供应商延迟与产物形态；接入真实供应商仅需 .env 切换 PROVIDER_MODE=real
 """
+
 import asyncio
 import math
 import struct
@@ -47,8 +48,14 @@ def _sine_wav(duration: float, freq: float = 220.0, rate: int = 16000) -> bytes:
         # 叠加两个谐波，听感接近"蜂鸣人声占位"
         v = 0.28 * math.sin(2 * math.pi * freq * i / rate) + 0.12 * math.sin(2 * math.pi * freq * 2 * i / rate)
         frames += struct.pack("<h", int(v * 32767))
-    header = b"RIFF" + struct.pack("<I", 36 + len(frames)) + b"WAVEfmt " + struct.pack(
-        "<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16) + b"data" + struct.pack("<I", len(frames))
+    header = (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(frames))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(frames))
+    )
     return bytes(header) + bytes(frames)
 
 
@@ -133,8 +140,11 @@ class MockParser:
     async def parse_url(self, url: str) -> ParseResult:
         await asyncio.sleep(1.0)
         platform = "douyin"
-        for p, keys in {"douyin": ["douyin", "iesdouyin"], "kuaishou": ["kuaishou", "gifshow"],
-                        "xiaohongshu": ["xiaohongshu", "xhslink"]}.items():
+        for p, keys in {
+            "douyin": ["douyin", "iesdouyin"],
+            "kuaishou": ["kuaishou", "gifshow"],
+            "xiaohongshu": ["xiaohongshu", "xhslink"],
+        }.items():
             if any(k in url.lower() for k in keys):
                 platform = p
                 break
@@ -155,8 +165,7 @@ class MockASR:
 class MockVoice:
     name = "mock-voice"
 
-    async def clone(self, name: str, sample_key: str, consent_token: str,
-                    language: str = "zh") -> str:
+    async def clone(self, name: str, sample_key: str, consent_token: str, language: str = "zh") -> str:
         await asyncio.sleep(2.0)
         return f"mock_task_{uuid.uuid4().hex[:12]}"
 
@@ -200,8 +209,9 @@ class MockAvatar:
         await asyncio.sleep(0.5)
         return f"mock_render_{uuid.uuid4().hex[:12]}"
 
-    async def create_by_tts(self, avatar_id: str, voice_id: str, text: str,
-                            subtitle_opts: dict[str, Any] | None = None) -> str:
+    async def create_by_tts(
+        self, avatar_id: str, voice_id: str, text: str, subtitle_opts: dict[str, Any] | None = None
+    ) -> str:
         await asyncio.sleep(0.5)
         return f"mock_render_{uuid.uuid4().hex[:12]}"
 
@@ -233,8 +243,7 @@ class MockCompose:
         )
         video_key = await save_text("compose", "final.mp4.txt", note)
         cover_key = await save_text("compose", "cover.jpg.txt", f"MOCK COVER: {inp.cover_text}")
-        return ComposeResult(video_key=video_key, cover_key=cover_key,
-                             duration=float(len(inp.subtitle_words) * 0.28))
+        return ComposeResult(video_key=video_key, cover_key=cover_key, duration=float(len(inp.subtitle_words) * 0.28))
 
 
 class MockPublishDriver:
@@ -260,7 +269,15 @@ class MockPublishDriver:
             return None
         return {"sessionId": uuid.uuid4().hex, "nickname": f"{self.platform} 运营号", "platform": self.platform}
 
-    async def publish(self, account_session: dict[str, Any], video_key: str,
-                      title: str, topics: list[str], cover_key: str | None) -> str:
+    async def publish(
+        self,
+        account_session: dict[str, Any],
+        video_key: str,
+        title: str,
+        topics: list[str],
+        cover_key: str | None,
+        scheduled_at: str | None = None,
+        account_id: str = "",
+    ) -> str:
         await asyncio.sleep(1.5)
         return f"mock_post_{self.platform}_{uuid.uuid4().hex[:8]}"

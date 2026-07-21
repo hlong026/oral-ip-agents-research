@@ -5,8 +5,8 @@
 - 超时 30s + 重试 2 次（tenacity），失败抛 StepRecoverableError 触发降级链
 - 凭据从前端设置页动态读取（dynamic_config），保存即时生效无需重启
 """
+
 import json as _json
-from typing import Any
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -80,8 +80,11 @@ class DeepSeekLLM:
             raise StepRecoverableError(f"deepseek 调用失败: {e}") from e
 
     async def rewrite(self, text: str, intensity: str, prompt: str | None = None) -> str:
-        level = {"light": "轻度润色，保持原意", "structure": "保留结构，语义级重写",
-                 "theme": "只借鉴主题，完全重新创作"}.get(intensity, "轻度润色")
+        level = {
+            "light": "轻度润色，保持原意",
+            "structure": "保留结构，语义级重写",
+            "theme": "只借鉴主题，完全重新创作",
+        }.get(intensity, "轻度润色")
         sys = "你是爆款口播文案专家。仿写要求：口语化、有钩子、无抄袭风险。"
         extra = f"\n额外指令：{prompt}" if prompt else ""
         return await self._chat(sys, f"请对以下文案进行{level}：\n{text}{extra}")
@@ -95,8 +98,10 @@ class DeepSeekLLM:
         return await self._mock.check_similarity(text)
 
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]:
-        raw = await self._chat("你是短视频标题党（合规版）",
-                               f"为以下口播稿生成 {count} 组适配{platform}风格的标题+话题标签：\n{script[:400]}")
+        raw = await self._chat(
+            "你是短视频标题党（合规版）",
+            f"为以下口播稿生成 {count} 组适配{platform}风格的标题+话题标签：\n{script[:400]}",
+        )
         return [line.strip() for line in raw.splitlines() if line.strip()][:count]
 
     # ---- 三阶段仿写引擎 ----
@@ -108,6 +113,7 @@ class DeepSeekLLM:
             THEME_EXTRACTION_SYSTEM,
             THEME_EXTRACTION_USER,
         )
+
         if mode == "theme":
             raw = await self._chat(THEME_EXTRACTION_SYSTEM, THEME_EXTRACTION_USER.format(text=text))
         else:
@@ -121,6 +127,7 @@ class DeepSeekLLM:
             OUTLINE_THEME_SYSTEM,
             OUTLINE_THEME_USER,
         )
+
         if intensity == "theme":
             topic = "、".join(structure.get("topic_keywords", ["口播干货"]))
             user = OUTLINE_THEME_USER.format(persona_ctx=persona_ctx, topic=topic, duration=duration)
@@ -141,6 +148,7 @@ class DeepSeekLLM:
 
     async def generate_script(self, outline: str, persona_ctx: str, constraints: dict) -> str:
         from app.modules.content.prompts import SCRIPT_GENERATION_SYSTEM, SCRIPT_GENERATION_USER
+
         duration = constraints.get("duration", 60)
         word_count = int(duration * 3.5)
         user = SCRIPT_GENERATION_USER.format(
@@ -155,10 +163,12 @@ class DeepSeekLLM:
 
     async def polish_light(self, text: str, persona_ctx: str) -> str:
         from app.modules.content.prompts import LIGHT_POLISH_SYSTEM, LIGHT_POLISH_USER
+
         return await self._chat(LIGHT_POLISH_SYSTEM, LIGHT_POLISH_USER.format(persona_ctx=persona_ctx, text=text))
 
     async def validation_rewrite(self, script: str, persona_ctx: str, issues: str) -> str:
         from app.modules.content.prompts import VALIDATION_REWRITE_SYSTEM, VALIDATION_REWRITE_USER
+
         return await self._chat(
             VALIDATION_REWRITE_SYSTEM,
             VALIDATION_REWRITE_USER.format(persona_ctx=persona_ctx, script=script, issues=issues),
@@ -170,7 +180,7 @@ def _parse_json(raw: str) -> dict:
     text = raw.strip()
     if text.startswith("```"):
         lines = text.splitlines()
-        lines = [l for l in lines if not l.strip().startswith("```")]
+        lines = [line for line in lines if not line.strip().startswith("```")]
         text = "\n".join(lines)
     try:
         return _json.loads(text)

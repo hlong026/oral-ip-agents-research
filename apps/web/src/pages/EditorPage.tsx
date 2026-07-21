@@ -56,12 +56,19 @@ export default function EditorPage() {
     queryFn: () => pipelineApi.list("done", 1, 20),
   });
   const candidates = useMemo(
-    () => (doneTasks?.items ?? []).filter((t) => t.steps.some((s) => s.step === "compose" && s.artifacts?.final_video_key)),
+    () =>
+      (doneTasks?.items ?? []).filter((t) =>
+        t.steps.some(
+          (s) => s.step === "compose" && s.artifacts?.final_video_key,
+        ),
+      ),
     [doneTasks],
   );
 
   const task: PipelineTask | undefined =
-    liveTasks[taskId] ?? candidates.find((t) => t.id === taskId) ?? (taskId ? undefined : candidates[0]);
+    liveTasks[taskId] ??
+    candidates.find((t) => t.id === taskId) ??
+    (taskId ? undefined : candidates[0]);
   const effectiveTaskId = task?.id ?? taskId;
 
   const { data: taskDetail, refetch } = useQuery({
@@ -71,8 +78,10 @@ export default function EditorPage() {
   });
   const detail = liveTasks[effectiveTaskId] ?? taskDetail ?? task;
 
-  const videoKey = detail?.steps.find((s) => s.step === "compose")?.artifacts?.final_video_key;
-  const script = detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ?? "";
+  const videoKey = detail?.steps.find((s) => s.step === "compose")?.artifacts
+    ?.final_video_key;
+  const script =
+    detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ?? "";
   const subtitleLines = useMemo(
     () =>
       script
@@ -97,7 +106,12 @@ export default function EditorPage() {
     try {
       // 人工覆盖 edit 步参数 → 重跑 edit 步生成新成片
       await pipelineApi.overrideStep(detail.id, "edit", {
-        subtitle_style: JSON.stringify({ fontSize: cfg.fontSize, color: cfg.color, position: cfg.position, stroke: cfg.stroke }),
+        subtitle_style: JSON.stringify({
+          fontSize: cfg.fontSize,
+          color: cfg.color,
+          position: cfg.position,
+          stroke: cfg.stroke,
+        }),
         bgm_mode: cfg.bgmMode,
         bgm_volume: String(cfg.bgmVolume),
         cover: cfg.cover,
@@ -118,9 +132,15 @@ export default function EditorPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">视频剪辑</h1>
-          <p className="mt-1 text-sm text-text-3">成片微调 · 字幕样式 · BGM · 封面（F-401/402/404）</p>
+          <p className="mt-1 text-sm text-text-3">
+            成片微调 · 字幕样式 · BGM · 封面（F-401/402/404）
+          </p>
         </div>
-        <select className="input h-10 w-72 px-3 py-0 text-sm" value={effectiveTaskId} onChange={(e) => setTaskId(e.target.value)}>
+        <select
+          className="input h-10 w-72 px-3 py-0 text-sm"
+          value={effectiveTaskId}
+          onChange={(e) => setTaskId(e.target.value)}
+        >
           <option value="">选择要精修的成片任务…</option>
           {candidates.map((t) => (
             <option key={t.id} value={t.id}>
@@ -146,16 +166,25 @@ export default function EditorPage() {
             <div className="glass p-4">
               <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
                 <span className="text-4xl">▶</span>
-                <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">1080P</span>
+                <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
+                  1080P
+                </span>
                 {/* 字幕预览：随样式实时变化 */}
                 <span
                   className={`absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
-                    cfg.position === "bottom" ? "bottom-6" : cfg.position === "middle" ? "top-1/2 -translate-y-1/2" : "top-6"
+                    cfg.position === "bottom"
+                      ? "bottom-6"
+                      : cfg.position === "middle"
+                        ? "top-1/2 -translate-y-1/2"
+                        : "top-6"
                   }`}
                   style={{
                     color: cfg.color,
                     fontSize: Math.max(12, cfg.fontSize / 2.2),
-                    textShadow: cfg.stroke > 0 ? `0 0 ${cfg.stroke * 2}px rgba(0,0,0,.9), 0 ${cfg.stroke}px ${cfg.stroke}px rgba(0,0,0,.8)` : "none",
+                    textShadow:
+                      cfg.stroke > 0
+                        ? `0 0 ${cfg.stroke * 2}px rgba(0,0,0,.9), 0 ${cfg.stroke}px ${cfg.stroke}px rgba(0,0,0,.8)`
+                        : "none",
                   }}
                 >
                   {subtitleLines[2] ?? "字幕效果实时预览"}
@@ -164,9 +193,13 @@ export default function EditorPage() {
               <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="min-w-0">
                   <b className="block truncate">{detail.title}</b>
-                  <div className="mt-0.5 text-xs text-text-3">合成完成 · {dirty ? "有未保存修改" : "待微调"}</div>
+                  <div className="mt-0.5 text-xs text-text-3">
+                    合成完成 · {dirty ? "有未保存修改" : "待微调"}
+                  </div>
                 </div>
-                <span className="chip shrink-0 text-[11px]">{videoKey ? "成片就绪" : "合成中"}</span>
+                <span className="chip shrink-0 text-[11px]">
+                  {videoKey ? "成片就绪" : "合成中"}
+                </span>
               </div>
             </div>
 
@@ -177,11 +210,29 @@ export default function EditorPage() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div>
                     <label className="label">字号（{cfg.fontSize}px）</label>
-                    <input type="range" min={32} max={64} value={cfg.fontSize} onChange={(e) => update({ fontSize: Number(e.target.value) })} className="w-full accent-brand-from" />
+                    <input
+                      type="range"
+                      min={32}
+                      max={64}
+                      value={cfg.fontSize}
+                      onChange={(e) =>
+                        update({ fontSize: Number(e.target.value) })
+                      }
+                      className="w-full accent-brand-from"
+                    />
                   </div>
                   <div>
                     <label className="label">描边粗细（{cfg.stroke}px）</label>
-                    <input type="range" min={0} max={6} value={cfg.stroke} onChange={(e) => update({ stroke: Number(e.target.value) })} className="w-full accent-brand-from" />
+                    <input
+                      type="range"
+                      min={0}
+                      max={6}
+                      value={cfg.stroke}
+                      onChange={(e) =>
+                        update({ stroke: Number(e.target.value) })
+                      }
+                      className="w-full accent-brand-from"
+                    />
                   </div>
                   <div>
                     <label className="label">颜色</label>
@@ -207,7 +258,11 @@ export default function EditorPage() {
                           ["bottom", "底部安全区"],
                         ] as const
                       ).map(([k, label]) => (
-                        <button key={k} onClick={() => update({ position: k })} className={`chip px-3 py-1 ${cfg.position === k ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}>
+                        <button
+                          key={k}
+                          onClick={() => update({ position: k })}
+                          className={`chip px-3 py-1 ${cfg.position === k ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+                        >
                           {label}
                         </button>
                       ))}
@@ -233,8 +288,19 @@ export default function EditorPage() {
                 </div>
                 {cfg.bgmMode !== "none" && (
                   <div className="mt-4">
-                    <label className="label">BGM 音量（{cfg.bgmVolume}% · sidechain 自动闪避人声）</label>
-                    <input type="range" min={0} max={100} value={cfg.bgmVolume} onChange={(e) => update({ bgmVolume: Number(e.target.value) })} className="w-full accent-brand-from" />
+                    <label className="label">
+                      BGM 音量（{cfg.bgmVolume}% · sidechain 自动闪避人声）
+                    </label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={cfg.bgmVolume}
+                      onChange={(e) =>
+                        update({ bgmVolume: Number(e.target.value) })
+                      }
+                      className="w-full accent-brand-from"
+                    />
                   </div>
                 )}
               </div>
@@ -253,7 +319,12 @@ export default function EditorPage() {
                       className={`rounded-xl border-2 p-1 ${cfg.cover === k ? "border-brand-to" : "border-transparent"}`}
                     >
                       <div className="flex h-24 items-center justify-center rounded-lg bg-white/5 text-xs text-text-3">
-                        封面 {k} · {k === "A" ? "大字标题" : k === "B" ? "人物特写" : "对比数字"}
+                        封面 {k} ·{" "}
+                        {k === "A"
+                          ? "大字标题"
+                          : k === "B"
+                            ? "人物特写"
+                            : "对比数字"}
                       </div>
                     </button>
                   ))}
@@ -265,16 +336,27 @@ export default function EditorPage() {
                 {error && <span className="text-sm text-danger">{error}</span>}
                 {msg && <span className="text-sm text-success">{msg}</span>}
                 <div className="flex-1" />
-                <button className="btn-ghost text-xs" disabled title="V1.1 剪映草稿导出">
+                <button
+                  className="btn-ghost text-xs"
+                  disabled
+                  title="V1.1 剪映草稿导出"
+                >
                   导出剪映草稿
                 </button>
                 <button className="btn-ghost text-xs" disabled={!videoKey}>
                   导出 MP4
                 </button>
-                <button className="btn-primary px-5" disabled={busy || !dirty} onClick={save}>
+                <button
+                  className="btn-primary px-5"
+                  disabled={busy || !dirty}
+                  onClick={save}
+                >
                   {busy ? "合成中…" : "保存并重新合成"}
                 </button>
-                <Link to={`/publish/jobs?task=${detail.id}`} className="btn-ghost text-xs">
+                <Link
+                  to={`/publish/jobs?task=${detail.id}`}
+                  className="btn-ghost text-xs"
+                >
                   去发布 →
                 </Link>
               </div>
@@ -286,12 +368,19 @@ export default function EditorPage() {
             <div className="glass p-5">
               <div className="mb-3 flex items-center gap-2">
                 <h2 className="font-medium">字幕校对</h2>
-                <span className="chip border-success/40 text-[11px] text-success">ASR 对齐完成</span>
-                <span className="ml-auto text-xs text-text-3">口播文案分行预览</span>
+                <span className="chip border-success/40 text-[11px] text-success">
+                  ASR 对齐完成
+                </span>
+                <span className="ml-auto text-xs text-text-3">
+                  口播文案分行预览
+                </span>
               </div>
               <div className="space-y-1">
                 {subtitleLines.map((line, i) => (
-                  <div key={i} className={`rounded-lg px-3 py-1.5 text-sm ${i === 2 ? "bg-brand-from/10 text-text-1" : "text-text-2 hover:bg-white/5"}`}>
+                  <div
+                    key={i}
+                    className={`rounded-lg px-3 py-1.5 text-sm ${i === 2 ? "bg-brand-from/10 text-text-1" : "text-text-2 hover:bg-white/5"}`}
+                  >
                     {line}
                   </div>
                 ))}

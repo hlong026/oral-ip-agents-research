@@ -1,4 +1,5 @@
 """Mock IM Provider（开发/测试用，定时生成模拟私信）"""
+
 import asyncio
 import logging
 import random
@@ -58,20 +59,20 @@ class MockIMConnection:
 
 class MockIMProvider:
     """Mock 实现：send 只打日志，connect 返回模拟连接"""
+
     name = "mock_im"
     platform = "douyin"
 
     async def connect(self, session: dict[str, Any]) -> MockIMConnection:
         return MockIMConnection(session)
 
-    async def send_message(self, session: dict[str, Any], conversation_id: str,
-                           conversation_short_id: str, ticket: str,
-                           content: str) -> bool:
+    async def send_message(
+        self, session: dict[str, Any], conversation_id: str, conversation_short_id: str, ticket: str, content: str
+    ) -> bool:
         logger.info(f"[MockIM] send → conv={conversation_id}: {content[:50]}")
         return True
 
-    async def create_conversation(self, session: dict[str, Any],
-                                  to_uid: int) -> dict[str, str]:
+    async def create_conversation(self, session: dict[str, Any], to_uid: int) -> dict[str, str]:
         return {
             "conversation_id": f"conv_{to_uid}",
             "conversation_short_id": f"short_{to_uid}",

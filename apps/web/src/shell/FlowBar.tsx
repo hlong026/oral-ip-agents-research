@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
-/** flow-bar 全局六步动线（对齐效果图：13 个流程页显示，settings/account 不显示） */
+/** flow-bar 全局六步动线（对齐效果图：创作流程页显示，账号/套餐页不显示） */
 const FLOW_STEPS = [
   { key: "link", label: "链接/选题", to: "/create?step=link" },
   { key: "script", label: "文案", to: "/scripts" },
@@ -30,7 +30,8 @@ function useActiveStep(): string | null {
     if (pathname.startsWith("/scripts")) return "script";
     if (pathname.startsWith("/assets/voices")) return "voice";
     if (pathname.startsWith("/assets/avatars")) return "avatar";
-    if (pathname.startsWith("/tasks") || pathname.startsWith("/editor")) return "compose";
+    if (pathname.startsWith("/tasks") || pathname.startsWith("/editor"))
+      return "compose";
     if (pathname.startsWith("/publish")) return "publish";
     return null;
   }, [pathname, params]);
@@ -41,7 +42,10 @@ export default function FlowBar() {
   const activeIdx = FLOW_STEPS.findIndex((s) => s.key === active);
 
   return (
-    <div data-testid="flow-bar" className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-stroke px-6 py-2.5">
+    <div
+      data-testid="flow-bar"
+      className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-stroke px-6 py-2.5"
+    >
       {FLOW_STEPS.map((step, i) => {
         const done = activeIdx > i;
         const current = step.key === active;
@@ -59,7 +63,11 @@ export default function FlowBar() {
             >
               <span
                 className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] ${
-                  current ? "bg-white/20" : done ? "bg-success/20" : "bg-white/5"
+                  current
+                    ? "bg-white/20"
+                    : done
+                      ? "bg-success/20"
+                      : "bg-white/5"
                 }`}
               >
                 {done ? "✓" : i + 1}
@@ -67,7 +75,9 @@ export default function FlowBar() {
               {step.label}
             </Link>
             {i < FLOW_STEPS.length - 1 && (
-              <span className={`mx-0.5 h-px w-6 ${done ? "bg-success/50" : "bg-stroke"}`} />
+              <span
+                className={`mx-0.5 h-px w-6 ${done ? "bg-success/50" : "bg-stroke"}`}
+              />
             )}
           </div>
         );

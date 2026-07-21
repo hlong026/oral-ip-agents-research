@@ -36,15 +36,20 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between rounded-card border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
-        <span>ℹ 数据看板为 V1.1 能力（依赖平台数据回流核验 G3），以下为效果预览</span>
+        <span>
+          ℹ 数据看板为 V1.1 能力（依赖平台数据回流核验 G3），以下为效果预览
+        </span>
         <span className="chip border-info/40 text-info">V1.1 上线</span>
       </div>
 
       {/* 首屏：一个核心结论 */}
       <div className="glass-strong p-6">
-        <div className="text-xs text-text-3">本周洞察 · IP：{current?.name ?? "—"} · 近 7 天</div>
+        <div className="text-xs text-text-3">
+          本周洞察 · IP：{current?.name ?? "—"} · 近 7 天
+        </div>
         <h1 className="mt-2 text-2xl font-bold leading-snug">
-          「节税」主题播放量是平均的 <span className="text-grad">3.2 倍</span>，<br className="hidden md:block" />
+          「节税」主题播放量是平均的 <span className="text-grad">3.2 倍</span>，
+          <br className="hidden md:block" />
           建议下周加大该选题占比。
         </h1>
       </div>
@@ -55,7 +60,11 @@ export default function AnalyticsPage() {
           <div key={s.k} className="glass card-hover p-4">
             <div className="text-xs text-text-3">{s.k}</div>
             <div className="mt-1 text-2xl font-black">{s.v}</div>
-            <div className={`mt-1 text-xs ${s.up ? "text-success" : "text-danger"}`}>{s.d}</div>
+            <div
+              className={`mt-1 text-xs ${s.up ? "text-success" : "text-danger"}`}
+            >
+              {s.d}
+            </div>
           </div>
         ))}
       </div>
@@ -69,9 +78,15 @@ export default function AnalyticsPage() {
           </div>
           <div className="flex h-44 items-end gap-3">
             {WEEK_BARS.map((b) => (
-              <div key={b.day} className="flex flex-1 flex-col items-center gap-2">
+              <div
+                key={b.day}
+                className="flex flex-1 flex-col items-center gap-2"
+              >
                 <div className="flex h-36 w-full items-end rounded-lg bg-white/5">
-                  <div className="w-full rounded-lg bg-brand-grad-x" style={{ height: `${b.h}%` }} />
+                  <div
+                    className="w-full rounded-lg bg-brand-grad-x"
+                    style={{ height: `${b.h}%` }}
+                  />
                 </div>
                 <span className="text-[11px] text-text-3">{b.day}</span>
               </div>
@@ -93,7 +108,10 @@ export default function AnalyticsPage() {
                   <span className="text-text-3">{p.pct}%</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
-                  <div className="h-full rounded-full bg-brand-grad-x" style={{ width: `${p.pct}%` }} />
+                  <div
+                    className="h-full rounded-full bg-brand-grad-x"
+                    style={{ width: `${p.pct}%` }}
+                  />
                 </div>
               </div>
             ))}
@@ -112,11 +130,15 @@ export default function AnalyticsPage() {
         <div className="grid gap-3 md:grid-cols-3">
           {TOP_VIDEOS.map((v) => (
             <div key={v.title} className="glass card-hover p-4">
-              <div className="flex h-28 items-center justify-center rounded-lg bg-white/5 text-sm text-text-3">封面</div>
+              <div className="flex h-28 items-center justify-center rounded-lg bg-white/5 text-sm text-text-3">
+                封面
+              </div>
               <div className="mt-3 text-sm font-medium">{v.title}</div>
               <div className="mt-2 flex gap-1.5">
                 <span className="chip text-[11px]">{v.platform}</span>
-                <span className="chip border-success/40 text-[11px] text-success">{v.views}</span>
+                <span className="chip border-success/40 text-[11px] text-success">
+                  {v.views}
+                </span>
               </div>
             </div>
           ))}

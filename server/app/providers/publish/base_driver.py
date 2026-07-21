@@ -3,6 +3,7 @@ SAU PublishDriver 公共基类
 - 封装 Cookie 文件管理、浏览器槽位、错误转换等公共逻辑
 - 各平台 Driver 继承本类，实现 qrcode_login / check_login / publish
 """
+
 import asyncio
 import uuid
 from typing import Any
@@ -12,7 +13,13 @@ from app.core.storage import local_path
 from app.providers.base import StepRecoverableError
 
 from .browser_pool import BrowserSlot
-from .cookie_manager import file_to_session, session_to_file
+from .cookie_manager import (
+    cleanup_cookie_file,
+    cleanup_cookie_path,
+    create_private_cookie_path,
+    file_to_session,
+    session_to_file,
+)
 from .sau_conf import setup_sau
 
 logger = get_logger("oral.publish.driver")
@@ -95,21 +102,31 @@ class SAUPublishDriverBase:
                 session["nickname"] = session_data.get("nickname") or f"{self._platform_cn}账号"
             except Exception:
                 session = {"nickname": f"{self._platform_cn}账号"}
-            # 清理
-            del self._login_sessions[ticket]
+            finally:
+                cleanup_cookie_path(cookie_path)
+                del self._login_sessions[ticket]
             return session
         if session_data["status"] == "failed":
+            cleanup_cookie_path(session_data["account_file"])
             del self._login_sessions[ticket]
             return {"_failed": True, "message": session_data.get("error", "登录失败，请重试")}
         info = session_data.get("qrcode_info") or {}
         return {"_waiting": True, "qrcode_url": info.get("image_data_url", "")}
 
-    async def publish(self, account_session: dict[str, Any], video_key: str,
-                      title: str, topics: list[str], cover_key: str | None,
-                      scheduled_at: str | None = None, account_id: str = "") -> str:
+    async def publish(
+        self,
+        account_session: dict[str, Any],
+        video_key: str,
+        title: str,
+        topics: list[str],
+        cover_key: str | None,
+        scheduled_at: str | None = None,
+        account_id: str = "",
+    ) -> str:
         """执行发布，返回 post_id（平台作品ID）"""
         # 1. Cookie → 临时文件
         import json
+
         session_json = json.dumps(account_session, ensure_ascii=False)
         cookie_file = session_to_file(session_json, account_id or "tmp", self.platform)
 
@@ -141,10 +158,13 @@ class SAUPublishDriverBase:
             raise
         except Exception as e:
             raise StepRecoverableError(f"{self.platform} 发布失败: {e}") from e
+        finally:
+            cleanup_cookie_file(account_id or "tmp", self.platform)
 
     async def check_cookie_valid(self, account_session: dict[str, Any], account_id: str = "") -> bool:
         """检测 Cookie 是否仍然有效（心跳用）"""
         import json
+
         session_json = json.dumps(account_session, ensure_ascii=False)
         cookie_file = session_to_file(session_json, account_id or "hb", self.platform)
         try:
@@ -152,6 +172,8 @@ class SAUPublishDriverBase:
                 return await self._do_check_cookie(cookie_file)
         except Exception:
             return False
+        finally:
+            cleanup_cookie_file(account_id or "hb", self.platform)
 
     # ============ 子类必须实现的抽象方法 ============
 
@@ -159,8 +181,9 @@ class SAUPublishDriverBase:
         """执行平台登录流程（子类实现）"""
         raise NotImplementedError
 
-    async def _do_publish(self, cookie_file: str, video_path: str, title: str,
-                          topics: list[str], cover_path: str | None, publish_date) -> str:
+    async def _do_publish(
+        self, cookie_file: str, video_path: str, title: str, topics: list[str], cover_path: str | None, publish_date
+    ) -> str:
         """执行平台发布（子类实现），返回 post_id"""
         raise NotImplementedError
 
@@ -191,6 +214,7 @@ class SAUPublishDriverBase:
             from patchright.async_api import async_playwright
 
             from app.core.config import get_settings
+
             headless = get_settings().publish_browser_headless
 
             async with async_playwright() as pw:
@@ -205,6 +229,7 @@ class SAUPublishDriverBase:
                 # ② 嗅探准备：收集可能含用户信息的 JSON 响应
                 sniffed: list[Any] = []
                 if self._sniff_keywords:
+
                     async def _on_response(resp: Any) -> None:
                         try:
                             ctype = resp.headers.get("content-type") or ""
@@ -214,6 +239,7 @@ class SAUPublishDriverBase:
                                 sniffed.append(await resp.json())
                         except Exception:
                             pass
+
                     page.on("response", _on_response)
 
                 await page.goto(self._nickname_url, wait_until="domcontentloaded", timeout=30000)
@@ -307,8 +333,7 @@ class SAUPublishDriverBase:
     # ============ 工具方法 ============
 
     def _make_login_cookie_path(self, ticket: str) -> str:
-        from .cookie_manager import get_cookie_dir
-        return str(get_cookie_dir() / f"{self.platform}_login_{ticket}.json")
+        return create_private_cookie_path(f"{self.platform}_login_{ticket}.json")
 
     @staticmethod
     def _parse_schedule(scheduled_at: str | None):
@@ -316,6 +341,7 @@ class SAUPublishDriverBase:
         if not scheduled_at:
             return 0
         from datetime import datetime
+
         try:
             dt = datetime.fromisoformat(scheduled_at)
             return dt

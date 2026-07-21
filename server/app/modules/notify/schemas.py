@@ -1,4 +1,5 @@
 """notify 出入参"""
+
 from pydantic import BaseModel
 
 

@@ -4,6 +4,7 @@
 - 异步写入，不阻塞主业务流程
 - 与 structlog stdout 日志互为补充（stdout 用于实时告警，DB 用于合规追溯）
 """
+
 import uuid
 from datetime import UTC, datetime
 
@@ -31,8 +32,9 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
-async def write_audit(event: str, *, user_id: str = "", trace_id: str = "",
-                      task_id: str = "", detail: str = "") -> None:
+async def write_audit(
+    event: str, *, user_id: str = "", trace_id: str = "", task_id: str = "", detail: str = ""
+) -> None:
     """
     异步写入审计日志（fire-and-forget，失败仅记 warning 不影响主流程）
     使用独立 Session 避免与业务事务耦合。
@@ -42,13 +44,15 @@ async def write_audit(event: str, *, user_id: str = "", trace_id: str = "",
     logger = get_logger("oral.audit")
     try:
         async with SessionLocal() as db:
-            db.add(AuditLog(
-                event=event,
-                user_id=user_id,
-                trace_id=trace_id,
-                task_id=task_id,
-                detail=detail[:2000],
-            ))
+            db.add(
+                AuditLog(
+                    event=event,
+                    user_id=user_id,
+                    trace_id=trace_id,
+                    task_id=task_id,
+                    detail=detail[:2000],
+                )
+            )
             await db.commit()
     except Exception as e:  # noqa: BLE001
-        logger.warning("audit_write_failed", event=event, error=str(e)[:200])
+        logger.warning("audit_write_failed", audit_event=event, error=str(e)[:200])

@@ -5,6 +5,7 @@ content 业务编排（F-101~F-106）
 ASR 智能分流：短音频(≤5min)走Flash同步 / 长音频走异步轮询
 日志：LLM 调用完成（§10.6.8-B #3）
 """
+
 import json
 import time
 from datetime import UTC
@@ -17,16 +18,23 @@ from app.core.storage import save_bytes
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import probe_duration
 from app.providers.registry import registry
-from app.providers.url_resolver import Platform, resolve_input
+from app.providers.url_resolver import resolve_input
 
 from . import repository as repo
 from .models import Script
-from .schemas import ParseOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut, WordTsOut
+from .schemas import ParseOut, RewriteOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut, WordTsOut
 
 logger = get_logger("oral.content")
 
 
-async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | None) -> ParseOut:
+async def parse_url(
+    db: AsyncSession,
+    user_id: str,
+    url: str,
+    persona_id: str | None,
+    verified_duration_seconds: float | None = None,
+    require_verified_duration: bool = False,
+) -> ParseOut:
     """链接解析 → 文案优先 / ASR 转写 → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
@@ -34,17 +42,16 @@ async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | 
 
     # 尝试 Douyidou 完整解析（获取文案+视频直链）
     douyidou_result: DouyidouParseResult | None = None
-    try:
-        parser = DouyidouParser()
-        douyidou_result = await parser.parse_url_full(resolved.url)
-    except Exception as e:
-        logger.warning(f"Douyidou 完整解析失败，走降级链: {e}")
+    if await registry.provider_enabled("douyidou"):
+        try:
+            parser = DouyidouParser()
+            douyidou_result = await parser.parse_url_full(resolved.url)
+        except Exception as e:
+            logger.warning(f"Douyidou 完整解析失败，走降级链: {e}")
 
     # 文案优先策略：Douyidou 已返回 text 时直接使用（跳过ASR，零成本）
     if douyidou_result and douyidou_result.text:
-        return await _save_text_result(
-            db, user_id, persona_id, resolved.url, douyidou_result
-        )
+        return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
 
     # 无文案：走 ASR 转写（需要视频直链）
     video_url = douyidou_result.video_url if douyidou_result else None
@@ -54,9 +61,7 @@ async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | 
 
     if not video_url:
         # 降级链兜底
-        parse_result, _ = await registry.run_with_fallback(
-            "parse", registry.parse_chain, "parse_url", resolved.url
-        )
+        parse_result, _ = await registry.run_with_fallback("parse", registry.parse_chain, "parse_url", resolved.url)
         video_url = parse_result.video_key
         platform = parse_result.platform
         title = parse_result.title
@@ -64,9 +69,20 @@ async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | 
     if not video_url:
         return ParseOut(transcript=None, degraded=True, platform=platform, title=title)
 
-    # 探测视频时长（用于 ASR 分流决策：≤阈值走Flash同步，>阈值走异步）
     known_dur = douyidou_result.duration_sec if douyidou_result else None
-    duration_sec = await probe_duration(video_url, platform=platform, known_duration=known_dur)
+    duration_sec = verified_duration_seconds or await probe_duration(
+        video_url,
+        platform=platform,
+        known_duration=known_dur,
+    )
+    if require_verified_duration and duration_sec is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_DURATION_UNVERIFIED",
+                "message": "无法验证链接媒体时长，请上传本地文件后重试",
+            },
+        )
     logger.info(f"ASR 分流决策: duration={duration_sec}, threshold={300}s")
 
     # ASR 转写（直传视频URL，按时长智能分流）
@@ -74,45 +90,67 @@ async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | 
         "asr", registry.asr_chain, "transcribe", video_url, duration_sec=duration_sec
     )
     transcript = TranscriptOut(
-        text=tr.text, duration=tr.duration, language=tr.language,
+        text=tr.text,
+        duration=tr.duration,
+        language=tr.language,
         words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in tr.words],
     )
     script = await repo.create(
-        db, user_id=user_id, persona_id=persona_id or "",
-        title=title or "解析文案", source_url=resolved.url, platform=platform,
+        db,
+        user_id=user_id,
+        persona_id=persona_id or "",
+        title=title or "解析文案",
+        source_url=resolved.url,
+        platform=platform,
         original_text=tr.text,
-        words_json=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
-                              ensure_ascii=False),
+        words_json=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in tr.words], ensure_ascii=False),
     )
     return ParseOut(
-        transcript=transcript, degraded=False, platform=platform,
-        title=title, scriptId=script.id, cover=cover,
+        transcript=transcript,
+        degraded=False,
+        platform=platform,
+        title=title,
+        scriptId=script.id,
+        cover=cover,
         author=douyidou_result.author if douyidou_result else None,
     )
 
 
 async def _save_text_result(
-    db: AsyncSession, user_id: str, persona_id: str | None,
-    source_url: str, result: DouyidouParseResult
+    db: AsyncSession, user_id: str, persona_id: str | None, source_url: str, result: DouyidouParseResult
 ) -> ParseOut:
     """Douyidou 已返回文案时直接落库（跳过ASR，零成本）"""
     text = result.text or ""
     script = await repo.create(
-        db, user_id=user_id, persona_id=persona_id or "",
-        title=result.title or text[:20], source_url=source_url,
-        platform=result.platform, original_text=text, words_json="[]",
+        db,
+        user_id=user_id,
+        persona_id=persona_id or "",
+        title=result.title or text[:20],
+        source_url=source_url,
+        platform=result.platform,
+        original_text=text,
+        words_json="[]",
     )
     logger.info(f"文案优先命中，跳过ASR: platform={result.platform}, text_len={len(text)}")
     return ParseOut(
         transcript=TranscriptOut(text=text, words=[], duration=0, language="zh"),
-        degraded=False, platform=result.platform,
-        title=result.title, scriptId=script.id, cover=result.cover,
+        degraded=False,
+        platform=result.platform,
+        title=result.title,
+        scriptId=script.id,
+        cover=result.cover,
         author=result.author or None,
     )
 
 
 async def parse_by_id(
-    db: AsyncSession, user_id: str, video_id: str, platform: str, persona_id: str | None
+    db: AsyncSession,
+    user_id: str,
+    video_id: str,
+    platform: str,
+    persona_id: str | None,
+    verified_duration_seconds: float | None = None,
+    require_verified_duration: bool = False,
 ) -> ParseOut:
     """通过视频ID + 平台解析（内部拼接URL后走统一链路）"""
     if platform == "douyin":
@@ -121,36 +159,99 @@ async def parse_by_id(
         url = f"https://www.xiaohongshu.com/explore/{video_id}"
     else:
         url = video_id  # 透传
-    return await parse_url(db, user_id, url, persona_id)
+    return await parse_url(
+        db,
+        user_id,
+        url,
+        persona_id,
+        verified_duration_seconds,
+        require_verified_duration,
+    )
 
 
-async def parse_upload(db: AsyncSession, user_id: str, filename: str, data: bytes,
-                       persona_id: str | None) -> ParseOut:
+async def probe_url_duration(url: str, *, required: bool) -> float | None:
+    """在报价前解析直链，并只返回供应商值或 ffprobe 验证值。"""
+    resolved = resolve_input(url)
+    result: DouyidouParseResult | None = None
+    if await registry.provider_enabled("douyidou"):
+        try:
+            result = await DouyidouParser().parse_url_full(resolved.url)
+        except Exception as exc:
+            logger.warning(f"Douyidou 时长探测失败，走降级链: {exc}")
+
+    video_url = result.video_url if result else None
+    platform = result.platform if result else resolved.platform.value
+    if not video_url:
+        try:
+            parsed, _ = await registry.run_with_fallback(
+                "parse",
+                registry.parse_chain,
+                "parse_url",
+                resolved.url,
+            )
+            video_url = parsed.video_key
+            platform = parsed.platform
+        except Exception as exc:
+            logger.warning(f"链接直链解析失败，无法探测时长: {exc}")
+
+    duration = await probe_duration(
+        video_url or "",
+        platform=platform,
+        known_duration=result.duration_sec if result else None,
+    )
+    if required and duration is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_DURATION_UNVERIFIED",
+                "message": "无法验证链接媒体时长，请上传本地文件后重试",
+            },
+        )
+    return duration
+
+
+async def parse_upload(
+    db: AsyncSession,
+    user_id: str,
+    filename: str,
+    data: bytes,
+    persona_id: str | None,
+    duration_seconds: float | None = None,
+) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
     key = await save_bytes("uploads", filename, data)
     # 按文件大小估算时长（用于 ASR 分流决策，短视频可走 Flash 同步）
-    estimated_dur = len(data) / 300_000  # 默认码率 ~2.4Mbps
+    verified_duration = duration_seconds or len(data) / 300_000
     tr, _ = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", key, duration_sec=estimated_dur
+        "asr", registry.asr_chain, "transcribe", key, duration_sec=verified_duration
     )
     script = await repo.create(
-        db, user_id=user_id, persona_id=persona_id or "", title=filename, platform="upload",
+        db,
+        user_id=user_id,
+        persona_id=persona_id or "",
+        title=filename,
+        platform="upload",
         original_text=tr.text,
-        words_json=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
-                              ensure_ascii=False),
+        words_json=json.dumps([{"word": w.word, "start": w.start, "end": w.end} for w in tr.words], ensure_ascii=False),
     )
     return ParseOut(
-        transcript=TranscriptOut(text=tr.text, duration=tr.duration, language=tr.language,
-                                 words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in tr.words]),
-        degraded=True, platform="upload", title=filename, scriptId=script.id,
+        transcript=TranscriptOut(
+            text=tr.text,
+            duration=tr.duration,
+            language=tr.language,
+            words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in tr.words],
+        ),
+        degraded=True,
+        platform="upload",
+        title=filename,
+        scriptId=script.id,
     )
 
 
-async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
-                  prompt: str | None, script_id: str | None) -> dict:
+async def rewrite(
+    db: AsyncSession, user_id: str, text: str, intensity: str, prompt: str | None, script_id: str | None
+) -> RewriteOut:
     """三阶段IP仿写引擎：结构拆解 → IP化大纲 → 全文生成+校验闭环"""
-    from .schemas import RewriteOut
-
     start_time = time.perf_counter()
     # 人设引擎注入（F-701）
     persona_ctx = ""
@@ -159,16 +260,18 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         s = await repo.get(db, script_id, user_id)
         if s and s.persona_id:
             from app.modules.ipasset.repository import get as get_persona
+
             persona = await get_persona(db, s.persona_id, user_id)
             if persona:
                 from app.modules.ipasset.service import persona_prompt_context
+
                 persona_ctx = persona_prompt_context(persona)
 
     # 如果没有通过 script_id 找到 persona，尝试用户活跃 persona
     if not persona_ctx:
-        from app.modules.ipasset.service import get_active_persona_id
         from app.modules.ipasset.repository import get as get_persona
-        from app.modules.ipasset.service import persona_prompt_context
+        from app.modules.ipasset.service import get_active_persona_id, persona_prompt_context
+
         active_id = await get_active_persona_id(db, user_id)
         if active_id:
             persona = await get_persona(db, active_id, user_id)
@@ -186,8 +289,7 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         if persona_ctx:
             result = await llm.polish_light(text, persona_ctx)
         else:
-            result, _ = await registry.run_with_fallback(
-                "llm", registry.llm_chain, "rewrite", text, "light", prompt)
+            result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "rewrite", text, "light", prompt)
         # 禁忌词校验
         result, passed = _validate_taboo(result, taboo_words, avoid_topics)
         return RewriteOut(text=result, validationPassed=passed)
@@ -221,8 +323,7 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         if found_avoid:
             issues.append(f"涉及回避话题：{'、'.join(found_avoid)}")
         # 去重检测
-        sim_result, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", result)
+        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result)
         final_score = sim_result.score
         if sim_result.score > 60:
             issues.append(f"与原文相似度偏高（{sim_result.score:.0f}分），需降低重复度")
@@ -237,8 +338,7 @@ async def rewrite(db: AsyncSession, user_id: str, text: str, intensity: str,
         result = await llm.validation_rewrite(result, persona_ctx, "\n".join(issues))
     else:
         # 循环耗尽（文本被重写过），重新检测最终相似度
-        sim_result, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", result)
+        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result)
         final_score = sim_result.score
         validation_passed = sim_result.score <= 60
 
@@ -298,13 +398,19 @@ async def topics(keyword: str) -> list[str]:
     return result
 
 
-async def create_script(db: AsyncSession, user_id: str, persona_id: str | None,
-                        title: str, text: str, platform: str, topic: str | None) -> ScriptOut:
+async def create_script(
+    db: AsyncSession, user_id: str, persona_id: str | None, title: str, text: str, platform: str, topic: str | None
+) -> ScriptOut:
     """手动创建文案资产（选题生成 / 直接编写入口），与解析产物同构"""
     script = await repo.create(
-        db, user_id=user_id, persona_id=persona_id or "",
+        db,
+        user_id=user_id,
+        persona_id=persona_id or "",
         title=title or (topic or text[:20] or "手动文案"),
-        source_url="", platform=platform, original_text=text, words_json="[]",
+        source_url="",
+        platform=platform,
+        original_text=text,
+        words_json="[]",
     )
     return to_out(script)
 
@@ -323,8 +429,13 @@ async def get_script(db: AsyncSession, user_id: str, script_id: str) -> ScriptOu
 
 def to_out(s: Script) -> ScriptOut:
     return ScriptOut(
-        id=s.id, title=s.title, sourceUrl=s.source_url, platform=s.platform,
-        originalText=s.original_text, rewrittenText=s.rewritten_text,
-        similarityScore=s.similarity_score, status=s.status,
+        id=s.id,
+        title=s.title,
+        sourceUrl=s.source_url,
+        platform=s.platform,
+        originalText=s.original_text,
+        rewrittenText=s.rewritten_text,
+        similarityScore=s.similarity_score,
+        status=s.status,
         createdAt=s.created_at.astimezone(UTC).isoformat(),
     )

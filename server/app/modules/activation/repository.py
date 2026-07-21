@@ -1,4 +1,5 @@
 """activation 数据访问层"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
@@ -8,7 +9,10 @@ from .models import ActivationBatch, ActivationCode, UserSubscription
 
 
 async def get_code_by_value(db: AsyncSession, code: str) -> ActivationCode | None:
-    res = await db.execute(select(ActivationCode).where(ActivationCode.code == code))
+    from .code_generator import hash_code
+
+    digest = hash_code(code)
+    res = await db.execute(select(ActivationCode).where(ActivationCode.code.in_([digest, code])))
     return res.scalar_one_or_none()
 
 
@@ -19,7 +23,7 @@ async def mark_code_used(db: AsyncSession, code_id: str, user_id: str) -> bool:
         .where(ActivationCode.id == code_id, ActivationCode.status == "unused")
         .values(status="used", bound_user_id=user_id, activated_at=datetime.now(UTC))
     )
-    return res.rowcount > 0  # type: ignore[union-attr]
+    return int(getattr(res, "rowcount", 0) or 0) > 0
 
 
 async def create_codes(db: AsyncSession, codes: list[ActivationCode]) -> None:
@@ -36,9 +40,7 @@ async def create_batch(db: AsyncSession, batch: ActivationBatch) -> ActivationBa
 
 async def increment_batch_used(db: AsyncSession, batch_id: str) -> None:
     await db.execute(
-        update(ActivationBatch)
-        .where(ActivationBatch.id == batch_id)
-        .values(used_count=ActivationBatch.used_count + 1)
+        update(ActivationBatch).where(ActivationBatch.id == batch_id).values(used_count=ActivationBatch.used_count + 1)
     )
 
 
@@ -71,7 +73,12 @@ async def list_codes(
 async def list_batches(db: AsyncSession, page: int = 1, page_size: int = 50) -> tuple[list[ActivationBatch], int]:
     count_q = select(func.count()).select_from(ActivationBatch)
     total = (await db.execute(count_q)).scalar() or 0
-    q = select(ActivationBatch).order_by(ActivationBatch.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    q = (
+        select(ActivationBatch)
+        .order_by(ActivationBatch.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     rows = (await db.execute(q)).scalars().all()
     return list(rows), total
 
@@ -82,7 +89,7 @@ async def revoke_code(db: AsyncSession, code_id: str) -> bool:
         .where(ActivationCode.id == code_id, ActivationCode.status == "unused")
         .values(status="revoked")
     )
-    return res.rowcount > 0  # type: ignore[union-attr]
+    return int(getattr(res, "rowcount", 0) or 0) > 0
 
 
 async def revoke_batch(db: AsyncSession, batch_id: str) -> int:
@@ -91,13 +98,11 @@ async def revoke_batch(db: AsyncSession, batch_id: str) -> int:
         .where(ActivationCode.batch_id == batch_id, ActivationCode.status == "unused")
         .values(status="revoked")
     )
-    return res.rowcount  # type: ignore[return-value]
+    return int(getattr(res, "rowcount", 0) or 0)
 
 
 async def code_stats(db: AsyncSession) -> dict[str, int]:
-    rows = await db.execute(
-        select(ActivationCode.status, func.count()).group_by(ActivationCode.status)
-    )
+    rows = await db.execute(select(ActivationCode.status, func.count()).group_by(ActivationCode.status))
     stats = {row[0]: row[1] for row in rows.all()}
     return {
         "total": sum(stats.values()),

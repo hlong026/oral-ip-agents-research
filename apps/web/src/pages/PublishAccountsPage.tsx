@@ -1,8 +1,19 @@
-import { HttpError, imApi, publishApi, type IMListenerStatus } from "@oral/api-client";
-import { PLATFORM_NAMES, PUBLISH_PLATFORMS, type Platform, type PublishAccount } from "@oral/types";
+import {
+  HttpError,
+  imApi,
+  publishApi,
+  type IMListenerStatus,
+} from "@oral/api-client";
+import {
+  PLATFORM_NAMES,
+  PUBLISH_PLATFORMS,
+  type Platform,
+  type PublishAccount,
+} from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
+import { IM_ENABLED } from "../config/features";
 
 interface QrSession {
   platform: Platform;
@@ -12,7 +23,15 @@ interface QrSession {
 }
 
 /** 扫码授权弹层（F-502：qrcode 发起 → 2s 轮询 → 成功/过期；等待中同步刷新后的新二维码） */
-function QrPanel({ session, onClose, onSuccess }: { session: QrSession; onClose: () => void; onSuccess: () => void }) {
+function QrPanel({
+  session,
+  onClose,
+  onSuccess,
+}: {
+  session: QrSession;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [status, setStatus] = useState(session.status);
   const [qrUrl, setQrUrl] = useState(session.qrcodeUrl);
 
@@ -20,7 +39,10 @@ function QrPanel({ session, onClose, onSuccess }: { session: QrSession; onClose:
     if (status !== "waiting") return;
     const timer = setInterval(async () => {
       try {
-        const res = await publishApi.qrcodePoll(session.ticket, session.platform);
+        const res = await publishApi.qrcodePoll(
+          session.ticket,
+          session.platform,
+        );
         // 平台二维码过期后后端会自动刷新，轮询拿到新图立即替换
         if (res.qrcodeUrl) setQrUrl(res.qrcodeUrl);
         setStatus(res.status);
@@ -39,19 +61,31 @@ function QrPanel({ session, onClose, onSuccess }: { session: QrSession; onClose:
     <div className="glass-strong flex items-center gap-4 border-brand-from/40 p-4">
       <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-white p-2">
         {qrUrl ? (
-          <img src={qrUrl} alt="授权二维码" className="h-full w-full object-contain" />
+          <img
+            src={qrUrl}
+            alt="授权二维码"
+            className="h-full w-full object-contain"
+          />
         ) : (
           <span className="text-4xl">▦</span>
         )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="font-medium">
-          <PlatformIcon platform={session.platform} size={18} /> 绑定{PLATFORM_NAMES[session.platform]}账号
+          <PlatformIcon platform={session.platform} size={18} /> 绑定
+          {PLATFORM_NAMES[session.platform]}账号
         </div>
         <div className="mt-1 text-sm text-text-3">
-          {status === "waiting" && "请使用手机 App 扫码，并在手机上确认授权（二维码过期会自动刷新）"}
-          {status === "success" && <span className="text-success">✓ 授权成功，正在写入账号…</span>}
-          {status === "expired" && <span className="text-warning">授权未完成或二维码已过期，请关闭后重新发起</span>}
+          {status === "waiting" &&
+            "请使用手机 App 扫码，并在手机上确认授权（二维码过期会自动刷新）"}
+          {status === "success" && (
+            <span className="text-success">✓ 授权成功，正在写入账号…</span>
+          )}
+          {status === "expired" && (
+            <span className="text-warning">
+              授权未完成或二维码已过期，请关闭后重新发起
+            </span>
+          )}
         </div>
       </div>
       <button className="btn-ghost px-3 py-1 text-xs" onClick={onClose}>
@@ -90,7 +124,12 @@ export default function PublishAccountsPage() {
     setError("");
     try {
       const res = await publishApi.qrcodeStart(platform);
-      setQr({ platform, ticket: res.ticket, qrcodeUrl: res.qrcodeUrl, status: "waiting" });
+      setQr({
+        platform,
+        ticket: res.ticket,
+        qrcodeUrl: res.qrcodeUrl,
+        status: "waiting",
+      });
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "发起扫码授权失败");
     } finally {
@@ -103,7 +142,12 @@ export default function PublishAccountsPage() {
     setError("");
     try {
       const res = await publishApi.reauth(account.id);
-      setQr({ platform: account.platform, ticket: res.ticket, qrcodeUrl: res.qrcodeUrl, status: "waiting" });
+      setQr({
+        platform: account.platform,
+        ticket: res.ticket,
+        qrcodeUrl: res.qrcodeUrl,
+        status: "waiting",
+      });
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "发起重新授权失败");
     } finally {
@@ -148,7 +192,9 @@ export default function PublishAccountsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">账号管理</h1>
-          <p className="mt-1 text-sm text-text-3">平台账号绑定 · 登录态巡检 · 授权续期（F-501/502）</p>
+          <p className="mt-1 text-sm text-text-3">
+            平台账号绑定 · 登录态巡检 · 授权续期（F-501/502）
+          </p>
         </div>
         <span className="chip text-[11px]">每日 06:00 自动巡检登录态</span>
       </div>
@@ -157,14 +203,26 @@ export default function PublishAccountsPage() {
       {expired.length > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3">
           <span className="text-sm text-danger">
-            ⚠ {expired.map((a) => `${a.platformName}账号「${a.nickname}」`).join("、")}登录态已过期，关联发布任务被阻塞。
+            ⚠{" "}
+            {expired
+              .map((a) => `${a.platformName}账号「${a.nickname}」`)
+              .join("、")}
+            登录态已过期，关联发布任务被阻塞。
           </span>
-          <button className="btn-primary px-3 py-1 text-xs" disabled={busyId === expired[0]!.id} onClick={() => void reauth(expired[0]!)}>
+          <button
+            className="btn-primary px-3 py-1 text-xs"
+            disabled={busyId === expired[0]!.id}
+            onClick={() => void reauth(expired[0]!)}
+          >
             扫码重新授权
           </button>
         </div>
       )}
-      {error && <div className="rounded-card border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
+      {error && (
+        <div className="rounded-card border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
       {/* 扫码授权面板 */}
       {qr && (
@@ -182,7 +240,9 @@ export default function PublishAccountsPage() {
       <div className="glass p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-medium">已绑定账号（{list.length}）</h2>
-          <span className="text-xs text-text-3">Cookie 加密存 PG · 会话态 Redis</span>
+          <span className="text-xs text-text-3">
+            Cookie 加密存 PG · 会话态 Redis
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -197,10 +257,14 @@ export default function PublishAccountsPage() {
             </thead>
             <tbody>
               {list.map((a) => (
-                <tr key={a.id} className="border-b border-stroke/50 last:border-0">
+                <tr
+                  key={a.id}
+                  className="border-b border-stroke/50 last:border-0"
+                >
                   <td className="py-2.5 pr-3">
                     <span className="chip text-[11px]">
-                      <PlatformIcon platform={a.platform} size={14} /> {a.platformName}
+                      <PlatformIcon platform={a.platform} size={14} />{" "}
+                      {a.platformName}
                     </span>
                   </td>
                   <td className="py-2.5 pr-3 font-medium">
@@ -212,7 +276,11 @@ export default function PublishAccountsPage() {
                         maxLength={30}
                         className="w-36 rounded-lg border border-brand bg-transparent px-2 py-0.5 text-sm text-text-1 outline-none"
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") void saveRename(a.id, (e.target as HTMLInputElement).value);
+                          if (e.key === "Enter")
+                            void saveRename(
+                              a.id,
+                              (e.target as HTMLInputElement).value,
+                            );
                           if (e.key === "Escape") setEditingId("");
                         }}
                         onBlur={(e) => void saveRename(a.id, e.target.value)}
@@ -232,24 +300,42 @@ export default function PublishAccountsPage() {
                   </td>
                   <td className="py-2.5 pr-3">
                     {a.status === "active" ? (
-                      <span className="chip border-success/40 text-[11px] text-success">正常</span>
+                      <span className="chip border-success/40 text-[11px] text-success">
+                        正常
+                      </span>
                     ) : (
-                      <span className="chip border-danger/40 text-[11px] text-danger">已过期</span>
+                      <span className="chip border-danger/40 text-[11px] text-danger">
+                        已过期
+                      </span>
                     )}
                   </td>
-                  <td className="py-2.5 pr-3 text-xs text-text-3">{new Date(a.createdAt).toLocaleDateString("zh-CN")}</td>
+                  <td className="py-2.5 pr-3 text-xs text-text-3">
+                    {new Date(a.createdAt).toLocaleDateString("zh-CN")}
+                  </td>
                   <td className="py-2.5">
                     <div className="flex gap-1.5">
                       {a.status === "expired" ? (
-                        <button className="btn-primary px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void reauth(a)}>
+                        <button
+                          className="btn-primary px-2.5 py-0.5 text-xs"
+                          disabled={busyId === a.id}
+                          onClick={() => void reauth(a)}
+                        >
                           重新授权
                         </button>
                       ) : (
-                        <button className="btn-ghost px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void reauth(a)}>
+                        <button
+                          className="btn-ghost px-2.5 py-0.5 text-xs"
+                          disabled={busyId === a.id}
+                          onClick={() => void reauth(a)}
+                        >
                           续期
                         </button>
                       )}
-                      <button className="btn-ghost px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void unbind(a)}>
+                      <button
+                        className="btn-ghost px-2.5 py-0.5 text-xs"
+                        disabled={busyId === a.id}
+                        onClick={() => void unbind(a)}
+                      >
                         解绑
                       </button>
                     </div>
@@ -274,13 +360,18 @@ export default function PublishAccountsPage() {
           <h2 className="mb-4 font-medium">绑定新账号</h2>
           <div className="grid grid-cols-3 gap-2.5">
             {PUBLISH_PLATFORMS.map((p) => (
-              <button key={p} className="btn-ghost justify-center" onClick={() => void startBind(p)}>
+              <button
+                key={p}
+                className="btn-ghost justify-center"
+                onClick={() => void startBind(p)}
+              >
                 <PlatformIcon platform={p} size={16} /> {PLATFORM_NAMES[p]}
               </button>
             ))}
           </div>
           <div className="mt-4 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-            ℹ 绑定时使用手机扫码，Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。
+            ℹ 绑定时使用手机扫码，Cookie
+            仅保存在您的账户中并加密存储，可随时解绑清除。
           </div>
         </div>
 
@@ -290,15 +381,21 @@ export default function PublishAccountsPage() {
           <div className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <span>每日自动巡检</span>
-              <span className="chip border-success/40 text-[11px] text-success">已开启 · 06:00</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                已开启 · 06:00
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>到期前提醒</span>
-              <span className="chip border-success/40 text-[11px] text-success">提前 3 天 · 站内信</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                提前 3 天 · 站内信
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>过期自动暂停发布</span>
-              <span className="chip border-success/40 text-[11px] text-success">已开启</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                已开启
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>解绑后保留历史数据</span>
@@ -309,7 +406,7 @@ export default function PublishAccountsPage() {
       </div>
 
       {/* 私信监听面板（仅抖音账号） */}
-      <ImListenerPanel accounts={list} />
+      {IM_ENABLED && <ImListenerPanel accounts={list} />}
     </div>
   );
 }
@@ -351,29 +448,41 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
     <div className="glass p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-medium">私信监听（抖音 IM）</h2>
-        <span className="text-xs text-text-3">WebSocket 长连接 · 实时收取私信</span>
+        <span className="text-xs text-text-3">
+          WebSocket 长连接 · 实时收取私信
+        </span>
       </div>
       <div className="space-y-2.5">
         {dyAccounts.map((a) => {
           const ls = listenerMap.get(a.id);
           const st = ls?.status ?? "disconnected";
           return (
-            <div key={a.id} className="flex items-center justify-between rounded-xl border border-stroke/60 px-4 py-3">
+            <div
+              key={a.id}
+              className="flex items-center justify-between rounded-xl border border-stroke/60 px-4 py-3"
+            >
               <div className="flex items-center gap-3">
                 <PlatformIcon platform="douyin" size={18} />
                 <div>
                   <span className="text-sm font-medium">{a.nickname}</span>
                   <span className="ml-2 text-xs text-text-3">
-                    {st === "listening" && `监听中${ls?.startedAt ? ` · ${new Date(ls.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 启动` : ""}`}
+                    {st === "listening" &&
+                      `监听中${ls?.startedAt ? ` · ${new Date(ls.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 启动` : ""}`}
                     {st === "disconnected" && "未连接"}
                     {st === "error" && `异常：${ls?.errorMsg || "未知"}`}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-block h-2 w-2 rounded-full ${
-                  st === "listening" ? "bg-success animate-pulse" : st === "error" ? "bg-danger" : "bg-text-3/40"
-                }`} />
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${
+                    st === "listening"
+                      ? "bg-success animate-pulse"
+                      : st === "error"
+                        ? "bg-danger"
+                        : "bg-text-3/40"
+                  }`}
+                />
                 <button
                   className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
                     st === "listening"
@@ -383,7 +492,11 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
                   disabled={busyId === a.id || a.status !== "active"}
                   onClick={() => void toggle(a)}
                 >
-                  {busyId === a.id ? "…" : st === "listening" ? "停止监听" : "启动监听"}
+                  {busyId === a.id
+                    ? "…"
+                    : st === "listening"
+                      ? "停止监听"
+                      : "启动监听"}
                 </button>
               </div>
             </div>
@@ -391,7 +504,8 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         })}
       </div>
       <div className="mt-3 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-        ℹ 启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
+        ℹ
+        启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
       </div>
     </div>
   );

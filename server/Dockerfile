@@ -3,6 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir -e . || pip install --no-cache-dir \
     fastapi "uvicorn[standard]" "sqlalchemy[asyncio]" aiosqlite asyncpg \

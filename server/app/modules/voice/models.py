@@ -1,8 +1,9 @@
 """voice 模块 ORM（F-201~F-204，异步克隆 + 试听确认流程）"""
+
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -14,6 +15,15 @@ def new_id() -> str:
 
 class Voice(Base):
     __tablename__ = "voices"
+    __table_args__ = (
+        Index(
+            "uq_voices_provider_task_id",
+            "provider_task_id",
+            unique=True,
+            sqlite_where=text("provider_task_id <> ''"),
+            postgresql_where=text("provider_task_id <> ''"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(32), index=True)
@@ -22,6 +32,7 @@ class Voice(Base):
     provider: Mapped[str] = mapped_column(String(32), default="")  # 内部用，不暴露给用户
     provider_voice_id: Mapped[str] = mapped_column(String(64), default="")
     provider_task_id: Mapped[str] = mapped_column(String(64), default="")  # 异步克隆任务 ID
+    reservation_id: Mapped[str] = mapped_column(String(32), default="", index=True)
     gender: Mapped[str] = mapped_column(String(16), default="")
     emotion: Mapped[str] = mapped_column(String(32), default="")
     language: Mapped[str] = mapped_column(String(16), default="zh")  # zh/en/jp/ko 等

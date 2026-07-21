@@ -1,4 +1,5 @@
 """pipeline 数据访问"""
+
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
@@ -10,7 +11,7 @@ from .models import PipelineTask
 async def create(db: AsyncSession, **fields) -> PipelineTask:
     t = PipelineTask(**fields)
     db.add(t)
-    await db.commit()
+    await db.flush()
     await db.refresh(t)
     return t
 
@@ -29,16 +30,19 @@ async def save(db: AsyncSession, task: PipelineTask) -> PipelineTask:
     return task
 
 
-async def list_by_user(db: AsyncSession, user_id: str, status: str | None,
-                       page: int, page_size: int) -> tuple[list[PipelineTask], int]:
+async def list_by_user(
+    db: AsyncSession, user_id: str, status: str | None, page: int, page_size: int
+) -> tuple[list[PipelineTask], int]:
     cond = PipelineTask.user_id == user_id
     if status:
         cond = cond & (PipelineTask.status == status)
     total = (await db.execute(select(func.count(PipelineTask.id)).where(cond))).scalar() or 0
     res = await db.execute(
-        select(PipelineTask).where(cond)
+        select(PipelineTask)
+        .where(cond)
         .order_by(PipelineTask.created_at.desc())
-        .offset((page - 1) * page_size).limit(page_size)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return list(res.scalars().all()), int(total)
 
@@ -73,3 +77,17 @@ async def stats(db: AsyncSession, user_id: str) -> dict:
         "weekDelta": week_done - prev_week,
         "pendingAlerts": failed,
     }
+
+
+async def active_count(db: AsyncSession, user_id: str) -> int:
+    return int(
+        (
+            await db.scalar(
+                select(func.count(PipelineTask.id)).where(
+                    PipelineTask.user_id == user_id,
+                    PipelineTask.status.in_(["pending", "running", "waiting_confirm"]),
+                )
+            )
+        )
+        or 0
+    )

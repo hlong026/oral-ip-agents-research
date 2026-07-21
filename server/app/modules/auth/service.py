@@ -1,6 +1,7 @@
 """auth 业务编排（F-601：注册登录 / JWT 双令牌 / 设备绑定 / 单端互踢可配置）
 日志：登录成功/失败（§10.6.8-A #1，安全审计 DB 双写）
 """
+
 from datetime import UTC
 
 from fastapi import HTTPException, status
@@ -25,10 +26,10 @@ settings = get_settings()
 logger = get_logger("oral.auth")
 
 
-def _tokens(user_id: str, device_id: str | None) -> TokensOut:
+def _tokens(user_id: str, device_id: str | None, audience: str = "user") -> TokensOut:
     return TokensOut(
-        accessToken=create_access_token(user_id, device_id),
-        refreshToken=create_refresh_token(user_id, device_id),
+        accessToken=create_access_token(user_id, device_id, audience),
+        refreshToken=create_refresh_token(user_id, device_id, audience),
         expiresIn=settings.access_token_ttl_min * 60,
     )
 
@@ -60,7 +61,14 @@ async def register(db: AsyncSession, phone: str, password: str, nickname: str) -
     return tokens
 
 
-async def login(db: AsyncSession, phone: str, password: str, device_id: str | None) -> TokensOut:
+async def login(
+    db: AsyncSession,
+    phone: str,
+    password: str,
+    device_id: str | None,
+    required_role: str | None = None,
+    audience: str = "user",
+) -> TokensOut:
     user = await repo.get_by_phone(db, phone)
     if not user or not verify_password(password, user.password_hash):
         # 登录失败：记录 WARNING（安全审计）
@@ -73,10 +81,13 @@ async def login(db: AsyncSession, phone: str, password: str, device_id: str | No
     if not user.is_active:
         logger.warning("login_failed", phone=phone, user_id=user.id, reason="DISABLED")
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
+    if required_role and user.role != required_role:
+        logger.warning("login_failed", phone=phone, user_id=user.id, reason="ROLE_FORBIDDEN")
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "FORBIDDEN", "message": "账号无管理权限"})
     device = device_id or "web"
     if settings.single_session_kick:
         await repo.revoke_device_sessions(db, user.id, device)
-    tokens = _tokens(user.id, device)
+    tokens = _tokens(user.id, device, audience)
     await repo.save_session(db, user.id, device, _refresh_jti(tokens))
     # 登录成功：记录 INFO + 设置 user_id 上下文
     user_id_var.set(user.id)
@@ -90,13 +101,19 @@ async def refresh(db: AsyncSession, refresh_token: str) -> TokensOut:
     if not payload or not await repo.is_jti_valid(db, payload["jti"]):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail={"code": "INVALID_REFRESH", "message": "刷新令牌无效"})
     user_id = str(payload["sub"])
+    user = await repo.get_by_id(db, user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
     device = payload.get("dev", "web")
-    tokens = _tokens(user_id, device)
-    await repo.save_session(db, user_id, device, _refresh_jti(tokens))
+    audience = str(payload.get("aud") or "user")
+    tokens = _tokens(user_id, device, audience)
+    await repo.rotate_refresh_session(db, str(payload["jti"]), user_id, device, _refresh_jti(tokens))
     return tokens
 
 
 def to_out(user: User) -> UserOut:
+    plan_expires_at = user.plan_expires_at
+    activated_at = user.activated_at
     return UserOut(
         id=user.id,
         phone=user.phone,
@@ -104,6 +121,6 @@ def to_out(user: User) -> UserOut:
         avatarChar=user.avatar_char,
         createdAt=user.created_at.astimezone(UTC).isoformat(),
         planType=getattr(user, "plan_type", "none") or "none",
-        planExpiresAt=user.plan_expires_at.astimezone(UTC).isoformat() if getattr(user, "plan_expires_at", None) else None,
-        activatedAt=user.activated_at.astimezone(UTC).isoformat() if getattr(user, "activated_at", None) else None,
+        planExpiresAt=plan_expires_at.astimezone(UTC).isoformat() if plan_expires_at else None,
+        activatedAt=activated_at.astimezone(UTC).isoformat() if activated_at else None,
     )

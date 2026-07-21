@@ -1,4 +1,5 @@
 """billing 数据访问"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -17,7 +18,7 @@ async def ensure_account(db: AsyncSession, user_id: str) -> QuotaAccount:
     if acc is None:
         acc = QuotaAccount(user_id=user_id)
         db.add(acc)
-        await db.commit()
+        await db.flush()
         await db.refresh(acc)
     return acc
 
@@ -46,9 +47,7 @@ async def add_usage(db: AsyncSession, usage: QuotaUsage) -> QuotaUsage:
 
 
 async def list_usage(db: AsyncSession, user_id: str, page: int, page_size: int) -> tuple[list[QuotaUsage], int]:
-    total = (
-        await db.execute(select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == user_id))
-    ).scalar() or 0
+    total = (await db.execute(select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == user_id))).scalar() or 0
     res = await db.execute(
         select(QuotaUsage)
         .where(QuotaUsage.user_id == user_id)

@@ -5,6 +5,7 @@
 - HiFlyAvatar: 数字人形象克隆 + 视频创作（AvatarProvider 实现）
 - 凭据从前端设置页动态读取（dynamic_config），保存即时生效无需重启
 """
+
 import asyncio
 import logging
 from pathlib import Path
@@ -15,7 +16,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config
-from app.core.storage import local_path, read_bytes, save_bytes
+from app.core.storage import read_bytes, save_bytes
 
 from .base import StepRecoverableError, SynthesizeResult, WordTs
 
@@ -107,8 +108,7 @@ class HiFlyClient:
     async def upload_file(self, file_key: str, extension: str) -> str:
         """上传本地存储文件到飞影 OSS，返回 file_id"""
         # 1. 获取上传地址
-        data = await self.request("POST", "/api/v2/hifly/tool/create_upload_url",
-                                  json={"file_extension": extension})
+        data = await self.request("POST", "/api/v2/hifly/tool/create_upload_url", json={"file_extension": extension})
         upload_url = data["upload_url"]
         content_type = data["content_type"]
         file_id = data["file_id"]
@@ -127,8 +127,7 @@ class HiFlyClient:
 
     async def upload_bytes(self, file_data: bytes, extension: str, content_type: str | None = None) -> str:
         """直接上传字节流到飞影 OSS，返回 file_id"""
-        data = await self.request("POST", "/api/v2/hifly/tool/create_upload_url",
-                                  json={"file_extension": extension})
+        data = await self.request("POST", "/api/v2/hifly/tool/create_upload_url", json={"file_extension": extension})
         upload_url = data["upload_url"]
         ct = content_type or data["content_type"]
         file_id = data["file_id"]
@@ -170,8 +169,7 @@ class HiFlyVoice:
     def __init__(self) -> None:
         self._c = get_client()
 
-    async def clone(self, name: str, sample_key: str, consent_token: str,
-                    language: str = "zh") -> str:
+    async def clone(self, name: str, sample_key: str, consent_token: str, language: str = "zh") -> str:
         """
         声音克隆：上传音频样本 → 创建克隆任务 → 返回 task_id
         音频要求：mp3/m4a/wav，≤20MB，5s~3min
@@ -199,8 +197,7 @@ class HiFlyVoice:
         返回: {status: int, voice_id: str, demo_url: str}
         status: 1等待 2处理 3完成 4失败
         """
-        data = await self._c.request("GET", "/api/v2/hifly/voice/task",
-                                     params={"task_id": task_id})
+        data = await self._c.request("GET", "/api/v2/hifly/voice/task", params={"task_id": task_id})
         return {
             "status": data.get("status", 1),
             "voice_id": data.get("voice", ""),
@@ -244,17 +241,20 @@ class HiFlyVoice:
 
     async def edit_params(self, voice_id: str, rate: str, volume: str, pitch: str) -> None:
         """修改声音参数（语速/音量/语调）"""
-        await self._c.request("POST", "/api/v2/hifly/voice/edit", json={
-            "voice": voice_id,
-            "rate": rate,
-            "volume": volume,
-            "pitch": pitch,
-        })
+        await self._c.request(
+            "POST",
+            "/api/v2/hifly/voice/edit",
+            json={
+                "voice": voice_id,
+                "rate": rate,
+                "volume": volume,
+                "pitch": pitch,
+            },
+        )
 
     async def list_voices(self) -> list[dict[str, Any]]:
         """查询已克隆的声音列表（仅自己的）"""
-        data = await self._c.request("GET", "/api/v2/hifly/voice/list",
-                                     params={"page": 1, "size": 300, "kind": 1})
+        data = await self._c.request("GET", "/api/v2/hifly/voice/list", params={"page": 1, "size": 300, "kind": 1})
         return data.get("data", [])
 
     async def _poll_video_task(self, task_id: str) -> dict[str, Any]:
@@ -262,8 +262,7 @@ class HiFlyVoice:
         interval = settings.feiying_poll_interval
         max_attempts = settings.feiying_poll_max_attempts
         for _ in range(max_attempts):
-            data = await self._c.request("GET", "/api/v2/hifly/video/task",
-                                         params={"task_id": task_id})
+            data = await self._c.request("GET", "/api/v2/hifly/video/task", params={"task_id": task_id})
             status = data.get("status", 1)
             if status == 3:
                 return data
@@ -289,10 +288,14 @@ class HiFlyAvatar:
         ext = Path(video_key).suffix.lstrip(".") or "mp4"
         file_id = await self._c.upload_file(video_key, ext)
 
-        data = await self._c.request("POST", "/api/v2/hifly/avatar/create_by_video", json={
-            "title": name[:20],
-            "file_id": file_id,
-        })
+        data = await self._c.request(
+            "POST",
+            "/api/v2/hifly/avatar/create_by_video",
+            json={
+                "title": name[:20],
+                "file_id": file_id,
+            },
+        )
         task_id = data.get("task_id", "")
         logger.info(f"[hifly] avatar clone_by_video task: {task_id}")
         return task_id
@@ -305,11 +308,15 @@ class HiFlyAvatar:
         ext = Path(image_key).suffix.lstrip(".") or "jpg"
         file_id = await self._c.upload_file(image_key, ext)
 
-        data = await self._c.request("POST", "/api/v2/hifly/avatar/create_by_image", json={
-            "title": name[:20],
-            "file_id": file_id,
-            "model": model,
-        })
+        data = await self._c.request(
+            "POST",
+            "/api/v2/hifly/avatar/create_by_image",
+            json={
+                "title": name[:20],
+                "file_id": file_id,
+                "model": model,
+            },
+        )
         task_id = data.get("task_id", "")
         logger.info(f"[hifly] avatar clone_by_image task: {task_id}")
         return task_id
@@ -320,8 +327,7 @@ class HiFlyAvatar:
         返回: {status: int, avatar_id: str}
         status: 1等待 2处理 3完成 4失败
         """
-        data = await self._c.request("GET", "/api/v2/hifly/avatar/task",
-                                     params={"task_id": task_id})
+        data = await self._c.request("GET", "/api/v2/hifly/avatar/task", params={"task_id": task_id})
         return {
             "status": data.get("status", 1),
             "avatar_id": data.get("avatar", ""),
@@ -334,17 +340,22 @@ class HiFlyAvatar:
         ext = Path(audio_key).suffix.lstrip(".") or "mp3"
         file_id = await self._c.upload_file(audio_key, ext)
 
-        data = await self._c.request("POST", "/api/v2/hifly/video/create_by_audio", json={
-            "file_id": file_id,
-            "avatar": avatar_id,
-            "title": "口播视频",
-        })
+        data = await self._c.request(
+            "POST",
+            "/api/v2/hifly/video/create_by_audio",
+            json={
+                "file_id": file_id,
+                "avatar": avatar_id,
+                "title": "口播视频",
+            },
+        )
         task_id = data.get("task_id", "")
         logger.info(f"[hifly] video create_by_audio task: {task_id}")
         return task_id
 
-    async def create_by_tts(self, avatar_id: str, voice_id: str, text: str,
-                            subtitle_opts: dict[str, Any] | None = None) -> str:
+    async def create_by_tts(
+        self, avatar_id: str, voice_id: str, text: str, subtitle_opts: dict[str, Any] | None = None
+    ) -> str:
         """
         视频创作（文本驱动）：文本 + 声音 + 数字人 → 视频（含字幕）
         """
@@ -367,8 +378,7 @@ class HiFlyAvatar:
         查询创作任务状态（单次查询，不含轮询）
         返回: {status, video_url, duration}
         """
-        data = await self._c.request("GET", "/api/v2/hifly/video/task",
-                                     params={"task_id": task_id})
+        data = await self._c.request("GET", "/api/v2/hifly/video/task", params={"task_id": task_id})
         return {
             "status": data.get("status", 1),
             "video_url": data.get("video_Url", ""),
@@ -394,8 +404,7 @@ class HiFlyAvatar:
 
     async def list_public(self) -> list[dict[str, Any]]:
         """查询公共数字人（内部使用，不暴露给用户）"""
-        data = await self._c.request("GET", "/api/v2/hifly/avatar/list",
-                                     params={"page": 1, "size": 100, "kind": 2})
+        data = await self._c.request("GET", "/api/v2/hifly/avatar/list", params={"page": 1, "size": 100, "kind": 2})
         return data.get("data", [])
 
     async def get_credit(self) -> int:

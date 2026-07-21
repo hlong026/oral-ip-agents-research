@@ -1,4 +1,9 @@
-import { STEP_LABELS, STEP_ORDER, type PipelineTask, type StepStatus } from "@oral/types";
+import {
+  STEP_LABELS,
+  STEP_ORDER,
+  type PipelineTask,
+  type StepStatus,
+} from "@oral/types";
 import { Link } from "react-router-dom";
 
 const STATUS_TEXT: Record<string, { label: string; cls: string }> = {
@@ -26,10 +31,18 @@ function stepDot(status: StepStatus | undefined) {
 }
 
 /** 任务卡（工作台 mini-pipe 与任务中心共用 PipelineTask 统一模型） */
-export default function TaskCard({ task, compact = false }: { task: PipelineTask; compact?: boolean }) {
+export default function TaskCard({
+  task,
+  compact = false,
+}: {
+  task: PipelineTask;
+  compact?: boolean;
+}) {
   const st = STATUS_TEXT[task.status] ?? STATUS_TEXT.pending!;
   const currentStep = task.steps.find((s) => s.status === "running");
-  const doneCount = task.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
+  const doneCount = task.steps.filter(
+    (s) => s.status === "done" || s.status === "skipped",
+  ).length;
   const pct = Math.round((doneCount / STEP_ORDER.length) * 100);
 
   return (
@@ -38,7 +51,9 @@ export default function TaskCard({ task, compact = false }: { task: PipelineTask
       className="card-hover block rounded-xl border border-stroke bg-white/[0.03] p-3.5"
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 flex-1 truncate text-sm font-medium">{task.title}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {task.title}
+        </span>
         <span className={`chip shrink-0 ${st.cls}`}>{st.label}</span>
       </div>
 
@@ -61,17 +76,22 @@ export default function TaskCard({ task, compact = false }: { task: PipelineTask
           {task.status === "running" && currentStep
             ? `${STEP_LABELS[currentStep.step]} 中…`
             : task.status === "waiting_confirm"
-              ? `${task.currentStep ? STEP_LABELS[task.currentStep as keyof typeof STEP_LABELS] ?? "" : ""} 完成，等待确认`
+              ? `${task.currentStep ? (STEP_LABELS[task.currentStep as keyof typeof STEP_LABELS] ?? "") : ""} 完成，等待确认`
               : `${doneCount}/${STEP_ORDER.length} 步`}
         </span>
         <span>
-          {task.mode === "manual" ? "手动" : "自动"} · {pct}% · {task.quotaCost.toFixed(0)} 点
+          {task.mode === "manual" ? "手动" : "自动"} · {pct}% ·{" "}
+          {task.quotaCost.toFixed(0)} 点
         </span>
       </div>
 
       {!compact && task.coverUrl && (
         <div className="mt-2 overflow-hidden rounded-lg border border-stroke">
-          <img src={task.coverUrl} alt="" className="h-28 w-full object-cover" />
+          <img
+            src={task.coverUrl}
+            alt=""
+            className="h-28 w-full object-cover"
+          />
         </div>
       )}
     </Link>

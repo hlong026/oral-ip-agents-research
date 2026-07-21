@@ -16,7 +16,11 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
 };
 
 /** 支持账号绑定与发布的平台（快手仅支持链接解析去水印，不可绑定发布） */
-export const PUBLISH_PLATFORMS: Platform[] = ["douyin", "xiaohongshu", "shipinhao"];
+export const PUBLISH_PLATFORMS: Platform[] = [
+  "douyin",
+  "xiaohongshu",
+  "shipinhao",
+];
 
 /** 算力通道（MVP 恒为 cloud；V1.5+ 本地引擎开放后出现 local） */
 export type ComputeChannel = "cloud" | "local";
@@ -56,10 +60,12 @@ export const STEP_LABELS: Record<PipelineStep, string> = {
 };
 
 /** 步骤状态 */
-export type StepStatus = "pending" | "running" | "done" | "failed" | "skipped" | "waiting_confirm";
+export type StepStatus =
+  "pending" | "running" | "done" | "failed" | "skipped" | "waiting_confirm";
 
 /** 任务状态机：PENDING → RUNNING → DONE / FAILED / CANCELED */
-export type TaskStatus = "pending" | "running" | "done" | "failed" | "canceled" | "waiting_confirm";
+export type TaskStatus =
+  "pending" | "running" | "done" | "failed" | "canceled" | "waiting_confirm";
 
 /** 流水线模式：auto 全自动 / manual 每步暂停可干预（F-405） */
 export type PipelineMode = "auto" | "manual";
@@ -99,6 +105,92 @@ export interface QuotaUsageItem {
   createdAt: string;
 }
 
+export type PlanSkuType =
+  "trial" | "annual_bundle" | "internal_annual" | "points_pack";
+export type PlanAudience = "public" | "internal";
+export type BillingUnit =
+  | "per_action"
+  | "per_minute"
+  | "per_second"
+  | "per_1k_chars"
+  | "per_1k_tokens"
+  | "per_image"
+  | "per_asset";
+
+export interface PlanSku {
+  code: string;
+  version: number;
+  skuType: PlanSkuType;
+  audience: PlanAudience;
+  name: string;
+  subtitle?: string | null;
+  description?: string | null;
+  badge?: string | null;
+  sortOrder?: number;
+  durationDays: number;
+  monthlyPoints: number;
+  oneTimePoints: number;
+  listPriceCents?: number | null;
+  displayPriceCents?: number | null;
+  entitlements: string[];
+  maxConcurrency?: number | null;
+  maxResolution?: string | null;
+  purchaseInstructions?: string | null;
+  publishedAt?: string | null;
+  retiredAt?: string | null;
+}
+
+export interface ModulePrice {
+  module: string;
+  displayName: string;
+  publicDescription?: string | null;
+  billingUnit: BillingUnit;
+  unitSize: number;
+  pointsPerUnit: number;
+  minimumPoints: number;
+}
+
+export interface ModulePriceCatalog {
+  version: string;
+  updatedAt?: string;
+  items: ModulePrice[];
+}
+
+export interface PricePreviewItem {
+  module: string;
+  name?: string;
+  quantity: number;
+  unit: BillingUnit;
+  points: number;
+}
+
+export interface PricePreviewRequest {
+  items: Array<{
+    module: string;
+    quantity: number;
+  }>;
+}
+
+export interface PricePreview {
+  quoteId: string;
+  priceVersion: string;
+  expiresAt: string;
+  items: PricePreviewItem[];
+  estimatedPoints: number;
+  availablePoints: number;
+}
+
+export interface Subscription {
+  planType: string;
+  planSkuCode?: string | null;
+  planName?: string | null;
+  planExpiresAt: string | null;
+  activatedAt: string | null;
+  nextGrantAt?: string | null;
+  monthlyPoints?: number;
+  quotaBalance: number;
+}
+
 // ============ IP 资产 ============
 
 export interface Persona {
@@ -123,6 +215,9 @@ export interface Persona {
   avoidTopics: string[];
 }
 
+export type VoiceStatus =
+  "ready" | "training" | "pending_confirm" | "rejected" | "failed";
+
 export interface Voice {
   id: string;
   name: string;
@@ -131,7 +226,8 @@ export interface Voice {
   gender: string;
   emotion: string;
   sampleUrl?: string | null;
-  status: "ready" | "training" | "failed";
+  demoUrl?: string | null;
+  status: VoiceStatus;
   createdAt: string;
 }
 

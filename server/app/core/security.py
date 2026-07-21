@@ -1,4 +1,5 @@
 """安全：密码散列 + JWT 双令牌（F-601 / C7）"""
+
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -22,7 +23,13 @@ def verify_password(raw: str, hashed: str) -> bool:
         return False
 
 
-def _make_token(subject: str, ttl: timedelta, token_type: str, device_id: str | None = None) -> str:
+def _make_token(
+    subject: str,
+    ttl: timedelta,
+    token_type: str,
+    device_id: str | None = None,
+    audience: str = "user",
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": subject,
@@ -30,23 +37,29 @@ def _make_token(subject: str, ttl: timedelta, token_type: str, device_id: str | 
         "iat": int(now.timestamp()),
         "exp": int((now + ttl).timestamp()),
         "jti": uuid.uuid4().hex,
+        "aud": audience,
     }
     if device_id:
         payload["dev"] = device_id
     return jwt.encode(payload, settings.app_secret, algorithm=settings.jwt_algorithm)
 
 
-def create_access_token(user_id: str, device_id: str | None = None) -> str:
-    return _make_token(user_id, timedelta(minutes=settings.access_token_ttl_min), "access", device_id)
+def create_access_token(user_id: str, device_id: str | None = None, audience: str = "user") -> str:
+    return _make_token(user_id, timedelta(minutes=settings.access_token_ttl_min), "access", device_id, audience)
 
 
-def create_refresh_token(user_id: str, device_id: str | None = None) -> str:
-    return _make_token(user_id, timedelta(days=settings.refresh_token_ttl_days), "refresh", device_id)
+def create_refresh_token(user_id: str, device_id: str | None = None, audience: str = "user") -> str:
+    return _make_token(user_id, timedelta(days=settings.refresh_token_ttl_days), "refresh", device_id, audience)
 
 
 def decode_token(token: str, expected_type: str = "access") -> dict | None:
     try:
-        payload = jwt.decode(token, settings.app_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(
+            token,
+            settings.app_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_aud": False},
+        )
     except JWTError:
         return None
     if payload.get("type") != expected_type:

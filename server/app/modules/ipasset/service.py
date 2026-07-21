@@ -1,4 +1,5 @@
 """ipasset 业务编排（F-701 人设引擎：字段注入生成链路）"""
+
 import json
 
 from fastapi import HTTPException, status
@@ -24,7 +25,8 @@ async def get_active_persona_id(db: AsyncSession, user_id: str) -> str | None:
 
 async def create_default_persona(db: AsyncSession, user_id: str, nickname: str) -> Persona:
     p = await repo.create(
-        db, user_id,
+        db,
+        user_id,
         name=f"{nickname}的 IP",
         domain="知识科普",
         tone="专业、接地气",
@@ -45,10 +47,15 @@ async def list_personas(db: AsyncSession, user_id: str) -> list[PersonaOut]:
 async def create_persona(db: AsyncSession, user_id: str, body: PersonaIn) -> PersonaOut:
     items = await repo.list_by_user(db, user_id)
     p = await repo.create(
-        db, user_id,
-        name=body.name, domain=body.domain, tone=body.tone, values=body.values,
+        db,
+        user_id,
+        name=body.name,
+        domain=body.domain,
+        tone=body.tone,
+        values=body.values,
         taboo_words=json.dumps(body.tabooWords, ensure_ascii=False),
-        avatar_char=body.name[0], avatar_grad=GRADS[len(items) % len(GRADS)],
+        avatar_char=body.name[0],
+        avatar_grad=GRADS[len(items) % len(GRADS)],
         is_active=len(items) == 0,
         audience=body.audience,
         content_pillars=json.dumps(body.contentPillars, ensure_ascii=False),
@@ -137,10 +144,17 @@ def persona_prompt_context(p: Persona) -> str:
 
 def to_out(p: Persona) -> PersonaOut:
     return PersonaOut(
-        id=p.id, name=p.name, domain=p.domain, tone=p.tone, values=p.values,
+        id=p.id,
+        name=p.name,
+        domain=p.domain,
+        tone=p.tone,
+        values=p.values,
         tabooWords=json.loads(p.taboo_words or "[]"),
-        avatarChar=p.avatar_char, avatarGrad=p.avatar_grad,
-        voiceId=p.voice_id, avatarId=p.avatar_id, isActive=p.is_active,
+        avatarChar=p.avatar_char,
+        avatarGrad=p.avatar_grad,
+        voiceId=p.voice_id,
+        avatarId=p.avatar_id,
+        isActive=p.is_active,
         audience=p.audience or "",
         contentPillars=json.loads(p.content_pillars or "[]"),
         styleSamples=p.style_samples or "",

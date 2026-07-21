@@ -1,7 +1,8 @@
 """WS 网关（06 文档 §10.1：Pub/Sub → 各端广播，进度延迟 ≤2s）
-- /ws/tasks?token=<access_token>
+- /ws/tasks，令牌通过 Sec-WebSocket-Protocol 传递，避免进入访问日志 URL
 - 订阅三频道（任务进度 / 动态流 / 告警），按 userId 过滤转发
 """
+
 import asyncio
 import json
 import logging
@@ -19,12 +20,13 @@ PING_INTERVAL = 25  # 心跳保活（秒）
 
 @ws_router.websocket("/ws/tasks")
 async def tasks_ws(ws: WebSocket) -> None:
-    token = ws.query_params.get("token", "")
+    protocols = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",")]
+    token = protocols[1] if len(protocols) == 2 and protocols[0] == "access-token" else ""
     user_id = verify_ws_token(token)
     if user_id is None:
         await ws.close(code=4401)
         return
-    await ws.accept()
+    await ws.accept(subprotocol="access-token")
     subs = [await subscribe(ch) for ch in (CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM)]
     getters = [s[0] for s in subs]
     unsubscribers = [s[1] for s in subs]
