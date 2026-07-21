@@ -3,17 +3,46 @@ SAU 配置适配层
 - 替代 social-auto-upload 的 conf.py，从项目 dynamic_config / settings 读取
 - 在 import SAU uploader 之前，将本模块注入 sys.modules["conf"]
 """
+
 import sys
 from pathlib import Path
+from shutil import which
 
 from app.core.config import get_settings
 
 settings = get_settings()
 
+
+def resolve_browser_executable(
+    configured: str,
+    candidates: list[Path] | None = None,
+) -> str:
+    """返回可用浏览器路径；显式配置优先，其次探测常见 Chrome / Edge。"""
+    if configured.strip():
+        return str(Path(configured).expanduser())
+
+    if candidates is None:
+        detected = [
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
+        ]
+        for command in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "microsoft-edge"):
+            executable = which(command)
+            if executable:
+                detected.append(Path(executable))
+        candidates = detected
+
+    for candidate in candidates:
+        candidate_path = candidate.expanduser()
+        if candidate_path.is_file():
+            return str(candidate_path)
+    return ""
+
+
 # SAU 需要的核心配置
 BASE_DIR = Path(__file__).parent.parent.parent.parent.parent / "vendor" / "social-auto-upload"
 XHS_SERVER = "http://127.0.0.1:11901"
-LOCAL_CHROME_PATH = ""  # 留空使用 patchright 自带 chromium
+LOCAL_CHROME_PATH = resolve_browser_executable(settings.publish_browser_executable_path)
 LOCAL_CHROME_HEADLESS = settings.publish_browser_headless
 DEBUG_MODE = settings.app_env == "dev"
 YT_PROXY = None

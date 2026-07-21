@@ -3,6 +3,7 @@
 必须在导入 app 之前设置环境变量（get_settings 为 lru_cache）。
 所有 Provider 凭据留空 → 触发 StepRecoverableError → 自动降级到 Mock。
 """
+
 import os
 import tempfile
 
@@ -16,6 +17,7 @@ os.environ.setdefault("DEEPSEEK_API_KEY", "")
 os.environ.setdefault("DOUYIDOU_APP_ID", "")
 os.environ.setdefault("DASHSCOPE_API_KEY", "")
 os.environ.setdefault("FEIYING_API_KEY", "")
+os.environ["DOUYIN_IM_USE_MOCK"] = "true"
 
 from collections.abc import AsyncGenerator  # noqa: E402
 

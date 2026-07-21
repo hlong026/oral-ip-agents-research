@@ -1,166 +1,188 @@
-"""抖音 IM Provider（整合 DouYin_Spider 的 WebSocket + Protobuf 逻辑）
-- connect(): 建立 wss://frontier-im.douyin.com/ws/v2 长连接
-- send_message(): POST https://imapi.douyin.com/v1/message/send
-- create_conversation(): POST https://imapi.douyin.com/v2/conversation/create
+"""抖音私信接收适配器。
+
+协议字段来自本地 DouYin_Spider：Playwright 登录态需要先规范化，
+再用固定客户端参数连接 frontier-im WebSocket 并解析 Protobuf 推送。
 """
+
 import hashlib
 import json
 import logging
-import time
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
+from urllib.parse import urlencode
 
-import httpx
+from google.protobuf.message import DecodeError
 
 from app.core.config import get_settings
+from app.providers.im.proto import Live_pb2, Response_pb2
 
 logger = logging.getLogger(__name__)
 
-# 抖音 IM 常量
 IM_WS_URL = "wss://frontier-im.douyin.com/ws/v2"
-IM_SEND_URL = "https://imapi.douyin.com/v1/message/send"
-IM_CONV_CREATE_URL = "https://imapi.douyin.com/v2/conversation/create"
-IM_DEVICE_URL = "https://mcs.zijieapi.com/v1/device/register"
-
-COMMON_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/125.0.0.0 Safari/537.36"),
-    "Referer": "https://www.douyin.com/",
-    "Origin": "https://www.douyin.com",
-}
+DOUYIN_ORIGIN = "https://www.douyin.com"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+)
 
 
-def _get_im_constants() -> tuple[str, str, str]:
-    """#11 从配置读取 IM 常量"""
-    s = get_settings()
-    return s.douyin_im_app_key, s.douyin_im_aid, s.douyin_im_fpid
+def _parse_cookie_string(cookie_str: str) -> dict[str, str]:
+    cookies: dict[str, str] = {}
+    for part in cookie_str.split(";"):
+        name, separator, value = part.strip().partition("=")
+        if separator and name:
+            cookies[name] = value
+    return cookies
 
 
-def _compute_access_key(device_id: str, session_id: str) -> str:
-    """#11 access_key = md5(fpid + appKey + deviceId + session_id)"""
-    app_key, _aid, fpid = _get_im_constants()
-    raw = fpid + app_key + device_id + session_id
+def normalize_douyin_session(session: dict[str, Any]) -> dict[str, Any]:
+    """把 Playwright storage_state 转成抖音 IM 使用的 Cookie 登录态。"""
+    normalized = dict(session)
+    cookie_map = _parse_cookie_string(str(session.get("cookie_str", "")))
+
+    for cookie in session.get("cookies", []):
+        if not isinstance(cookie, dict):
+            continue
+        domain = str(cookie.get("domain", "")).lstrip(".").lower()
+        name = str(cookie.get("name", ""))
+        if name and (domain == "douyin.com" or domain.endswith(".douyin.com")):
+            cookie_map[name] = str(cookie.get("value", ""))
+
+    session_id = str(session.get("sessionid") or cookie_map.get("sessionid") or cookie_map.get("sessionid_ss") or "")
+    if not session_id:
+        raise ValueError("抖音登录态缺少 sessionid，请重新扫码绑定账号")
+
+    normalized["sessionid"] = session_id
+    normalized["cookie_str"] = "; ".join(f"{name}={value}" for name, value in cookie_map.items())
+    device_id = str(session.get("device_id", ""))
+    if not device_id:
+        for origin in session.get("origins", []):
+            for item in origin.get("localStorage", []):
+                if item.get("name") == "oral_im_device_id":
+                    device_id = str(item.get("value", ""))
+                    break
+            if device_id:
+                break
+    if device_id:
+        normalized["device_id"] = device_id
+    return normalized
+
+
+def compute_access_key(
+    device_id: str,
+    *,
+    app_key: str,
+    fpid: str,
+    suffix: str,
+) -> str:
+    """按 DouYin_Spider 的 frontier-im access_key 公式计算摘要。"""
+    raw = f"{fpid}{app_key}{device_id}{suffix}"
     return hashlib.md5(raw.encode()).hexdigest()
 
 
 class DouyinIMConnection:
-    """抖音 WebSocket 长连接"""
+    """抖音 frontier-im WebSocket 长连接。"""
 
     def __init__(self, session: dict[str, Any]):
-        self._session = session
+        self._session = normalize_douyin_session(session)
         self._alive = False
-        self._ws = None
+        self._ws: Any = None
 
     async def listen(self, on_message: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
-        """建立 WebSocket 并持续监听私信"""
+        """连接 WebSocket 并把真实私信推送给业务层；断线重试由 Worker 负责。"""
         try:
             import websockets
-        except ImportError:
-            logger.error("websockets 未安装，无法启动抖音 IM 监听")
-            return
+        except ImportError as exc:
+            raise RuntimeError("websockets 未安装，无法启动抖音私信监听") from exc
 
-        cookie_str = self._session.get("cookie_str", "")
-        session_id = self._session.get("sessionid", "")
-        device_id = self._session.get("device_id", "")
-
-        if not session_id:
-            # 从 cookie_str 提取 sessionid
-            for part in cookie_str.split(";"):
-                kv = part.strip().split("=", 1)
-                if len(kv) == 2 and kv[0] == "sessionid":
-                    session_id = kv[1]
-                    break
-
+        device_id = str(self._session.get("device_id", ""))
         if not device_id:
-            device_id = await self._fetch_device_id(cookie_str)
-            self._session["device_id"] = device_id
+            raise RuntimeError("抖音登录态缺少 IM device_id，请重新扫码绑定账号")
 
-        access_key = _compute_access_key(device_id, session_id)
-        _app_key, aid, fpid = _get_im_constants()
-        ws_url = (
-            f"{IM_WS_URL}?aid={aid}&device_platform=douyin_pc&fpid={fpid}"
-            f"&device_id={device_id}&token={session_id}&access_key={access_key}"
+        settings = get_settings()
+        access_key = compute_access_key(
+            device_id,
+            app_key=settings.douyin_im_app_key,
+            fpid=settings.douyin_im_fpid,
+            suffix=settings.douyin_im_access_key_suffix,
+        )
+        query = urlencode(
+            {
+                "aid": settings.douyin_im_aid,
+                "device_platform": "douyin_pc",
+                "fpid": settings.douyin_im_fpid,
+                "device_id": device_id,
+                "token": self._session["sessionid"],
+                "access_key": access_key,
+            }
         )
 
         self._alive = True
-        logger.info(f"[DouyinIM] connecting ws device_id={device_id[:8]}...")
-
-        while self._alive:
-            try:
-                async with websockets.connect(
-                    ws_url,
-                    additional_headers={"Cookie": cookie_str},
-                    ping_interval=30,
-                    ping_timeout=10,
-                    close_timeout=5,
-                ) as ws:
-                    self._ws = ws
-                    logger.info("[DouyinIM] ws connected")
-                    async for raw in ws:
-                        if not self._alive:
-                            break
-                        parsed = self._decode_frame(raw)
-                        if parsed:
-                            await on_message(parsed)
-            except Exception as e:  # noqa: BLE001
-                if self._alive:
-                    logger.warning(f"[DouyinIM] ws error: {e}, reconnect in 10s")
-                    import asyncio
-                    await asyncio.sleep(10)
-
-    def _decode_frame(self, raw: bytes) -> dict[str, Any] | None:
-        """解码 Protobuf PushFrame → 提取私信内容（简化版）
-        生产环境需完整 protobuf 解码，MVP 用 protobuf3_to_dict 或 blackboxprotobuf
-        """
+        logger.info("[DouyinIM] connecting websocket")
         try:
-            from protobuf3_to_dict import protobuf3_to_dict  # type: ignore
-            # 实际需 .proto 编译；MVP 阶段用 blackboxprotobuf 动态解码
-            import blackboxprotobuf  # type: ignore
-            decoded, _ = blackboxprotobuf.decode_message(raw)
-            # 从嵌套结构提取消息字段（需根据实际 proto 结构调整）
-            payload = decoded.get("payload", b"")
-            if isinstance(payload, bytes) and payload:
-                inner, _ = blackboxprotobuf.decode_message(payload)
-                return self._extract_message(inner)
-        except Exception:  # noqa: BLE001
-            pass
-        return None
+            async with websockets.connect(
+                f"{IM_WS_URL}?{query}",
+                additional_headers={"Cookie": self._session["cookie_str"], "User-Agent": USER_AGENT},
+                origin=cast(Any, DOUYIN_ORIGIN),
+                subprotocols=cast(Any, ["binary", "base64", "pbbp2"]),
+                ping_interval=30,
+                ping_timeout=10,
+                close_timeout=5,
+            ) as ws:
+                self._ws = ws
+                logger.info("[DouyinIM] websocket connected")
+                async for raw in ws:
+                    if not self._alive:
+                        break
+                    parsed = self._decode_frame(raw)
+                    if parsed:
+                        await on_message(parsed)
+        finally:
+            self._alive = False
+            self._ws = None
 
-    def _extract_message(self, data: dict) -> dict[str, Any] | None:
-        """从解码后的 protobuf dict 中提取私信字段"""
-        # 结构依赖实际 proto，此处为占位逻辑
-        # 生产需按 PushFrame → Response → new_message_notify.message 路径解析
-        try:
-            msg_list = data.get("1", {}).get("1", [])
-            if not msg_list:
-                return None
-            msg = msg_list[0] if isinstance(msg_list, list) else msg_list
-            ext = json.loads(msg.get("8", "{}"))
-            content = ext.get("content", "")
-            return {
-                "remote_uid": str(ext.get("from_uid", "")),
-                "remote_nickname": ext.get("from_nickname", ""),
-                "remote_avatar": ext.get("from_avatar", ""),
-                "msg_type": int(ext.get("msg_type", 7)),
-                "content": content,
-                "dy_conversation_id": str(ext.get("conversation_id", "")),
-                "dy_conversation_short_id": str(ext.get("conversation_short_id", "")),
-                "dy_ticket": str(ext.get("ticket", "")),
-            }
-        except Exception:  # noqa: BLE001
+    def _decode_frame(self, raw: bytes | str) -> dict[str, Any] | None:
+        """解析 PushFrame → Response → new_message_notify.message。"""
+        if isinstance(raw, str):
             return None
+        try:
+            frame = Live_pb2.PushFrame()  # type: ignore[attr-defined]
+            frame.ParseFromString(raw)
+            if frame.payloadType != "pb" or not frame.payload:
+                return None
 
-    async def _fetch_device_id(self, cookie_str: str) -> str:
-        """获取设备 ID（简化：生成随机 device_id）"""
-        import random
-        return str(random.randint(10**18, 10**19 - 1))
+            response = Response_pb2.Response()  # type: ignore[attr-defined]
+            response.ParseFromString(frame.payload)
+            if response.body.WhichOneof("body") != "new_message_notify":
+                return None
+
+            message = response.body.new_message_notify.message
+            if not message.sender or not message.conversation_id:
+                return None
+
+            content = message.content
+            if message.message_type == 7:
+                decoded_content = json.loads(message.content)
+                content = str(decoded_content.get("text", ""))
+
+            return {
+                "remote_uid": str(message.sender),
+                "remote_nickname": "",
+                "remote_avatar": "",
+                "msg_type": int(message.message_type),
+                "content": content,
+                "dy_conversation_id": message.conversation_id,
+                "dy_conversation_short_id": str(message.conversation_short_id),
+                "dy_ticket": "",
+            }
+        except (DecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.warning("[DouyinIM] invalid protobuf frame: %s", exc)
+            return None
 
     async def close(self) -> None:
         self._alive = False
         if self._ws:
             await self._ws.close()
-        logger.info("[DouyinIM] ws closed")
+        logger.info("[DouyinIM] websocket closed")
 
     @property
     def is_alive(self) -> bool:
@@ -168,53 +190,29 @@ class DouyinIMConnection:
 
 
 class DouyinIMProvider:
-    """抖音私信 Provider 实现"""
+    """抖音私信 Provider；当前只开放已验证的真实接收路径。"""
+
     name = "douyin_im"
     platform = "douyin"
 
     async def connect(self, session: dict[str, Any]) -> DouyinIMConnection:
         return DouyinIMConnection(session)
 
-    async def send_message(self, session: dict[str, Any], conversation_id: str,
-                           conversation_short_id: str, ticket: str,
-                           content: str) -> bool:
-        """通过 imapi 发送文本消息"""
-        cookie_str = session.get("cookie_str", "")
-        # 构建发送请求（简化版，生产需 Protobuf 编码 + web_protect 签名）
-        payload = {
-            "conversation_id": conversation_id,
-            "conversation_short_id": conversation_short_id,
-            "content": json.dumps({"text": content}, ensure_ascii=False),
-            "msg_type": 7,
-            "ticket": ticket,
-        }
-        headers = {**COMMON_HEADERS, "Cookie": cookie_str,
-                   "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(IM_SEND_URL, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("status_code") == 0:
-                    return True
-                logger.warning(f"[DouyinIM] send failed: {data}")
-            else:
-                logger.warning(f"[DouyinIM] send http {resp.status_code}")
+    async def send_message(
+        self,
+        session: dict[str, Any],
+        conversation_id: str,
+        conversation_short_id: str,
+        ticket: str,
+        content: str,
+    ) -> bool:
+        """发送需要 web_protect 和 Protobuf 签名；未完成前明确失败，避免假成功。"""
+        normalize_douyin_session(session)
+        logger.warning("[DouyinIM] send is unavailable: Douyin web_protect signature is missing")
         return False
 
-    async def create_conversation(self, session: dict[str, Any],
-                                  to_uid: int) -> dict[str, str]:
-        """创建会话（cmd=609）"""
-        cookie_str = session.get("cookie_str", "")
-        payload = {"to_user_id": to_uid, "cmd": 609}
-        headers = {**COMMON_HEADERS, "Cookie": cookie_str,
-                   "Content-Type": "application/json"}
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(IM_CONV_CREATE_URL, json=payload, headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                return {
-                    "conversation_id": str(data.get("conversation_id", "")),
-                    "conversation_short_id": str(data.get("conversation_short_id", "")),
-                    "ticket": str(data.get("ticket", "")),
-                }
+    async def create_conversation(self, session: dict[str, Any], to_uid: int) -> dict[str, str]:
+        """创建会话同样依赖未采集的 web_protect 签名。"""
+        normalize_douyin_session(session)
+        logger.warning("[DouyinIM] create conversation is unavailable: Douyin web_protect signature is missing")
         return {"conversation_id": "", "conversation_short_id": "", "ticket": ""}

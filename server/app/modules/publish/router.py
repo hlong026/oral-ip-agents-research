@@ -1,4 +1,5 @@
 """publish 路由（/publish/*，F-501~F-504）"""
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ router = APIRouter(prefix="/publish", tags=["publish"])
 
 
 # ---- 账号授权 ----
+
 
 @router.get("/accounts", response_model=list[AccountOut])
 async def list_accounts(
@@ -46,7 +48,7 @@ async def qrcode_poll(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> QrcodePollOut:
-    """轮询扫码状态（第二次轮询 Mock 视为已扫码）"""
+    """轮询平台扫码状态；成功后自动保存账号并返回账号信息。"""
     return await service.qrcode_poll(db, user_id, platform, ticket)
 
 
@@ -81,6 +83,7 @@ async def rename_account(
 
 
 # ---- 发布任务 ----
+
 
 @router.post("/jobs", response_model=list[JobOut])
 async def create_jobs(

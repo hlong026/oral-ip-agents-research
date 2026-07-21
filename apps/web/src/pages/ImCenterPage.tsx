@@ -1,15 +1,17 @@
-import { imApi, publishApi, type IMConversation, type IMMessage } from "@oral/api-client";
+import {
+  imApi,
+  publishApi,
+  type IMConversation,
+  type IMMessage,
+} from "@oral/api-client";
 import type { PublishAccount } from "@oral/types";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 
 /** 私信中心：账号筛选 + 会话列表 + 对话气泡 */
 export default function ImCenterPage() {
-  const queryClient = useQueryClient();
   const [activeConv, setActiveConv] = useState<IMConversation | null>(null);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
   const [filterAccountId, setFilterAccountId] = useState<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -56,18 +58,6 @@ export default function ImCenterPage() {
     if (conv.unreadCount > 0) void imApi.markRead(conv.id);
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || !activeConv) return;
-    setSending(true);
-    try {
-      await imApi.send(activeConv.id, input.trim());
-      setInput("");
-      await queryClient.invalidateQueries({ queryKey: ["im-messages", activeConv.id] });
-    } finally {
-      setSending(false);
-    }
-  };
-
   const parseContent = (content: string): string => {
     try {
       const obj = JSON.parse(content);
@@ -81,7 +71,9 @@ export default function ImCenterPage() {
     <div className="space-y-5">
       <div>
         <h1 className="text-xl font-bold">私信中心</h1>
-        <p className="mt-1 text-sm text-text-3">聚合所有绑定账号的抖音私信 · 支持手动回复与自动回复</p>
+        <p className="mt-1 text-sm text-text-3">
+          实时接收绑定账号的新抖音私信 · 当前不包含历史会话同步
+        </p>
       </div>
 
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)" }}>
@@ -91,13 +83,20 @@ export default function ImCenterPage() {
           <div className="border-b border-stroke px-3 py-2">
             <select
               value={filterAccountId}
-              onChange={(e) => { setFilterAccountId(e.target.value); setActiveConv(null); }}
+              onChange={(e) => {
+                setFilterAccountId(e.target.value);
+                setActiveConv(null);
+              }}
               className="w-full rounded-lg border border-stroke bg-white/5 px-2.5 py-1.5 text-xs outline-none focus:border-brand-from/50"
             >
               <option value="">全部账号</option>
-              {accountList.filter((a) => a.platform === "douyin").map((a) => (
-                <option key={a.id} value={a.id}>{a.nickname}</option>
-              ))}
+              {accountList
+                .filter((a) => a.platform === "douyin")
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.nickname}
+                  </option>
+                ))}
             </select>
           </div>
           <div className="border-b border-stroke px-4 py-2.5 text-sm font-medium">
@@ -109,19 +108,30 @@ export default function ImCenterPage() {
                 key={conv.id}
                 onClick={() => selectConv(conv)}
                 className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-white/5 ${
-                  activeConv?.id === conv.id ? "bg-brand-from/10 border-l-2 border-brand-from" : ""
+                  activeConv?.id === conv.id
+                    ? "bg-brand-from/10 border-l-2 border-brand-from"
+                    : ""
                 }`}
               >
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-sm">
-                  {conv.remoteNickname?.[0] ?? "?"}
+                  {conversationName(conv)[0]}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{conv.remoteNickname || "未知用户"}</span>
+                  <span className="block truncate text-sm font-medium">
+                    {conversationName(conv)}
+                  </span>
                   <span className="block truncate text-xs text-text-3">
                     {accountMap.get(conv.accountId)?.nickname && (
-                      <span className="mr-1 text-brand-from/70">@{accountMap.get(conv.accountId)!.nickname}</span>
+                      <span className="mr-1 text-brand-from/70">
+                        @{accountMap.get(conv.accountId)!.nickname}
+                      </span>
                     )}
-                    {new Date(conv.lastMessageAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(conv.lastMessageAt).toLocaleString("zh-CN", {
+                      month: "numeric",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </span>
                 </span>
                 {conv.unreadCount > 0 && (
@@ -132,7 +142,9 @@ export default function ImCenterPage() {
               </button>
             ))}
             {conversations.length === 0 && (
-              <div className="py-12 text-center text-sm text-text-3">暂无私信会话</div>
+              <div className="px-5 py-12 text-center text-sm text-text-3">
+                启动监听后，新收到的真实私信会显示在这里
+              </div>
             )}
           </div>
         </div>
@@ -143,8 +155,12 @@ export default function ImCenterPage() {
             <>
               <div className="flex items-center gap-2 border-b border-stroke px-4 py-3">
                 <PlatformIcon platform="douyin" size={16} />
-                <span className="text-sm font-medium">{activeConv.remoteNickname || "未知用户"}</span>
-                <span className="text-xs text-text-3">UID: {activeConv.remoteUid}</span>
+                <span className="text-sm font-medium">
+                  {conversationName(activeConv)}
+                </span>
+                <span className="text-xs text-text-3">
+                  UID: {activeConv.remoteUid}
+                </span>
                 {accountMap.get(activeConv.accountId) && (
                   <span className="ml-auto chip text-[10px]">
                     <PlatformIcon platform="douyin" size={12} />
@@ -154,21 +170,17 @@ export default function ImCenterPage() {
               </div>
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
                 {messages.map((msg) => (
-                  <MessageBubble key={msg.id} msg={msg} parseContent={parseContent} />
+                  <MessageBubble
+                    key={msg.id}
+                    msg={msg}
+                    parseContent={parseContent}
+                  />
                 ))}
                 <div ref={bottomRef} />
               </div>
-              <div className="flex items-center gap-2 border-t border-stroke px-4 py-3">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && void handleSend()}
-                  placeholder="输入消息…"
-                  className="min-w-0 flex-1 rounded-xl border border-stroke bg-white/5 px-3 py-2 text-sm outline-none focus:border-brand-from/50"
-                />
-                <button className="btn-primary px-4 py-2 text-sm" disabled={sending || !input.trim()} onClick={() => void handleSend()}>
-                  发送
-                </button>
+              <div className="border-t border-stroke px-4 py-3 text-xs text-text-3">
+                当前仅开放真实私信接收；发送与自动回复需完成抖音 web_protect
+                签名接入后再启用。
               </div>
             </>
           ) : (
@@ -182,20 +194,37 @@ export default function ImCenterPage() {
   );
 }
 
-function MessageBubble({ msg, parseContent }: { msg: IMMessage; parseContent: (c: string) => string }) {
+function conversationName(conv: IMConversation): string {
+  return conv.remoteNickname || `抖音用户 ${conv.remoteUid.slice(-6)}`;
+}
+
+function MessageBubble({
+  msg,
+  parseContent,
+}: {
+  msg: IMMessage;
+  parseContent: (c: string) => string;
+}) {
   const isOut = msg.direction === "out";
   const text = parseContent(msg.content);
   return (
     <div className={`flex ${isOut ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
-        isOut
-          ? "bg-brand-from/20 text-text-1"
-          : "bg-white/5 text-text-1"
-      }`}>
+      <div
+        className={`max-w-[70%] rounded-2xl px-3.5 py-2 text-sm ${
+          isOut ? "bg-brand-from/20 text-text-1" : "bg-white/5 text-text-1"
+        }`}
+      >
         <p className="whitespace-pre-wrap break-words">{text}</p>
         <div className="mt-1 flex items-center gap-2 text-[10px] text-text-3">
-          <span>{new Date(msg.createdAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}</span>
-          {msg.autoReplied && <span className="text-brand-to">⚡ 自动回复</span>}
+          <span>
+            {new Date(msg.createdAt).toLocaleTimeString("zh-CN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+          {msg.autoReplied && (
+            <span className="text-brand-to">⚡ 自动回复</span>
+          )}
         </div>
       </div>
     </div>

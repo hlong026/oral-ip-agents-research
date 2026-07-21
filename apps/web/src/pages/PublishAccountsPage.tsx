@@ -1,62 +1,121 @@
-import { HttpError, imApi, publishApi, type IMListenerStatus } from "@oral/api-client";
-import { PLATFORM_NAMES, PUBLISH_PLATFORMS, type Platform, type PublishAccount } from "@oral/types";
+import {
+  HttpError,
+  imApi,
+  publishApi,
+  type IMListenerStatus,
+} from "@oral/api-client";
+import {
+  PLATFORM_NAMES,
+  PUBLISH_PLATFORMS,
+  type Platform,
+  type PublishAccount,
+} from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 
 interface QrSession {
   platform: Platform;
   ticket: string;
   qrcodeUrl: string;
-  status: "waiting" | "success" | "expired";
+  status: "starting" | "waiting" | "success" | "expired";
 }
 
 /** 扫码授权弹层（F-502：qrcode 发起 → 2s 轮询 → 成功/过期；等待中同步刷新后的新二维码） */
-function QrPanel({ session, onClose, onSuccess }: { session: QrSession; onClose: () => void; onSuccess: () => void }) {
+function QrPanel({
+  session,
+  onClose,
+  onSuccess,
+}: {
+  session: QrSession;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [status, setStatus] = useState(session.status);
   const [qrUrl, setQrUrl] = useState(session.qrcodeUrl);
+  const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
     if (status !== "waiting") return;
-    const timer = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
       try {
-        const res = await publishApi.qrcodePoll(session.ticket, session.platform);
+        const res = await publishApi.qrcodePoll(
+          session.ticket,
+          session.platform,
+        );
+        if (cancelled) return;
         // 平台二维码过期后后端会自动刷新，轮询拿到新图立即替换
         if (res.qrcodeUrl) setQrUrl(res.qrcodeUrl);
+        if (res.message) setStatusMessage(res.message);
         setStatus(res.status);
-        if (res.status === "success") {
-          clearInterval(timer);
-          setTimeout(onSuccess, 800);
-        }
       } catch {
         /* 网络抖动时继续轮询 */
       }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [session, status, onSuccess]);
+      if (!cancelled) timer = setTimeout(() => void poll(), 2000);
+    };
+
+    timer = setTimeout(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [session.platform, session.ticket, status]);
+
+  useEffect(() => {
+    if (status !== "success") return;
+    const timer = setTimeout(onSuccess, 800);
+    return () => clearTimeout(timer);
+  }, [status, onSuccess]);
 
   return (
-    <div className="glass-strong flex items-center gap-4 border-brand-from/40 p-4">
-      <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-white p-2">
-        {qrUrl ? (
-          <img src={qrUrl} alt="授权二维码" className="h-full w-full object-contain" />
-        ) : (
-          <span className="text-4xl">▦</span>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">
-          <PlatformIcon platform={session.platform} size={18} /> 绑定{PLATFORM_NAMES[session.platform]}账号
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`添加${PLATFORM_NAMES[session.platform]}账号`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    >
+      <div className="glass-strong flex w-full max-w-md items-center gap-4 border-brand-from/40 p-5 shadow-2xl">
+        <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-white p-2">
+          {qrUrl ? (
+            <img
+              src={qrUrl}
+              alt="授权二维码"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <span className="text-center text-sm text-slate-500">
+              {status === "starting" ? "正在生成二维码…" : "二维码加载中…"}
+            </span>
+          )}
         </div>
-        <div className="mt-1 text-sm text-text-3">
-          {status === "waiting" && "请使用手机 App 扫码，并在手机上确认授权（二维码过期会自动刷新）"}
-          {status === "success" && <span className="text-success">✓ 授权成功，正在写入账号…</span>}
-          {status === "expired" && <span className="text-warning">授权未完成或二维码已过期，请关闭后重新发起</span>}
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">
+            <PlatformIcon platform={session.platform} size={18} /> 绑定
+            {PLATFORM_NAMES[session.platform]}账号
+          </div>
+          <div className="mt-1 text-sm text-text-3">
+            {status === "starting" && "正在连接平台并生成二维码，请稍候"}
+            {status === "waiting" &&
+              "请使用手机 App 扫码，并按平台提示完成授权（二维码过期会自动刷新）"}
+            {status === "success" && (
+              <span className="text-success">
+                ✓ 授权成功，正在自动保存账号…
+              </span>
+            )}
+            {status === "expired" && (
+              <span className="text-warning">
+                {statusMessage || "授权未完成或二维码已过期，请关闭后重新发起"}
+              </span>
+            )}
+          </div>
         </div>
+        <button className="btn-ghost px-3 py-1 text-xs" onClick={onClose}>
+          取消
+        </button>
       </div>
-      <button className="btn-ghost px-3 py-1 text-xs" onClick={onClose}>
-        取消
-      </button>
     </div>
   );
 }
@@ -69,8 +128,9 @@ export default function PublishAccountsPage() {
   const [editingId, setEditingId] = useState("");
   const [error, setError] = useState("");
   const startingRef = useRef(false);
+  const qrRequestRef = useRef(0);
 
-  const { data: accounts, refetch } = useQuery({
+  const { data: accounts } = useQuery({
     queryKey: ["publish-accounts"],
     queryFn: () => publishApi.accounts(),
     refetchInterval: 30_000,
@@ -79,32 +139,67 @@ export default function PublishAccountsPage() {
   const list = accounts ?? [];
   const expired = list.filter((a) => a.status === "expired");
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["publish-accounts"] });
-    await refetch();
-  };
+  }, [queryClient]);
+
+  const handleQrSuccess = useCallback(() => {
+    setQr(null);
+    void refresh();
+  }, [refresh]);
+
+  const closeQr = useCallback(() => {
+    qrRequestRef.current += 1;
+    startingRef.current = false;
+    setQr(null);
+  }, []);
 
   const startBind = async (platform: Platform) => {
     if (startingRef.current) return;
     startingRef.current = true;
+    const requestId = ++qrRequestRef.current;
     setError("");
+    setQr({ platform, ticket: "", qrcodeUrl: "", status: "starting" });
     try {
       const res = await publishApi.qrcodeStart(platform);
-      setQr({ platform, ticket: res.ticket, qrcodeUrl: res.qrcodeUrl, status: "waiting" });
+      if (requestId !== qrRequestRef.current) return;
+      setQr({
+        platform,
+        ticket: res.ticket,
+        qrcodeUrl: res.qrcodeUrl,
+        status: "waiting",
+      });
     } catch (e) {
+      if (requestId !== qrRequestRef.current) return;
+      setQr(null);
       setError(e instanceof HttpError ? e.body.message : "发起扫码授权失败");
     } finally {
-      startingRef.current = false;
+      if (requestId === qrRequestRef.current) startingRef.current = false;
     }
   };
 
   const reauth = async (account: PublishAccount) => {
     setBusyId(account.id);
+    const requestId = ++qrRequestRef.current;
     setError("");
+    setQr({
+      platform: account.platform,
+      ticket: "",
+      qrcodeUrl: "",
+      status: "starting",
+    });
     try {
       const res = await publishApi.reauth(account.id);
-      setQr({ platform: account.platform, ticket: res.ticket, qrcodeUrl: res.qrcodeUrl, status: "waiting" });
+      if (requestId !== qrRequestRef.current) return;
+      setQr({
+        platform: account.platform,
+        ticket: res.ticket,
+        qrcodeUrl: res.qrcodeUrl,
+        status: "waiting",
+      });
     } catch (e) {
+      if (requestId !== qrRequestRef.current) return;
+      setQr(null);
       setError(e instanceof HttpError ? e.body.message : "发起重新授权失败");
     } finally {
       setBusyId("");
@@ -148,7 +243,9 @@ export default function PublishAccountsPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">账号管理</h1>
-          <p className="mt-1 text-sm text-text-3">平台账号绑定 · 登录态巡检 · 授权续期（F-501/502）</p>
+          <p className="mt-1 text-sm text-text-3">
+            平台账号绑定 · 登录态巡检 · 授权续期（F-501/502）
+          </p>
         </div>
         <span className="chip text-[11px]">每日 06:00 自动巡检登录态</span>
       </div>
@@ -157,32 +254,44 @@ export default function PublishAccountsPage() {
       {expired.length > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3">
           <span className="text-sm text-danger">
-            ⚠ {expired.map((a) => `${a.platformName}账号「${a.nickname}」`).join("、")}登录态已过期，关联发布任务被阻塞。
+            ⚠{" "}
+            {expired
+              .map((a) => `${a.platformName}账号「${a.nickname}」`)
+              .join("、")}
+            登录态已过期，关联发布任务被阻塞。
           </span>
-          <button className="btn-primary px-3 py-1 text-xs" disabled={busyId === expired[0]!.id} onClick={() => void reauth(expired[0]!)}>
+          <button
+            className="btn-primary px-3 py-1 text-xs"
+            disabled={busyId === expired[0]!.id}
+            onClick={() => void reauth(expired[0]!)}
+          >
             扫码重新授权
           </button>
         </div>
       )}
-      {error && <div className="rounded-card border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">{error}</div>}
+      {error && (
+        <div className="rounded-card border border-danger/30 bg-danger/10 px-4 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
 
       {/* 扫码授权面板 */}
       {qr && (
         <QrPanel
+          key={`${qr.platform}:${qr.ticket || "starting"}`}
           session={qr}
-          onClose={() => setQr(null)}
-          onSuccess={() => {
-            setQr(null);
-            void refresh();
-          }}
+          onClose={closeQr}
+          onSuccess={handleQrSuccess}
         />
       )}
 
-      {/* 已绑定账号 */}
+      {/* 已登录账号 */}
       <div className="glass p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-medium">已绑定账号（{list.length}）</h2>
-          <span className="text-xs text-text-3">Cookie 加密存 PG · 会话态 Redis</span>
+          <h2 className="font-medium">已登录账号（{list.length}）</h2>
+          <span className="text-xs text-text-3">
+            Cookie 加密存 PG · 会话态 Redis
+          </span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -197,10 +306,14 @@ export default function PublishAccountsPage() {
             </thead>
             <tbody>
               {list.map((a) => (
-                <tr key={a.id} className="border-b border-stroke/50 last:border-0">
+                <tr
+                  key={a.id}
+                  className="border-b border-stroke/50 last:border-0"
+                >
                   <td className="py-2.5 pr-3">
                     <span className="chip text-[11px]">
-                      <PlatformIcon platform={a.platform} size={14} /> {a.platformName}
+                      <PlatformIcon platform={a.platform} size={14} />{" "}
+                      {a.platformName}
                     </span>
                   </td>
                   <td className="py-2.5 pr-3 font-medium">
@@ -212,7 +325,11 @@ export default function PublishAccountsPage() {
                         maxLength={30}
                         className="w-36 rounded-lg border border-brand bg-transparent px-2 py-0.5 text-sm text-text-1 outline-none"
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") void saveRename(a.id, (e.target as HTMLInputElement).value);
+                          if (e.key === "Enter")
+                            void saveRename(
+                              a.id,
+                              (e.target as HTMLInputElement).value,
+                            );
                           if (e.key === "Escape") setEditingId("");
                         }}
                         onBlur={(e) => void saveRename(a.id, e.target.value)}
@@ -232,24 +349,42 @@ export default function PublishAccountsPage() {
                   </td>
                   <td className="py-2.5 pr-3">
                     {a.status === "active" ? (
-                      <span className="chip border-success/40 text-[11px] text-success">正常</span>
+                      <span className="chip border-success/40 text-[11px] text-success">
+                        正常
+                      </span>
                     ) : (
-                      <span className="chip border-danger/40 text-[11px] text-danger">已过期</span>
+                      <span className="chip border-danger/40 text-[11px] text-danger">
+                        已过期
+                      </span>
                     )}
                   </td>
-                  <td className="py-2.5 pr-3 text-xs text-text-3">{new Date(a.createdAt).toLocaleDateString("zh-CN")}</td>
+                  <td className="py-2.5 pr-3 text-xs text-text-3">
+                    {new Date(a.createdAt).toLocaleDateString("zh-CN")}
+                  </td>
                   <td className="py-2.5">
                     <div className="flex gap-1.5">
                       {a.status === "expired" ? (
-                        <button className="btn-primary px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void reauth(a)}>
+                        <button
+                          className="btn-primary px-2.5 py-0.5 text-xs"
+                          disabled={busyId === a.id}
+                          onClick={() => void reauth(a)}
+                        >
                           重新授权
                         </button>
                       ) : (
-                        <button className="btn-ghost px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void reauth(a)}>
+                        <button
+                          className="btn-ghost px-2.5 py-0.5 text-xs"
+                          disabled={busyId === a.id}
+                          onClick={() => void reauth(a)}
+                        >
                           续期
                         </button>
                       )}
-                      <button className="btn-ghost px-2.5 py-0.5 text-xs" disabled={busyId === a.id} onClick={() => void unbind(a)}>
+                      <button
+                        className="btn-ghost px-2.5 py-0.5 text-xs"
+                        disabled={busyId === a.id}
+                        onClick={() => void unbind(a)}
+                      >
                         解绑
                       </button>
                     </div>
@@ -259,7 +394,7 @@ export default function PublishAccountsPage() {
               {list.length === 0 && (
                 <tr>
                   <td colSpan={5} className="py-12 text-center text-text-3">
-                    暂无绑定账号，先在下方扫码绑定一个平台账号
+                    暂无已登录账号，点击下方平台添加账号
                   </td>
                 </tr>
               )}
@@ -269,18 +404,23 @@ export default function PublishAccountsPage() {
       </div>
 
       <div className="grid items-start gap-4 md:grid-cols-2">
-        {/* 绑定新账号 */}
+        {/* 添加账号 */}
         <div className="glass p-5">
-          <h2 className="mb-4 font-medium">绑定新账号</h2>
+          <h2 className="mb-4 font-medium">添加账号</h2>
           <div className="grid grid-cols-3 gap-2.5">
             {PUBLISH_PLATFORMS.map((p) => (
-              <button key={p} className="btn-ghost justify-center" onClick={() => void startBind(p)}>
+              <button
+                key={p}
+                className="btn-ghost justify-center"
+                onClick={() => void startBind(p)}
+              >
                 <PlatformIcon platform={p} size={16} /> {PLATFORM_NAMES[p]}
               </button>
             ))}
           </div>
           <div className="mt-4 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-            ℹ 绑定时使用手机扫码，Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。
+            ℹ
+            点击平台后直接扫码；授权完成会自动保存到“已登录账号”，无需在网页再次确认。
           </div>
         </div>
 
@@ -290,15 +430,21 @@ export default function PublishAccountsPage() {
           <div className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
               <span>每日自动巡检</span>
-              <span className="chip border-success/40 text-[11px] text-success">已开启 · 06:00</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                已开启 · 06:00
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>到期前提醒</span>
-              <span className="chip border-success/40 text-[11px] text-success">提前 3 天 · 站内信</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                提前 3 天 · 站内信
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>过期自动暂停发布</span>
-              <span className="chip border-success/40 text-[11px] text-success">已开启</span>
+              <span className="chip border-success/40 text-[11px] text-success">
+                已开启
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>解绑后保留历史数据</span>
@@ -318,6 +464,7 @@ export default function PublishAccountsPage() {
 function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState("");
+  const [listenerError, setListenerError] = useState("");
   const dyAccounts = accounts.filter((a) => a.platform === "douyin");
 
   const { data: listeners } = useQuery({
@@ -333,6 +480,7 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
     const ls = listenerMap.get(account.id);
     const isListening = ls?.status === "listening";
     setBusyId(account.id);
+    setListenerError("");
     try {
       if (isListening) {
         await imApi.stopListener(account.id);
@@ -340,6 +488,10 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         await imApi.startListener(account.id);
       }
       await queryClient.invalidateQueries({ queryKey: ["im-listener-status"] });
+    } catch (error) {
+      setListenerError(
+        error instanceof Error ? error.message : "私信监听操作失败",
+      );
     } finally {
       setBusyId("");
     }
@@ -351,29 +503,41 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
     <div className="glass p-5">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-medium">私信监听（抖音 IM）</h2>
-        <span className="text-xs text-text-3">WebSocket 长连接 · 实时收取私信</span>
+        <span className="text-xs text-text-3">
+          WebSocket 长连接 · 实时收取私信
+        </span>
       </div>
       <div className="space-y-2.5">
         {dyAccounts.map((a) => {
           const ls = listenerMap.get(a.id);
           const st = ls?.status ?? "disconnected";
           return (
-            <div key={a.id} className="flex items-center justify-between rounded-xl border border-stroke/60 px-4 py-3">
+            <div
+              key={a.id}
+              className="flex items-center justify-between rounded-xl border border-stroke/60 px-4 py-3"
+            >
               <div className="flex items-center gap-3">
                 <PlatformIcon platform="douyin" size={18} />
                 <div>
                   <span className="text-sm font-medium">{a.nickname}</span>
                   <span className="ml-2 text-xs text-text-3">
-                    {st === "listening" && `监听中${ls?.startedAt ? ` · ${new Date(ls.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 启动` : ""}`}
+                    {st === "listening" &&
+                      `监听中${ls?.startedAt ? ` · ${new Date(ls.startedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })} 启动` : ""}`}
                     {st === "disconnected" && "未连接"}
                     {st === "error" && `异常：${ls?.errorMsg || "未知"}`}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-block h-2 w-2 rounded-full ${
-                  st === "listening" ? "bg-success animate-pulse" : st === "error" ? "bg-danger" : "bg-text-3/40"
-                }`} />
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${
+                    st === "listening"
+                      ? "bg-success animate-pulse"
+                      : st === "error"
+                        ? "bg-danger"
+                        : "bg-text-3/40"
+                  }`}
+                />
                 <button
                   className={`px-3 py-1 text-xs rounded-lg border transition-colors ${
                     st === "listening"
@@ -383,7 +547,11 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
                   disabled={busyId === a.id || a.status !== "active"}
                   onClick={() => void toggle(a)}
                 >
-                  {busyId === a.id ? "…" : st === "listening" ? "停止监听" : "启动监听"}
+                  {busyId === a.id
+                    ? "…"
+                    : st === "listening"
+                      ? "停止监听"
+                      : "启动监听"}
                 </button>
               </div>
             </div>
@@ -391,8 +559,13 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         })}
       </div>
       <div className="mt-3 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-        ℹ 启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
+        ℹ 启动监听后，系统实时接收新私信；历史会话同步和主动发送当前未开放。
       </div>
+      {listenerError && (
+        <div className="mt-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
+          {listenerError}
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 """全局配置（pydantic-settings，.env 驱动）"""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,9 +49,9 @@ class Settings(BaseSettings):
     # 飞影数字人（内部代号，用户侧白标不暴露）
     feiying_api_key: str = ""
     feiying_base_url: str = "https://hfw-api.hifly.cc"
-    feiying_poll_interval: float = 5.0      # 轮询间隔（秒）
-    feiying_poll_max_attempts: int = 60     # 最大轮询次数（5分钟超时）
-    feiying_webhook_secret: str = ""        # 回调验签（预留）
+    feiying_poll_interval: float = 5.0  # 轮询间隔（秒）
+    feiying_poll_max_attempts: int = 60  # 最大轮询次数（5分钟超时）
+    feiying_webhook_secret: str = ""  # 回调验签（预留）
 
     # 第三方解析兜底
     parse_api_url: str = ""
@@ -78,13 +79,16 @@ class Settings(BaseSettings):
     # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口
     # （有头窗口易被用户扫完码后顺手关闭，导致后端轮询页面失效、登录判失败）
     publish_browser_headless: bool = True
+    publish_browser_executable_path: str = ""  # 留空时自动探测本机 Chrome / Edge
     publish_max_concurrency: int = 2  # 浏览器并发槽位数
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
 
-    # 抖音 IM 私信（#11: APP_KEY 移入配置，未配置时自动降级到 MockIMProvider）
-    douyin_im_app_key: str = ""
+    # 抖音 IM 私信。Mock 仅允许测试显式开启，避免生产界面混入模拟用户。
+    douyin_im_use_mock: bool = False
+    douyin_im_app_key: str = "e1bd35ec9db7b8d846de66ed140b1ad9"
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
+    douyin_im_access_key_suffix: str = "f8a69f1719916z"
 
 
 @lru_cache

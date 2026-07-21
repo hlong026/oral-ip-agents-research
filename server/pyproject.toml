@@ -20,10 +20,10 @@ dependencies = [
     "python-multipart>=0.0.19",
     "aiofiles>=24.1",
     "structlog>=24.0",
+    "loguru>=0.7",
     "cryptography>=44.0",
-    "websockets>=12.0",
+    "websockets>=14.0",
     "protobuf>=4.25",
-    "blackboxprotobuf>=1.0",
     # 发布模块：浏览器自动化（social-auto-upload 集成）
     "patchright>=1.58",
     "qrcode>=8.0",

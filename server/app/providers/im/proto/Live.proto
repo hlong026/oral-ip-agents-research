@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package oral.im;
+
+message HeadersList {
+  string key = 1;
+  string value = 2;
+}
+
+message PushFrame {
+  uint64 seqId = 1;
+  uint64 logId = 2;
+  uint64 service = 3;
+  uint64 method = 4;
+  repeated HeadersList headersList = 5;
+  string payloadEncoding = 6;
+  string payloadType = 7;
+  bytes payload = 8;
+  string logIdNew = 9;
+}

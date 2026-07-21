@@ -5,12 +5,15 @@ Provider 注册表（06 文档 §10.3）
 - 新增供应商 = 新建文件实现 Protocol + 在此注册一行
 - 日志：降级链 WARNING/ERROR（§10.6.8-A #4）+ 调用耗时（§10.6.8-B #5）
 """
+
 import time
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
 
+from .aliyun_asr import AliyunASR
 from .base import (
     ASRProvider,
     AvatarProvider,
@@ -20,17 +23,16 @@ from .base import (
     PublishDriver,
     VoiceProvider,
 )
-from .im.base import IMProvider
-from .im.mock_im import MockIMProvider
-from .im.douyin_im import DouyinIMProvider
-from .aliyun_asr import AliyunASR
 from .douyidou import DouyidouParser
-from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPublishDriver, MockVoice
-from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
 from .hifly import HiFlyAvatar, HiFlyVoice
+from .im.base import IMProvider
+from .im.douyin_im import DouyinIMProvider
+from .im.mock_im import MockIMProvider
+from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPublishDriver, MockVoice
 from .publish.douyin import DouyinPublishDriver
-from .publish.xiaohongshu import XiaohongshuPublishDriver
 from .publish.tencent import TencentPublishDriver
+from .publish.xiaohongshu import XiaohongshuPublishDriver
+from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
 
 logger = get_logger("oral.providers.registry")
 
@@ -54,14 +56,15 @@ class ProviderRegistry:
         self._publish_mock_fallback: dict[str, PublishDriver] = {
             p: MockPublishDriver(p) for p in ("douyin", "xiaohongshu", "shipinhao")
         }
-        # #9 IM Provider：未配置 key 时使用 MockIMProvider
-        _has_im_key = bool(get_settings().douyin_im_app_key)
+        # IM Provider：生产默认真实链路；Mock 只能由测试/演示环境显式开启。
+        _use_mock_im = get_settings().douyin_im_use_mock
         self.im_drivers: dict[str, IMProvider] = {
-            "douyin": DouyinIMProvider() if _has_im_key else MockIMProvider(),
+            "douyin": MockIMProvider() if _use_mock_im else DouyinIMProvider(),
         }
 
-    async def run_with_fallback(self, kind: str, chain: list, fn_name: str, *args,
-                                trace_id: str = "", task_id: str = "", **kwargs):
+    async def run_with_fallback(
+        self, kind: str, chain: list, fn_name: str, *args, trace_id: str = "", task_id: str = "", **kwargs
+    ):
         """沿降级链执行；StepRecoverableError 触发切换，降级事件推任务中心"""
         from .base import StepRecoverableError
 
@@ -92,11 +95,17 @@ class ProviderRegistry:
                         trace_id=trace_id,
                         task_id=task_id,
                     )
-                    await publish(CHANNEL_TASKS, {
-                        "kind": "provider_fallback", "provider_kind": kind,
-                        "to": provider.name, "taskId": task_id, "traceId": trace_id,
-                        "message": f"{kind} 已降级到 {provider.name}",
-                    })
+                    await publish(
+                        CHANNEL_TASKS,
+                        {
+                            "kind": "provider_fallback",
+                            "provider_kind": kind,
+                            "to": provider.name,
+                            "taskId": task_id,
+                            "traceId": trace_id,
+                            "message": f"{kind} 已降级到 {provider.name}",
+                        },
+                    )
                 return result, provider.name
             except StepRecoverableError as e:
                 # 降级链中某 Provider 失败：记录 WARNING
@@ -133,7 +142,7 @@ class ProviderRegistry:
 
     def get(self, kind: str):
         """按类型获取链首 Provider（供 im 等模块直接调用 LLM）"""
-        chain_map = {
+        chain_map: dict[str, list[Any]] = {
             "llm": self.llm_chain,
             "parse": self.parse_chain,
             "asr": self.asr_chain,

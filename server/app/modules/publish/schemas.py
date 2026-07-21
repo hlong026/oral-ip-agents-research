@@ -1,4 +1,5 @@
 """publish 出入参"""
+
 from pydantic import BaseModel
 
 
@@ -24,6 +25,7 @@ class QrcodePollOut(BaseModel):
     status: str  # waiting | success | expired
     account: AccountOut | None = None
     qrcodeUrl: str | None = None  # 等待中透传最新二维码（过期自动刷新后前端同步换图）
+    message: str | None = None
 
 
 class PublishIn(BaseModel):
