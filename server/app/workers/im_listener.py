@@ -16,6 +16,7 @@ from app.modules.publish.models import PublishAccount
 logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 30 * 60
+COOKIE_CHECK_RETRY_INTERVAL = 60
 RECONCILE_INTERVAL = 5
 STATE_POLL_INTERVAL = 5
 LEASE_TTL_SECONDS = 30
@@ -206,7 +207,8 @@ async def _load_account_context(account_id: str, user_id: str) -> tuple[dict[str
         return publish_repo.account_session(account), account.platform
 
 
-async def _check_cookie_validity(session: dict[str, Any]) -> bool:
+async def _check_cookie_validity(session: dict[str, Any]) -> bool | None:
+    """Return False only for a definitive credential rejection; None means probe unavailable."""
     import httpx
 
     cookie_str = session.get("cookie_str", "")
@@ -218,35 +220,21 @@ async def _check_cookie_validity(session: dict[str, Any]) -> bool:
                 "https://www.douyin.com/aweme/v1/web/user/profile/self/",
                 headers={"Cookie": cookie_str, "User-Agent": "Mozilla/5.0"},
             )
+        if response.status_code in {401, 403}:
+            return False
+        if response.status_code != 200:
+            return None
         data = response.json()
-        return response.status_code == 200 and data.get("status_code", -1) == 0
+        return data.get("status_code", -1) == 0
     except (httpx.HTTPError, ValueError, TypeError):
-        return False
+        return None
 
 
 async def _mark_cookie_expired(account_id: str, user_id: str) -> None:
-    from app.core.events import publish as emit
-    from app.modules.im import repository as im_repo
-    from app.modules.im.events import CHANNEL_IM, EV_LISTENER_STATUS
+    from app.modules.im.service import expire_account_credentials
 
     async with SessionLocal() as db:
-        await im_repo.upsert_listener_state(
-            db,
-            account_id=account_id,
-            user_id=user_id,
-            status="error",
-            error_msg="cookie_expired",
-        )
-    await emit(
-        CHANNEL_IM,
-        {
-            "kind": EV_LISTENER_STATUS,
-            "userId": user_id,
-            "accountId": account_id,
-            "status": "error",
-            "errorMsg": "登录态失效，请重新绑定账号",
-        },
-    )
+        await expire_account_credentials(db, account_id, user_id)
 
 
 async def _set_listener_error(account_id: str, user_id: str, error: Exception) -> None:
@@ -323,9 +311,14 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
 
                     now = asyncio.get_running_loop().time()
                     if now - last_heartbeat >= HEARTBEAT_INTERVAL:
-                        if not await _check_cookie_validity(session):
+                        cookie_valid = await _check_cookie_validity(session)
+                        if cookie_valid is False:
                             await _mark_cookie_expired(account_id, user_id)
                             return
+                        if cookie_valid is None:
+                            logger.warning("[IMWorker] cookie probe unavailable for %s", account_id[:8])
+                            last_heartbeat = now - HEARTBEAT_INTERVAL + COOKIE_CHECK_RETRY_INTERVAL
+                            continue
                         last_heartbeat = now
                         from app.modules.im import repository as im_repo
 

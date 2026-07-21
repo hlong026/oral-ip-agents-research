@@ -40,6 +40,10 @@ _reply_limiter = None
 AUTOMATION_RISK_VERSION = "im-auto-reply-v1"
 
 
+class AccountCredentialExpiredError(RuntimeError):
+    """The platform session is known to be expired and must not be retried."""
+
+
 # ============ 转换函数 ============
 
 
@@ -208,8 +212,8 @@ async def _send_existing_message(
     content: str,
 ) -> None:
     try:
-        provider = registry.im_driver(conversation.platform)
         session = await _load_account_session(conversation.account_id, conversation.user_id)
+        provider = registry.im_driver(conversation.platform)
         sent = await provider.send_message(
             session=session,
             conversation_id=conversation.dy_conversation_id,
@@ -240,6 +244,15 @@ async def _send_existing_message(
 
 
 def _send_failure(message: IMMessage) -> HTTPException:
+    if message.send_error == AccountCredentialExpiredError.__name__:
+        return HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ACCOUNT_CREDENTIAL_EXPIRED",
+                "message": "抖音账号登录态已失效，请重新授权后再发送",
+                "messageId": message.id,
+            },
+        )
     return HTTPException(
         status.HTTP_502_BAD_GATEWAY,
         detail={
@@ -450,6 +463,68 @@ async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
 async def get_global_kill_switch(db: AsyncSession) -> bool:
     control = await repo.get_global_control(db)
     return True if control is None else control.stopped
+
+
+async def expire_account_credentials(db: AsyncSession, account_id: str, user_id: str) -> bool:
+    """Fail closed after a Douyin session expires and notify only on the first transition."""
+    from app.core.audit import write_audit
+    from app.modules.notify.service import notify_user
+    from app.modules.publish import repository as publish_repo
+
+    account = await publish_repo.get_account(db, account_id, user_id)
+    if account is None:
+        return False
+    newly_expired = account.status != "expired"
+    account.status = "expired"
+
+    listener_state = await repo.get_listener_state(db, account_id, user_id)
+    if listener_state is not None:
+        listener_state.status = "error"
+        listener_state.error_msg = "cookie_expired"
+    canceled = await repo.disable_account_automation(
+        db,
+        account_id,
+        user_id,
+        reason="CredentialExpired",
+    )
+    logger.warning(
+        "IM credentials expired: account=%s user=%s canceled=%d",
+        account_id[:8],
+        user_id[:8],
+        canceled,
+    )
+
+    if newly_expired:
+        await write_audit(
+            "im_account_credential_expired",
+            user_id=user_id,
+            detail=f"account_id={account_id},platform={account.platform}",
+        )
+        try:
+            await notify_user(
+                db,
+                user_id,
+                "warn",
+                f"抖音账号「{account.nickname or account_id[:8]}」登录态失效，请重新授权",
+                "私信监听和待发送自动回复已停止；请在账号管理中重新扫码授权后再手动恢复自动回复。",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("IM credential expiry notification failed: account=%s", account_id[:8])
+
+    try:
+        await emit(
+            CHANNEL_IM,
+            {
+                "kind": EV_LISTENER_STATUS,
+                "userId": user_id,
+                "accountId": account_id,
+                "status": "error",
+                "errorMsg": "登录态失效，请重新绑定账号",
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("IM credential expiry event failed: account=%s", account_id[:8])
+    return True
 
 
 # ============ 消息接收处理（供 Worker 调用） ============
@@ -758,8 +833,10 @@ async def _load_account_session(account_id: str, user_id: str) -> dict:
 
     async with SessionLocal() as db:
         acc = await pub_repo.get_account(db, account_id, user_id)
-        if acc:
+        if acc and acc.status == "active":
             return pub_repo.account_session(acc)
+        if acc:
+            raise AccountCredentialExpiredError("account credentials expired")
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},

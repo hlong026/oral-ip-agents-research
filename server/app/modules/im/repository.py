@@ -384,7 +384,13 @@ async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
     return canceled
 
 
-async def disable_account_automation(db: AsyncSession, account_id: str, user_id: str) -> int:
+async def disable_account_automation(
+    db: AsyncSession,
+    account_id: str,
+    user_id: str,
+    *,
+    reason: str = "AccountKillSwitch",
+) -> int:
     consent = await get_automation_consent(db, account_id, user_id)
     if consent is not None:
         consent.auto_reply_enabled = False
@@ -398,7 +404,7 @@ async def disable_account_automation(db: AsyncSession, account_id: str, user_id:
             IMMessage.conversation_id.in_(conversation_ids),
             IMMessage.send_status == "scheduled",
         )
-        .values(send_status="canceled", send_error="AccountKillSwitch")
+        .values(send_status="canceled", send_error=reason[:256])
     )
     await db.commit()
     return int(getattr(result, "rowcount", 0) or 0)
