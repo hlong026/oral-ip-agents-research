@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal
@@ -31,6 +32,7 @@ from .schemas import (
     RuleOut,
     RuleUpdateIn,
     SendMessageIn,
+    SyncOut,
 )
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,8 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
         conversation_short_id=conv.dy_conversation_short_id,
         ticket=conv.dy_ticket,
         content=inp.content,
+        remote_uid=conv.remote_uid,
+        remote_nickname=conv.remote_nickname,
     )
     if not sent:
         raise HTTPException(
@@ -307,40 +311,31 @@ async def handle_incoming_message(
     dy_conversation_id: str = "",
     dy_conversation_short_id: str = "",
     dy_ticket: str = "",
+    remote_message_id: str = "",
+    remote_index: int | None = None,
 ) -> None:
     """Worker 收到新私信后的统一入口：落库 → 推送 → 触发自动回复"""
     async with _session() as db:
-        # 1. 查找或创建会话
-        conv = await repo.get_conversation_by_dy_id(db, account_id, remote_uid)
-        if conv is None:
-            conv = await repo.create_conversation(
-                db,
-                account_id=account_id,
-                user_id=user_id,
-                platform="douyin",
-                remote_uid=remote_uid,
-                remote_nickname=remote_nickname,
-                remote_avatar=remote_avatar,
-                dy_conversation_id=dy_conversation_id,
-                dy_conversation_short_id=dy_conversation_short_id,
-                dy_ticket=dy_ticket,
-                last_message_at=datetime.now(UTC),
-                unread_count=1,
-            )
-        else:
-            conv.last_message_at = datetime.now(UTC)
-            conv.unread_count = (conv.unread_count or 0) + 1
-            if remote_nickname:
-                conv.remote_nickname = remote_nickname
-            await repo.save_conversation(db, conv)
-
-        # 2. 消息落库
-        content_json = json.dumps({"text": content}, ensure_ascii=False) if msg_type == 7 else content
-        msg = await repo.create_message(
-            db, conversation_id=conv.id, user_id=user_id, direction="in", msg_type=msg_type, content=content_json
+        conv, msg = await _persist_remote_message(
+            db,
+            account_id=account_id,
+            user_id=user_id,
+            remote_uid=remote_uid,
+            remote_nickname=remote_nickname,
+            remote_avatar=remote_avatar,
+            direction="in",
+            msg_type=msg_type,
+            content=content,
+            dy_conversation_id=dy_conversation_id,
+            dy_conversation_short_id=dy_conversation_short_id,
+            dy_ticket=dy_ticket,
+            remote_message_id=remote_message_id or None,
+            remote_index=remote_index,
+            increment_unread=True,
         )
+        if msg is None:
+            return
 
-        # 3. 推送前端
         await emit(
             CHANNEL_IM,
             {
@@ -351,9 +346,219 @@ async def handle_incoming_message(
             },
         )
 
-        # 4. 触发自动回复（仅文本消息）
         if msg_type == 7:
             await _try_auto_reply(db, conv, content)
+
+
+async def sync_account_messages(
+    db: AsyncSession,
+    user_id: str,
+    account_id: str,
+    limit: int = 100,
+) -> SyncOut:
+    """用已保存的浏览器登录态增量导入可见历史；历史消息不会触发自动回复。"""
+    from app.modules.publish import repository as publish_repo
+
+    account = await publish_repo.get_account(db, account_id, user_id)
+    if not account:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "ACCOUNT_NOT_FOUND", "message": "账号不存在"})
+    if account.platform != "douyin":
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "IM_PLATFORM_UNSUPPORTED", "message": "当前仅支持抖音私信同步"},
+        )
+    if account.status != "active":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ACCOUNT_LOGIN_EXPIRED", "message": "抖音登录态已失效，请重新扫码绑定"},
+        )
+
+    provider = registry.im_driver(account.platform)
+    try:
+        session = json.loads(account.session_json or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "IM_SESSION_INCOMPLETE", "message": "抖音登录态损坏，请重新扫码绑定"},
+        ) from exc
+    try:
+        records = await provider.sync_messages(session=session, limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("douyin history sync failed", extra={"account_id": account_id, "error": str(exc)[:200]})
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail={"code": "IM_SYNC_FAILED", "message": f"抖音历史同步失败：{str(exc)[:120]}"},
+        ) from exc
+
+    imported = 0
+    conversation_ids: set[str] = set()
+    for record in records:
+        remote_uid = str(record.get("remote_uid", ""))
+        if not remote_uid:
+            continue
+        conv, message = await _persist_remote_message(
+            db,
+            account_id=account_id,
+            user_id=user_id,
+            remote_uid=remote_uid,
+            remote_nickname=str(record.get("remote_nickname", "")),
+            remote_avatar=str(record.get("remote_avatar", "")),
+            direction="out" if record.get("direction") == "out" else "in",
+            msg_type=_optional_int(record.get("msg_type")) or 7,
+            content=str(record.get("content", "")),
+            dy_conversation_id=str(record.get("dy_conversation_id", "")),
+            dy_conversation_short_id=str(record.get("dy_conversation_short_id", "")),
+            dy_ticket=str(record.get("dy_ticket", "")),
+            remote_message_id=str(record.get("remote_message_id") or "") or None,
+            remote_index=_optional_int(record.get("remote_index")),
+            increment_unread=False,
+        )
+        conversation_ids.add(conv.id)
+        if message is not None:
+            imported += 1
+
+    return SyncOut(accountId=account_id, imported=imported, conversations=len(conversation_ids))
+
+
+async def _persist_remote_message(
+    db: AsyncSession,
+    *,
+    account_id: str,
+    user_id: str,
+    remote_uid: str,
+    remote_nickname: str,
+    remote_avatar: str,
+    direction: str,
+    msg_type: int,
+    content: str,
+    dy_conversation_id: str,
+    dy_conversation_short_id: str,
+    dy_ticket: str,
+    remote_message_id: str | None,
+    remote_index: int | None,
+    increment_unread: bool,
+) -> tuple[IMConversation, IMMessage | None]:
+    conv = await repo.find_remote_conversation(db, account_id, remote_uid, dy_conversation_id)
+    now = datetime.now(UTC)
+    if conv is None:
+        conv = await repo.create_conversation(
+            db,
+            account_id=account_id,
+            user_id=user_id,
+            platform="douyin",
+            remote_uid=remote_uid,
+            remote_nickname=remote_nickname,
+            remote_avatar=remote_avatar,
+            dy_conversation_id=dy_conversation_id,
+            dy_conversation_short_id=dy_conversation_short_id,
+            dy_ticket=dy_ticket,
+            last_message_at=now,
+            unread_count=0,
+        )
+
+    content_json = json.dumps({"text": content}, ensure_ascii=False) if msg_type == 7 else content
+
+    existing = await repo.get_message_by_remote_key(
+        db,
+        conv.id,
+        direction,
+        remote_message_id,
+        remote_index,
+    )
+    if existing:
+        _enrich_conversation(
+            conv,
+            remote_uid,
+            remote_nickname,
+            remote_avatar,
+            dy_conversation_id,
+            dy_conversation_short_id,
+            dy_ticket,
+        )
+        await repo.save_conversation(db, conv)
+        return conv, None
+
+    if direction == "out" and remote_message_id:
+        local_message = await repo.get_unkeyed_outgoing_message(db, conv.id, content_json)
+        if local_message:
+            local_message.remote_message_id = remote_message_id
+            local_message.remote_index = remote_index
+            _enrich_conversation(
+                conv,
+                remote_uid,
+                remote_nickname,
+                remote_avatar,
+                dy_conversation_id,
+                dy_conversation_short_id,
+                dy_ticket,
+            )
+            await repo.save_message(db, local_message)
+            return conv, None
+
+    _enrich_conversation(
+        conv,
+        remote_uid,
+        remote_nickname,
+        remote_avatar,
+        dy_conversation_id,
+        dy_conversation_short_id,
+        dy_ticket,
+    )
+    conv.last_message_at = now
+    if increment_unread and direction == "in":
+        conv.unread_count = (conv.unread_count or 0) + 1
+
+    conv_id = conv.id
+    try:
+        message = await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=user_id,
+            direction=direction,
+            msg_type=msg_type,
+            content=content_json,
+            remote_message_id=remote_message_id,
+            remote_index=remote_index,
+        )
+    except IntegrityError:
+        await db.rollback()
+        persisted_conv = await repo.get_conversation(db, conv_id)
+        return persisted_conv or conv, None
+    return conv, message
+
+
+def _enrich_conversation(
+    conv: IMConversation,
+    remote_uid: str,
+    remote_nickname: str,
+    remote_avatar: str,
+    dy_conversation_id: str,
+    dy_conversation_short_id: str,
+    dy_ticket: str,
+) -> None:
+    if remote_uid and conv.remote_uid.startswith("browser:"):
+        conv.remote_uid = remote_uid
+    if remote_nickname:
+        conv.remote_nickname = remote_nickname
+    if remote_avatar:
+        conv.remote_avatar = remote_avatar
+    if dy_conversation_id and not conv.dy_conversation_id:
+        conv.dy_conversation_id = dy_conversation_id
+    if dy_conversation_short_id and not conv.dy_conversation_short_id:
+        conv.dy_conversation_short_id = dy_conversation_short_id
+    if dy_ticket and not conv.dy_ticket:
+        conv.dy_ticket = dy_ticket
+
+
+def _optional_int(value: object) -> int | None:
+    if value in (None, ""):
+        return None
+    if not isinstance(value, (str, int, float)):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> None:
@@ -393,6 +598,8 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
             dy_conversation_id=conv.dy_conversation_id,
             dy_conversation_short_id=conv.dy_conversation_short_id,
             dy_ticket=conv.dy_ticket,
+            remote_uid=conv.remote_uid,
+            remote_nickname=conv.remote_nickname,
             reply_text=reply_text,
             rule_id=matched_rule.id,
             delay=delay,
@@ -409,6 +616,8 @@ async def _delayed_reply(
     dy_conversation_id: str,
     dy_conversation_short_id: str,
     dy_ticket: str,
+    remote_uid: str,
+    remote_nickname: str,
     reply_text: str,
     rule_id: str,
     delay: float,
@@ -424,6 +633,8 @@ async def _delayed_reply(
             conversation_short_id=dy_conversation_short_id,
             ticket=dy_ticket,
             content=reply_text,
+            remote_uid=remote_uid,
+            remote_nickname=remote_nickname,
         )
         if not sent:
             logger.warning("auto reply provider rejected message")
@@ -506,18 +717,19 @@ async def _get_persona_context(db: AsyncSession, user_id: str) -> str:
     """#5 从 ipasset 模块读取当前激活 IP 人设定义"""
     try:
         from app.modules.ipasset import repository as ip_repo
+        from app.modules.ipasset import service as ip_service
 
-        persona_id = await ip_repo.get_active_persona_id(db, user_id)
+        persona_id = await ip_service.get_active_persona_id(db, user_id)
         if not persona_id:
             return ""
-        persona = await ip_repo.get_persona(db, persona_id)
+        persona = await ip_repo.get(db, persona_id, user_id)
         if not persona:
             return ""
         parts = [f"你是{persona.name}"]
         if hasattr(persona, "domain") and persona.domain:
             parts.append(f"领域：{persona.domain}")
-        if hasattr(persona, "style") and persona.style:
-            parts.append(f"风格：{persona.style}")
+        if persona.tone:
+            parts.append(f"风格：{persona.tone}")
         return "，".join(parts) + "。"
     except Exception:  # noqa: BLE001
         return ""

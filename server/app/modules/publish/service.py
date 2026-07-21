@@ -91,6 +91,22 @@ async def qrcode_poll(db: AsyncSession, user_id: str, platform: str, ticket: str
         session_json=json.dumps(session, ensure_ascii=False),
         status="active",
     )
+    if platform == "douyin":
+        from app.modules.im import repository as im_repo
+        from app.modules.im import service as im_service
+        from app.modules.im.schemas import ListenerControlIn
+
+        try:
+            await im_service.start_listener(db, user_id, ListenerControlIn(accountId=account.id))
+        except Exception as exc:  # noqa: BLE001
+            await im_repo.upsert_listener_state(
+                db,
+                account_id=account.id,
+                user_id=user_id,
+                status="error",
+                error_msg=str(exc)[:200],
+            )
+            logger.warning("douyin_im_auto_start_failed", account_id=account.id, error=str(exc)[:200])
     await emit(
         CHANNEL_FEED,
         {

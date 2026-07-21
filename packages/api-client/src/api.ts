@@ -321,6 +321,12 @@ export interface IMListenerStatus {
   startedAt?: string | null;
 }
 
+export interface IMSyncResult {
+  accountId: string;
+  imported: number;
+  conversations: number;
+}
+
 export const imApi = {
   conversations: (page = 1, pageSize = 20) =>
     http.get<{
@@ -358,6 +364,8 @@ export const imApi = {
     http.post<IMListenerStatus>("/im/listener/start", { accountId }),
   stopListener: (accountId: string) =>
     http.post<IMListenerStatus>("/im/listener/stop", { accountId }),
+  sync: (accountId: string) =>
+    http.post<IMSyncResult>(`/im/accounts/${accountId}/sync`),
 };
 
 // ---------- dashboard ----------

@@ -9,7 +9,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # 活跃连接池：account_id → task
-_active_listeners: dict[str, asyncio.Task] = {}
+_active_listeners: dict[str, asyncio.Task[None]] = {}
+_history_sync_tasks: dict[str, asyncio.Task[None]] = {}
 _connections: dict[str, Any] = {}
 
 # #8 Cookie 心跳间隔（秒）
@@ -33,15 +34,23 @@ def start_listening(account_id: str, user_id: str) -> None:
         return
     task = loop.create_task(_listen_loop(account_id, user_id))
     _active_listeners[account_id] = task
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    if settings.douyin_im_browser_enabled and not settings.douyin_im_use_mock:
+        _history_sync_tasks[account_id] = loop.create_task(_history_sync_loop(account_id, user_id))
     logger.info(f"[IMWorker] listener task created for {account_id[:8]}")
 
 
 def stop_listening(account_id: str) -> None:
     """停止指定账号的消息监听"""
     task = _active_listeners.pop(account_id, None)
+    sync_task = _history_sync_tasks.pop(account_id, None)
     conn = _connections.pop(account_id, None)
     if task and not task.done():
         task.cancel()
+    if sync_task and not sync_task.done():
+        sync_task.cancel()
     if conn:
         t = asyncio.ensure_future(conn.close())
         t.add_done_callback(_log_close_error)
@@ -50,11 +59,13 @@ def stop_listening(account_id: str) -> None:
 
 async def shutdown_all() -> None:
     """#7 应用关闭时清理所有监听任务"""
+    tasks = [*_active_listeners.values(), *_history_sync_tasks.values()]
     for account_id in list(_active_listeners):
         stop_listening(account_id)
-    if _active_listeners:
-        await asyncio.gather(*_active_listeners.values(), return_exceptions=True)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     _active_listeners.clear()
+    _history_sync_tasks.clear()
     _connections.clear()
     logger.info("[IMWorker] all listeners shut down")
 
@@ -97,6 +108,30 @@ async def _check_cookie_validity(session: dict) -> bool:
             return data.get("status_code", -1) == 0
     except Exception:  # noqa: BLE001
         return False
+
+
+async def _history_sync_loop(account_id: str, user_id: str) -> None:
+    """定时用网页可见历史补偿 WebSocket 断线缺口，不触发自动回复。"""
+    from fastapi import HTTPException
+
+    from app.core.config import get_settings
+    from app.core.db import SessionLocal
+    from app.modules.im.service import sync_account_messages
+
+    interval = max(30, get_settings().douyin_im_browser_sync_interval_sec)
+    while account_id in _active_listeners:
+        try:
+            async with SessionLocal() as db:
+                result = await sync_account_messages(db, user_id, account_id)
+            if result.imported:
+                logger.info("[IMWorker] history sync imported %s message(s) for %s", result.imported, account_id[:8])
+        except asyncio.CancelledError:
+            break
+        except HTTPException as exc:
+            logger.warning("[IMWorker] history sync failed for %s: %s", account_id[:8], exc.detail)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[IMWorker] history sync failed for %s: %s", account_id[:8], str(exc)[:200])
+        await asyncio.sleep(interval)
 
 
 async def _listen_loop(account_id: str, user_id: str) -> None:
@@ -183,6 +218,8 @@ async def _listen_loop(account_id: str, user_id: str) -> None:
                     dy_conversation_id=msg.get("dy_conversation_id", ""),
                     dy_conversation_short_id=msg.get("dy_conversation_short_id", ""),
                     dy_ticket=msg.get("dy_ticket", ""),
+                    remote_message_id=msg.get("remote_message_id", ""),
+                    remote_index=msg.get("remote_index"),
                 )
 
             await conn.listen(on_message)
@@ -207,6 +244,9 @@ async def _listen_loop(account_id: str, user_id: str) -> None:
 
     _connections.pop(account_id, None)
     _active_listeners.pop(account_id, None)
+    sync_task = _history_sync_tasks.pop(account_id, None)
+    if sync_task and not sync_task.done():
+        sync_task.cancel()
 
 
 def get_active_count() -> int:

@@ -5,8 +5,10 @@ import json
 
 import pytest
 
+from app.providers.im.douyin_browser import normalize_browser_snapshot
 from app.providers.im.douyin_im import (
     DouyinIMConnection,
+    DouyinIMProvider,
     compute_access_key,
     normalize_douyin_session,
 )
@@ -59,6 +61,8 @@ def test_decode_real_protobuf_private_message() -> None:
     message.message_type = 7
     message.conversation_id = "0:1:owner:sender"
     message.conversation_short_id = 987654321
+    message.server_message_id = 1122334455
+    message.index_in_conversation = 42
     message.content = json.dumps({"text": "真实私信"}, ensure_ascii=False)
 
     frame = Live_pb2.PushFrame(payloadType="pb", payload=response.SerializeToString())
@@ -75,4 +79,59 @@ def test_decode_real_protobuf_private_message() -> None:
         "dy_conversation_id": "0:1:owner:sender",
         "dy_conversation_short_id": "987654321",
         "dy_ticket": "",
+        "remote_message_id": "1122334455",
+        "remote_index": 42,
     }
+
+
+def test_normalize_browser_snapshot_builds_stable_message_keys() -> None:
+    snapshot = {
+        "conversation": {
+            "name": "历史用户",
+            "avatar": "https://example.com/avatar.png",
+            "conversationId": "browser-conversation-1",
+        },
+        "messages": [
+            {"text": "你好", "mine": False, "time": "昨天", "index": 0},
+            {"text": "收到", "mine": True, "time": "昨天", "index": 1},
+        ],
+    }
+
+    first = normalize_browser_snapshot(snapshot)
+    second = normalize_browser_snapshot(snapshot)
+
+    assert first == second
+    assert [message["direction"] for message in first] == ["in", "out"]
+    assert first[0]["remote_nickname"] == "历史用户"
+    assert first[0]["dy_conversation_id"] == "browser-conversation-1"
+    assert first[0]["remote_message_id"].startswith("browser:")
+
+
+@pytest.mark.asyncio
+async def test_provider_delegates_history_and_send_to_browser_client() -> None:
+    class BrowserClient:
+        async def sync_messages(self, session: dict, limit: int) -> list[dict]:
+            assert limit == 20
+            return [{"remote_message_id": "history-1"}]
+
+        async def send_message(self, session: dict, remote_uid: str, remote_nickname: str, content: str) -> bool:
+            assert remote_uid == "browser:user"
+            assert remote_nickname == "目标用户"
+            assert content == "回复内容"
+            return True
+
+    provider = DouyinIMProvider(browser_client=BrowserClient())
+
+    records = await provider.sync_messages({"cookies": []}, limit=20)
+    sent = await provider.send_message(
+        session={"cookies": []},
+        conversation_id="",
+        conversation_short_id="",
+        ticket="",
+        content="回复内容",
+        remote_uid="browser:user",
+        remote_nickname="目标用户",
+    )
+
+    assert records == [{"remote_message_id": "history-1"}]
+    assert sent is True

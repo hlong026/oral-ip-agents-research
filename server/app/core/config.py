@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
     douyin_im_access_key_suffix: str = "f8a69f1719916z"
+    douyin_im_browser_enabled: bool = True
+    douyin_im_browser_timeout_sec: float = 120.0
+    douyin_im_browser_timeout_ms: int = 60000
+    douyin_im_browser_sync_interval_sec: int = 300
 
 
 @lru_cache

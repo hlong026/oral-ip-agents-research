@@ -559,7 +559,8 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         })}
       </div>
       <div className="mt-3 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-        ℹ 启动监听后，系统实时接收新私信；历史会话同步和主动发送当前未开放。
+        ℹ
+        扫码绑定成功后会自动启动实时监听；私信中心可同步网页可见历史并发送回复。
       </div>
       {listenerError && (
         <div className="mt-2 rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-danger">

@@ -5,14 +5,20 @@ import {
   type IMMessage,
 } from "@oral/api-client";
 import type { PublishAccount } from "@oral/types";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 
 /** 私信中心：账号筛选 + 会话列表 + 对话气泡 */
 export default function ImCenterPage() {
+  const queryClient = useQueryClient();
   const [activeConv, setActiveConv] = useState<IMConversation | null>(null);
   const [filterAccountId, setFilterAccountId] = useState<string>("");
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const [syncFeedback, setSyncFeedback] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: accounts } = useQuery({
@@ -55,7 +61,61 @@ export default function ImCenterPage() {
 
   const selectConv = (conv: IMConversation) => {
     setActiveConv(conv);
+    setReply("");
+    setActionError("");
     if (conv.unreadCount > 0) void imApi.markRead(conv.id);
+  };
+
+  const douyinAccounts = accountList.filter(
+    (account) => account.platform === "douyin",
+  );
+  const syncAccountId =
+    activeConv?.accountId ||
+    filterAccountId ||
+    (douyinAccounts.length === 1 ? (douyinAccounts[0]?.id ?? "") : "");
+
+  const syncHistory = async () => {
+    if (!syncAccountId || syncing) return;
+    setSyncing(true);
+    setActionError("");
+    setSyncFeedback("");
+    try {
+      const result = await imApi.sync(syncAccountId);
+      setSyncFeedback(`已同步 ${result.imported} 条历史消息`);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["im-conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["im-messages"] }),
+      ]);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "历史私信同步失败",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const sendReply = async () => {
+    const content = reply.trim();
+    if (!activeConv || !content || sending) return;
+    setSending(true);
+    setActionError("");
+    try {
+      await imApi.send(activeConv.id, content);
+      setReply("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["im-conversations"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["im-messages", activeConv.id],
+        }),
+      ]);
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "抖音私信发送失败",
+      );
+    } finally {
+      setSending(false);
+    }
   };
 
   const parseContent = (content: string): string => {
@@ -69,12 +129,33 @@ export default function ImCenterPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold">私信中心</h1>
-        <p className="mt-1 text-sm text-text-3">
-          实时接收绑定账号的新抖音私信 · 当前不包含历史会话同步
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold">私信中心</h1>
+          <p className="mt-1 text-sm text-text-3">
+            实时接收新私信，并用已保存的网页登录态同步可见历史与回复
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {syncFeedback && (
+            <span className="text-xs text-success">{syncFeedback}</span>
+          )}
+          <button
+            type="button"
+            className="rounded-lg border border-brand-from/40 px-3 py-1.5 text-xs text-brand-from transition-colors hover:bg-brand-from/10 disabled:opacity-50"
+            disabled={!syncAccountId || syncing}
+            onClick={() => void syncHistory()}
+          >
+            {syncing ? "同步中…" : "同步历史"}
+          </button>
+        </div>
       </div>
+
+      {actionError && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
+          {actionError}
+        </div>
+      )}
 
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)" }}>
         {/* 会话列表 */}
@@ -143,7 +224,7 @@ export default function ImCenterPage() {
             ))}
             {conversations.length === 0 && (
               <div className="px-5 py-12 text-center text-sm text-text-3">
-                启动监听后，新收到的真实私信会显示在这里
+                扫码绑定后会自动监听；也可点击“同步历史”导入网页当前可见会话
               </div>
             )}
           </div>
@@ -178,14 +259,34 @@ export default function ImCenterPage() {
                 ))}
                 <div ref={bottomRef} />
               </div>
-              <div className="border-t border-stroke px-4 py-3 text-xs text-text-3">
-                当前仅开放真实私信接收；发送与自动回复需完成抖音 web_protect
-                签名接入后再启用。
-              </div>
+              <form
+                className="flex items-end gap-3 border-t border-stroke px-4 py-3"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void sendReply();
+                }}
+              >
+                <textarea
+                  aria-label="回复内容"
+                  value={reply}
+                  onChange={(event) => setReply(event.target.value)}
+                  placeholder="输入回复内容"
+                  rows={2}
+                  maxLength={500}
+                  className="min-h-12 flex-1 resize-none rounded-xl border border-stroke bg-white/5 px-3 py-2 text-sm outline-none focus:border-brand-from/50"
+                />
+                <button
+                  type="submit"
+                  disabled={!reply.trim() || sending}
+                  className="rounded-xl bg-brand-from/20 px-4 py-2 text-sm text-brand-from transition-colors hover:bg-brand-from/30 disabled:opacity-50"
+                >
+                  {sending ? "发送中…" : "发送回复"}
+                </button>
+              </form>
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-text-3">
-              选择左侧会话查看私信
+              选择左侧会话查看私信；首次使用可先同步历史
             </div>
           )}
         </div>

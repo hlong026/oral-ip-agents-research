@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from google.protobuf.message import DecodeError
 
 from app.core.config import get_settings
+from app.providers.im.douyin_browser import DouyinBrowserIMClient
 from app.providers.im.proto import Live_pb2, Response_pb2
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,8 @@ class DouyinIMConnection:
                 "dy_conversation_id": message.conversation_id,
                 "dy_conversation_short_id": str(message.conversation_short_id),
                 "dy_ticket": "",
+                "remote_message_id": str(message.server_message_id),
+                "remote_index": int(message.index_in_conversation),
             }
         except (DecodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
             logger.warning("[DouyinIM] invalid protobuf frame: %s", exc)
@@ -190,10 +193,13 @@ class DouyinIMConnection:
 
 
 class DouyinIMProvider:
-    """抖音私信 Provider；当前只开放已验证的真实接收路径。"""
+    """WebSocket 接收实时消息，浏览器复用扫码登录态同步与回复。"""
 
     name = "douyin_im"
     platform = "douyin"
+
+    def __init__(self, browser_client: DouyinBrowserIMClient | None = None) -> None:
+        self._browser_client = browser_client or DouyinBrowserIMClient()
 
     async def connect(self, session: dict[str, Any]) -> DouyinIMConnection:
         return DouyinIMConnection(session)
@@ -205,11 +211,18 @@ class DouyinIMProvider:
         conversation_short_id: str,
         ticket: str,
         content: str,
+        remote_uid: str = "",
+        remote_nickname: str = "",
     ) -> bool:
-        """发送需要 web_protect 和 Protobuf 签名；未完成前明确失败，避免假成功。"""
-        normalize_douyin_session(session)
-        logger.warning("[DouyinIM] send is unavailable: Douyin web_protect signature is missing")
-        return False
+        """通过已登录的抖音网页发送，只有页面确认输入框清空才返回成功。"""
+        try:
+            return await self._browser_client.send_message(session, remote_uid, remote_nickname, content)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[DouyinIM] browser send failed: %s", exc)
+            return False
+
+    async def sync_messages(self, session: dict[str, Any], limit: int = 100) -> list[dict[str, Any]]:
+        return await self._browser_client.sync_messages(session, limit)
 
     async def create_conversation(self, session: dict[str, Any], to_uid: int) -> dict[str, str]:
         """创建会话同样依赖未采集的 web_protect 签名。"""

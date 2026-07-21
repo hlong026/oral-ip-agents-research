@@ -1,6 +1,6 @@
 """im 模块数据访问层"""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +33,24 @@ async def get_conversation_by_dy_id(db: AsyncSession, account_id: str, remote_ui
     return res.scalar_one_or_none()
 
 
+async def find_remote_conversation(
+    db: AsyncSession,
+    account_id: str,
+    remote_uid: str,
+    dy_conversation_id: str = "",
+) -> IMConversation | None:
+    if dy_conversation_id:
+        res = await db.execute(
+            select(IMConversation).where(
+                IMConversation.account_id == account_id,
+                IMConversation.dy_conversation_id == dy_conversation_id,
+            )
+        )
+        if conversation := res.scalar_one_or_none():
+            return conversation
+    return await get_conversation_by_dy_id(db, account_id, remote_uid)
+
+
 async def list_conversations(
     db: AsyncSession, user_id: str, page: int = 1, page_size: int = 20
 ) -> tuple[list[IMConversation], int]:
@@ -62,6 +80,59 @@ async def create_message(db: AsyncSession, **fields) -> IMMessage:
     await db.commit()
     await db.refresh(m)
     return m
+
+
+async def get_message_by_remote_key(
+    db: AsyncSession,
+    conversation_id: str,
+    direction: str,
+    remote_message_id: str | None,
+    remote_index: int | None,
+) -> IMMessage | None:
+    if remote_message_id:
+        res = await db.execute(
+            select(IMMessage).where(
+                IMMessage.conversation_id == conversation_id,
+                IMMessage.remote_message_id == remote_message_id,
+            )
+        )
+        if message := res.scalar_one_or_none():
+            return message
+    if remote_index is not None:
+        res = await db.execute(
+            select(IMMessage).where(
+                IMMessage.conversation_id == conversation_id,
+                IMMessage.direction == direction,
+                IMMessage.remote_index == remote_index,
+            )
+        )
+        return res.scalar_one_or_none()
+    return None
+
+
+async def get_unkeyed_outgoing_message(
+    db: AsyncSession,
+    conversation_id: str,
+    content: str,
+) -> IMMessage | None:
+    res = await db.execute(
+        select(IMMessage)
+        .where(
+            IMMessage.conversation_id == conversation_id,
+            IMMessage.direction == "out",
+            IMMessage.remote_message_id.is_(None),
+            IMMessage.content == content,
+            IMMessage.created_at >= datetime.now(UTC) - timedelta(minutes=10),
+        )
+        .order_by(IMMessage.created_at.desc())
+        .limit(1)
+    )
+    return res.scalar_one_or_none()
+
+
+async def save_message(db: AsyncSession, message: IMMessage) -> None:
+    await db.commit()
+    await db.refresh(message)
 
 
 async def list_messages(

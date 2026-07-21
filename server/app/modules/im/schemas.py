@@ -1,8 +1,9 @@
 """im 模块 Pydantic schemas（出入参）"""
-from pydantic import BaseModel
 
+from pydantic import BaseModel, Field
 
 # ---- 会话 ----
+
 
 class ConversationOut(BaseModel):
     id: str
@@ -26,6 +27,7 @@ class ConversationPageOut(BaseModel):
 
 # ---- 消息 ----
 
+
 class MessageOut(BaseModel):
     id: str
     conversationId: str
@@ -44,12 +46,19 @@ class MessagePageOut(BaseModel):
     pageSize: int
 
 
+class SyncOut(BaseModel):
+    accountId: str
+    imported: int
+    conversations: int
+
+
 class SendMessageIn(BaseModel):
-    content: str
+    content: str = Field(min_length=1, max_length=500)
     msgType: int = 7  # 默认文本
 
 
 # ---- 自动回复规则 ----
+
 
 class RuleCreateIn(BaseModel):
     accountId: str = ""
@@ -98,6 +107,7 @@ class RuleOut(BaseModel):
 
 
 # ---- 监听状态 ----
+
 
 class ListenerStatusOut(BaseModel):
     accountId: str
