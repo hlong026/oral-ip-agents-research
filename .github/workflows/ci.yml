@@ -60,6 +60,8 @@ jobs:
         env:
           APP_ENV: test
           DATABASE_URL: sqlite+aiosqlite:///./ci_openapi.db
+          IM_ENABLED: "true"
+          DOUYIN_IM_APP_KEY: test-openapi-app-key
         run: |
           uv run --directory server uvicorn app.main:app --host 127.0.0.1 --port 8000 &
           backend_pid=$!

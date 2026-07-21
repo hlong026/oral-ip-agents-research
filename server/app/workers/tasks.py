@@ -19,3 +19,10 @@ def run_publish_job(job_id: str) -> None:
     from app.modules.publish.service import _run_job
 
     asyncio.run(_run_job(job_id))
+
+
+@dramatiq.actor(queue_name="im", max_retries=0, time_limit=120_000)
+def run_im_auto_reply(message_id: str) -> None:
+    from app.modules.im.service import run_scheduled_reply
+
+    asyncio.run(run_scheduled_reply(message_id))

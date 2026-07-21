@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T06:58:53.497Z
+ * API 版本：1.0.0 · 生成时间：2026-07-21T08:53:14.485Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -33,6 +33,19 @@ export interface ActivateOut {
   planSkuCode?: string;
   planExpiresAt?: string | null;
   quotaBalance?: number;
+}
+
+export interface AutomationConsentIn {
+  accountId: string;
+  accepted: boolean;
+  riskVersion: string;
+}
+
+export interface AutomationStatusOut {
+  accountId: string;
+  authorized: boolean;
+  riskVersion?: string;
+  acceptedAt?: string | null;
 }
 
 export interface AvatarOut {
@@ -125,6 +138,26 @@ export interface CodeStatsOut {
   revoked?: number;
 }
 
+export interface ConversationOut {
+  id: string;
+  accountId: string;
+  platform: string;
+  remoteUid: string;
+  remoteNickname: string;
+  remoteAvatar: string;
+  lastMessageAt: string;
+  unreadCount: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface ConversationPageOut {
+  items: ConversationOut[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface CreatePipelineIn {
   ipId: string;
   sourceUrl?: string | null;
@@ -162,6 +195,14 @@ export interface FeedEvent {
   createdAt: string;
 }
 
+export interface GrayAccountOut {
+  accountId: string;
+  userId: string;
+  nickname: string;
+  approvedBy: string;
+  addedAt: string;
+}
+
 export interface JobOut {
   id: string;
   taskId: string;
@@ -188,10 +229,57 @@ export interface JobPageOut {
   pageSize: number;
 }
 
+export interface KillSwitchIn {
+  stopped: boolean;
+}
+
+export interface KillSwitchOut {
+  stopped: boolean;
+  canceledMessages?: number;
+}
+
+export interface ListenerControlIn {
+  accountId: string;
+}
+
+export interface ListenerStatusOut {
+  accountId: string;
+  accountNickname?: string;
+  platform?: string;
+  status: string;
+  lastHeartbeat?: string | null;
+  errorMsg?: string;
+  startedAt?: string | null;
+}
+
 export interface LoginIn {
   phone: string;
   password: string;
   deviceId?: string | null;
+}
+
+export interface MessageOut {
+  id: string;
+  conversationId: string;
+  direction: string;
+  msgType: number;
+  content: string;
+  autoReplied: boolean;
+  replyContent: string;
+  sendStatus: string;
+  sendError: string;
+  retryCount: number;
+  manualTakeover: boolean;
+  moderationStatus: string;
+  moderationReason: string;
+  createdAt: string;
+}
+
+export interface MessagePageOut {
+  items: MessageOut[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface ModulePriceCatalogOut {
@@ -227,6 +315,31 @@ export interface ModulePricePublicOut {
   pointsPerUnit: number;
   minimumPoints: number;
   publicDescription: string;
+}
+
+export interface MonitoringIncidentIn {
+  accountId?: string;
+  detail: string;
+}
+
+export interface MonitoringSummaryOut {
+  hours: number;
+  windowStart: string;
+  windowEnd: string;
+  grayAccounts: number;
+  listenerAccounts: number;
+  listeningAccounts: number;
+  connectionAttempts: number;
+  connectionSuccessRate: number;
+  dropoutRate: number;
+  sendSuccessRate: number;
+  sendSuccess: number;
+  sendFailure: number;
+  quotaRejected: number;
+  moderationBlocked: number;
+  credentialExpired: number;
+  ownershipRejected: number;
+  riskControlIncidents: number;
 }
 
 export interface NotificationOut {
@@ -490,6 +603,55 @@ export interface RewriteOut {
   validationPassed?: boolean;
 }
 
+export interface RuleCreateIn {
+  accountId?: string;
+  name: string;
+  triggerType?: string;
+  triggerPattern?: string;
+  replyMode?: string;
+  replyTemplate?: string;
+  llmPrompt?: string;
+  priority?: number;
+  dailyLimit?: number;
+  delayMin?: number;
+  delayMax?: number;
+  deliveryMode?: string;
+  enabled?: boolean;
+}
+
+export interface RuleOut {
+  id: string;
+  accountId: string;
+  name: string;
+  triggerType: string;
+  triggerPattern: string;
+  replyMode: string;
+  replyTemplate: string;
+  llmPrompt: string;
+  priority: number;
+  dailyLimit: number;
+  delayMin: number;
+  delayMax: number;
+  deliveryMode: string;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface RuleUpdateIn {
+  name?: string | null;
+  triggerType?: string | null;
+  triggerPattern?: string | null;
+  replyMode?: string | null;
+  replyTemplate?: string | null;
+  llmPrompt?: string | null;
+  priority?: number | null;
+  dailyLimit?: number | null;
+  delayMin?: number | null;
+  delayMax?: number | null;
+  deliveryMode?: string | null;
+  enabled?: boolean | null;
+}
+
 export interface ScriptCreateIn {
   title?: string;
   text: string;
@@ -525,6 +687,11 @@ export interface ScriptVersionOut {
   modelName: string;
   promptVersion: string;
   createdAt: string;
+}
+
+export interface SendMessageIn {
+  content: string;
+  msgType?: number;
 }
 
 export interface SettingsIn {

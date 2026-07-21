@@ -1,6 +1,6 @@
 """im 模块 Pydantic schemas（出入参）"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ---- 会话 ----
 
@@ -36,6 +36,12 @@ class MessageOut(BaseModel):
     content: str
     autoReplied: bool
     replyContent: str
+    sendStatus: str
+    sendError: str
+    retryCount: int
+    manualTakeover: bool
+    moderationStatus: str
+    moderationReason: str
     createdAt: str
 
 
@@ -66,6 +72,7 @@ class RuleCreateIn(BaseModel):
     dailyLimit: int = 50
     delayMin: int = 3
     delayMax: int = 30
+    deliveryMode: str = "suggestion"
     enabled: bool = True
 
 
@@ -80,6 +87,7 @@ class RuleUpdateIn(BaseModel):
     dailyLimit: int | None = None
     delayMin: int | None = None
     delayMax: int | None = None
+    deliveryMode: str | None = None
     enabled: bool | None = None
 
 
@@ -96,6 +104,7 @@ class RuleOut(BaseModel):
     dailyLimit: int
     delayMin: int
     delayMax: int
+    deliveryMode: str
     enabled: bool
     createdAt: str
 
@@ -115,3 +124,58 @@ class ListenerStatusOut(BaseModel):
 
 class ListenerControlIn(BaseModel):
     accountId: str
+
+
+class AutomationConsentIn(BaseModel):
+    accountId: str
+    accepted: bool
+    riskVersion: str
+
+
+class AutomationStatusOut(BaseModel):
+    accountId: str
+    authorized: bool
+    riskVersion: str = ""
+    acceptedAt: str | None = None
+
+
+class KillSwitchIn(BaseModel):
+    stopped: bool
+
+
+class KillSwitchOut(BaseModel):
+    stopped: bool
+    canceledMessages: int = 0
+
+
+class GrayAccountOut(BaseModel):
+    accountId: str
+    userId: str
+    nickname: str
+    approvedBy: str
+    addedAt: str
+
+
+class MonitoringSummaryOut(BaseModel):
+    hours: int
+    windowStart: str
+    windowEnd: str
+    grayAccounts: int
+    listenerAccounts: int
+    listeningAccounts: int
+    connectionAttempts: int
+    connectionSuccessRate: float
+    dropoutRate: float
+    sendSuccessRate: float
+    sendSuccess: int
+    sendFailure: int
+    quotaRejected: int
+    moderationBlocked: int
+    credentialExpired: int
+    ownershipRejected: int
+    riskControlIncidents: int
+
+
+class MonitoringIncidentIn(BaseModel):
+    accountId: str = Field("", max_length=32)
+    detail: str = Field(..., min_length=1, max_length=256)

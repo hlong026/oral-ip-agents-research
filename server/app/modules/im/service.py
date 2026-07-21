@@ -1,32 +1,36 @@
 """im 业务编排（私信收发 + 自动回复策略引擎）"""
 
-import asyncio
 import json
 import logging
 import random
 import re
-import time
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import publish as emit
+from app.modules.publish.models import PublishAccount
 from app.providers.registry import registry
 
 from . import repository as repo
 from .events import CHANNEL_IM, EV_AUTO_REPLIED, EV_LISTENER_STATUS, EV_NEW_MESSAGE
 from .models import IMAutoReplyRule, IMConversation, IMMessage
 from .schemas import (
+    AutomationConsentIn,
+    AutomationStatusOut,
     ConversationOut,
     ConversationPageOut,
+    GrayAccountOut,
     ListenerControlIn,
     ListenerStatusOut,
     MessageOut,
     MessagePageOut,
+    MonitoringIncidentIn,
+    MonitoringSummaryOut,
     RuleCreateIn,
     RuleOut,
     RuleUpdateIn,
@@ -35,9 +39,18 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# #13 每分钟频率限制：account_id → 最近 60s 内发送时间戳
-_rate_window: dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
 MAX_REPLIES_PER_MINUTE = 3
+MAX_REPLIES_PER_CONVERSATION_PER_DAY = 10
+_reply_limiter = None
+AUTOMATION_RISK_VERSION = "im-auto-reply-v1"
+
+
+class AccountCredentialExpiredError(RuntimeError):
+    """The platform session is known to be expired and must not be retried."""
+
+
+class GrayAccountNotApprovedError(RuntimeError):
+    """The account is outside the active rollout allowlist."""
 
 
 # ============ 转换函数 ============
@@ -67,6 +80,12 @@ def msg_to_out(m: IMMessage) -> MessageOut:
         content=m.content,
         autoReplied=m.auto_replied,
         replyContent=m.reply_content,
+        sendStatus=m.send_status,
+        sendError=m.send_error,
+        retryCount=m.retry_count,
+        manualTakeover=m.manual_takeover,
+        moderationStatus=m.moderation_status,
+        moderationReason=m.moderation_reason,
         createdAt=m.created_at.astimezone(UTC).isoformat(),
     )
 
@@ -85,6 +104,7 @@ def rule_to_out(r: IMAutoReplyRule) -> RuleOut:
         dailyLimit=r.daily_limit,
         delayMin=r.delay_min,
         delayMax=r.delay_max,
+        deliveryMode=r.delivery_mode,
         enabled=r.enabled,
         createdAt=r.created_at.astimezone(UTC).isoformat(),
     )
@@ -93,18 +113,44 @@ def rule_to_out(r: IMAutoReplyRule) -> RuleOut:
 # ============ 会话管理 ============
 
 
-async def list_conversations(db: AsyncSession, user_id: str, page: int = 1, page_size: int = 20) -> ConversationPageOut:
-    items, total = await repo.list_conversations(db, user_id, page, page_size)
+async def list_conversations(
+    db: AsyncSession,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    search: str = "",
+    account_id: str = "",
+) -> ConversationPageOut:
+    items, total = await repo.list_conversations(
+        db,
+        user_id,
+        page,
+        page_size,
+        search=search.strip(),
+        account_id=account_id,
+    )
     return ConversationPageOut(items=[conv_to_out(c) for c in items], total=total, page=page, pageSize=page_size)
 
 
 async def list_messages(
-    db: AsyncSession, user_id: str, conversation_id: str, page: int = 1, page_size: int = 50
+    db: AsyncSession,
+    user_id: str,
+    conversation_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
 ) -> MessagePageOut:
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
-    items, total = await repo.list_messages(db, conversation_id, page, page_size)
+    items, total = await repo.list_messages(
+        db,
+        conversation_id,
+        user_id,
+        page,
+        page_size,
+        search=search.strip(),
+    )
     return MessagePageOut(items=[msg_to_out(m) for m in items], total=total, page=page, pageSize=page_size)
 
 
@@ -112,24 +158,176 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
-    # 通过 Provider 发送
-    im_provider = registry.im_driver(conv.platform)
+    await _require_gray_account(db, conv.account_id, user_id)
+    from app.modules.im.moderation import review_outgoing
+
+    moderation = review_outgoing(inp.content)
+    if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conv.account_id, user_id=user_id)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
+        )
     content_json = json.dumps({"text": inp.content}, ensure_ascii=False)
-    session = await _load_account_session(conv.account_id, user_id)
-    await im_provider.send_message(
-        session=session,
-        conversation_id=conv.dy_conversation_id,
-        conversation_short_id=conv.dy_conversation_short_id,
-        ticket=conv.dy_ticket,
-        content=inp.content,
-    )
-    # 落库
     msg = await repo.create_message(
-        db, conversation_id=conv.id, user_id=user_id, direction="out", msg_type=inp.msgType, content=content_json
+        db,
+        conversation_id=conv.id,
+        user_id=user_id,
+        direction="out",
+        msg_type=inp.msgType,
+        content=content_json,
+        send_status="pending",
+        moderation_status="approved",
     )
-    conv.last_message_at = datetime.now(UTC)
-    await repo.save_conversation(db, conv)
-    return msg_to_out(msg)
+    try:
+        await _send_existing_message(db, conv, msg, inp.content)
+        return msg_to_out(msg)
+    except Exception as error:  # noqa: BLE001
+        raise _send_failure(msg) from error
+
+
+async def retry_message(db: AsyncSession, user_id: str, message_id: str) -> MessageOut:
+    message = await repo.get_message(db, message_id, user_id)
+    if message is None or message.direction != "out":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "消息不存在"})
+    if message.manual_takeover or message.send_status == "manual":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MANUAL_TAKEOVER", "message": "消息已转人工处理，不能自动重试"},
+        )
+    if message.send_status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_NOT_FAILED", "message": "只有发送失败的消息可以重试"},
+        )
+    conversation = await repo.get_conversation(db, message.conversation_id, user_id)
+    if conversation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+    await _require_gray_account(db, conversation.account_id, user_id)
+    from app.modules.im.moderation import review_outgoing
+
+    moderation = review_outgoing(_message_text(message))
+    if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conversation.account_id, user_id=user_id)
+        message.send_status = "blocked"
+        message.moderation_status = "blocked"
+        message.moderation_reason = moderation.reason_text
+        await repo.save_message(db, message)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
+        )
+
+    if not await repo.claim_failed_message_for_retry(db, message.id, user_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_ALREADY_CLAIMED", "message": "消息已被其他任务接管"},
+        )
+    await db.refresh(message)
+    try:
+        await _send_existing_message(db, conversation, message, _message_text(message))
+        return msg_to_out(message)
+    except Exception as error:  # noqa: BLE001
+        raise _send_failure(message) from error
+
+
+async def take_over_message(db: AsyncSession, user_id: str, message_id: str) -> MessageOut:
+    message = await repo.get_message(db, message_id, user_id)
+    if message is None or message.direction != "out":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "消息不存在"})
+    if message.send_status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_NOT_FAILED", "message": "只有发送失败的消息可以转人工处理"},
+        )
+    message.send_status = "manual"
+    message.manual_takeover = True
+    await repo.save_message(db, message)
+    return msg_to_out(message)
+
+
+async def _send_existing_message(
+    db: AsyncSession,
+    conversation: IMConversation,
+    message: IMMessage,
+    content: str,
+) -> None:
+    try:
+        session = await _load_account_session(conversation.account_id, conversation.user_id)
+        provider = registry.im_driver(conversation.platform)
+        sent = await provider.send_message(
+            session=session,
+            conversation_id=conversation.dy_conversation_id,
+            conversation_short_id=conversation.dy_conversation_short_id,
+            ticket=conversation.dy_ticket,
+            content=content,
+        )
+        if sent is not True:
+            raise RuntimeError("平台未确认私信发送成功")
+    except Exception as error:  # noqa: BLE001
+        message.send_status = "failed"
+        message.send_error = error.__class__.__name__[:256]
+        await repo.save_message(db, message)
+        logger.warning(
+            "IM send failed: account=%s conversation=%s message=%s error=%s",
+            conversation.account_id[:8],
+            conversation.id[:8],
+            message.id[:8],
+            message.send_error,
+        )
+        await record_metric(
+            "send_failure",
+            account_id=conversation.account_id,
+            user_id=conversation.user_id,
+            detail=message.send_error,
+        )
+        raise
+
+    message.send_status = "sent"
+    message.send_error = ""
+    await repo.save_message(db, message)
+    conversation.last_message_at = datetime.now(UTC)
+    await repo.save_conversation(db, conversation)
+    await record_metric("send_success", account_id=conversation.account_id, user_id=conversation.user_id)
+
+
+def _send_failure(message: IMMessage) -> HTTPException:
+    if message.send_error == GrayAccountNotApprovedError.__name__:
+        return HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "IM_GRAY_NOT_APPROVED",
+                "message": "该账号尚未进入私信灰度名单",
+                "messageId": message.id,
+            },
+        )
+    if message.send_error == AccountCredentialExpiredError.__name__:
+        return HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ACCOUNT_CREDENTIAL_EXPIRED",
+                "message": "抖音账号登录态已失效，请重新授权后再发送",
+                "messageId": message.id,
+            },
+        )
+    return HTTPException(
+        status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "code": "IM_SEND_FAILED",
+            "message": "平台未确认发送成功，已记录失败，可重试或转人工处理",
+            "messageId": message.id,
+        },
+    )
+
+
+def _message_text(message: IMMessage) -> str:
+    try:
+        content = json.loads(message.content)
+        if isinstance(content, dict):
+            return str(content.get("text") or "")
+    except (TypeError, ValueError):
+        pass
+    return message.content
 
 
 async def mark_read(db: AsyncSession, user_id: str, conversation_id: str) -> None:
@@ -163,6 +361,7 @@ async def create_rule(db: AsyncSession, user_id: str, inp: RuleCreateIn) -> Rule
         daily_limit=inp.dailyLimit,
         delay_min=inp.delayMin,
         delay_max=inp.delayMax,
+        delivery_mode=inp.deliveryMode,
         enabled=inp.enabled,
     )
     return rule_to_out(rule)
@@ -184,6 +383,7 @@ async def update_rule(db: AsyncSession, user_id: str, rule_id: str, inp: RuleUpd
         "dailyLimit": "daily_limit",
         "delayMin": "delay_min",
         "delayMax": "delay_max",
+        "deliveryMode": "delivery_mode",
         "enabled": "enabled",
     }
     for k, v in updates.items():
@@ -230,9 +430,9 @@ async def get_listener_status(db: AsyncSession, user_id: str) -> list[ListenerSt
 
 
 async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) -> ListenerStatusOut:
-    """启动指定账号的消息监听"""
+    """Persist listener intent; the independent supervisor owns the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
-    from app.workers.im_listener import start_listening
+    await _require_gray_account(db, inp.accountId, user_id)
 
     await repo.upsert_listener_state(
         db, account_id=inp.accountId, user_id=user_id, status="listening", started_at=datetime.now(UTC), error_msg=""
@@ -240,22 +440,281 @@ async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn)
     await emit(
         CHANNEL_IM, {"kind": EV_LISTENER_STATUS, "userId": user_id, "accountId": inp.accountId, "status": "listening"}
     )
-    start_listening(inp.accountId, user_id)
     return ListenerStatusOut(accountId=inp.accountId, status="listening")
 
 
 async def stop_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) -> ListenerStatusOut:
-    """停止指定账号的消息监听"""
+    """Persist stop intent; the independent supervisor observes and closes the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
-    from app.workers.im_listener import stop_listening
 
-    stop_listening(inp.accountId)
     await repo.upsert_listener_state(db, account_id=inp.accountId, user_id=user_id, status="disconnected", error_msg="")
     await emit(
         CHANNEL_IM,
         {"kind": EV_LISTENER_STATUS, "userId": user_id, "accountId": inp.accountId, "status": "disconnected"},
     )
     return ListenerStatusOut(accountId=inp.accountId, status="disconnected")
+
+
+# ============ 自动发送授权与 Kill Switch ============
+
+
+async def authorize_automation(
+    db: AsyncSession,
+    user_id: str,
+    inp: AutomationConsentIn,
+) -> AutomationStatusOut:
+    await _require_owned_account(db, user_id, inp.accountId)
+    await _require_gray_account(db, inp.accountId, user_id)
+    if not inp.accepted:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "RISK_CONSENT_REQUIRED", "message": "必须明确同意自动回复风险协议"},
+        )
+    if inp.riskVersion != AUTOMATION_RISK_VERSION:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RISK_VERSION_MISMATCH", "message": "风险协议版本已更新，请重新确认"},
+        )
+    consent = await repo.upsert_automation_consent(
+        db,
+        inp.accountId,
+        user_id,
+        inp.riskVersion,
+        enabled=True,
+    )
+    return AutomationStatusOut(
+        accountId=consent.account_id,
+        authorized=consent.auto_reply_enabled,
+        riskVersion=consent.risk_version,
+        acceptedAt=consent.accepted_at.astimezone(UTC).isoformat(),
+    )
+
+
+async def disable_automation(db: AsyncSession, user_id: str, account_id: str) -> AutomationStatusOut:
+    await _require_owned_account(db, user_id, account_id)
+    await repo.disable_account_automation(db, account_id, user_id)
+    consent = await repo.get_automation_consent(db, account_id, user_id)
+    return AutomationStatusOut(
+        accountId=account_id,
+        authorized=False,
+        riskVersion=consent.risk_version if consent else "",
+        acceptedAt=consent.accepted_at.astimezone(UTC).isoformat() if consent else None,
+    )
+
+
+async def list_automation_status(db: AsyncSession, user_id: str) -> list[AutomationStatusOut]:
+    consents = await repo.list_automation_consents(db, user_id)
+    return [
+        AutomationStatusOut(
+            accountId=consent.account_id,
+            authorized=consent.auto_reply_enabled,
+            riskVersion=consent.risk_version,
+            acceptedAt=consent.accepted_at.astimezone(UTC).isoformat(),
+        )
+        for consent in consents
+    ]
+
+
+async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
+    return await repo.set_global_kill_switch(db, stopped=stopped)
+
+
+async def get_global_kill_switch(db: AsyncSession) -> bool:
+    control = await repo.get_global_control(db)
+    return True if control is None else control.stopped
+
+
+async def approve_gray_account(db: AsyncSession, account_id: str, admin_id: str) -> GrayAccountOut:
+    account = await db.get(PublishAccount, account_id)
+    if account is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+        )
+    settings = get_settings()
+    already_enabled = await repo.is_gray_account_enabled(db, account_id, account.user_id)
+    if not already_enabled and await repo.gray_account_count(db) >= max(1, settings.im_gray_max_accounts):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "IM_GRAY_LIMIT_REACHED", "message": "灰度账号数量已达到受控上限"},
+        )
+    gray = await repo.approve_gray_account(db, account_id, approved_by=admin_id)
+    if gray is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+        )
+    return GrayAccountOut(
+        accountId=gray.account_id,
+        userId=gray.user_id,
+        nickname=account.nickname,
+        approvedBy=gray.approved_by,
+        addedAt=gray.created_at.astimezone(UTC).isoformat(),
+    )
+
+
+async def remove_gray_account(db: AsyncSession, account_id: str) -> bool:
+    account = await db.get(PublishAccount, account_id)
+    removed = await repo.remove_gray_account(db, account_id)
+    if removed and account is not None:
+        state = await repo.get_listener_state(db, account_id, account.user_id)
+        if state is not None:
+            state.status = "disconnected"
+            state.error_msg = "gray_approval_removed"
+            await db.commit()
+        await repo.disable_account_automation(db, account_id, account.user_id, reason="GrayApprovalRemoved")
+    return removed
+
+
+async def list_gray_accounts(db: AsyncSession) -> list[GrayAccountOut]:
+    return [
+        GrayAccountOut(
+            accountId=gray.account_id,
+            userId=gray.user_id,
+            nickname=account.nickname,
+            approvedBy=gray.approved_by,
+            addedAt=gray.created_at.astimezone(UTC).isoformat(),
+        )
+        for gray, account in await repo.list_gray_accounts(db)
+    ]
+
+
+async def get_monitoring_summary(db: AsyncSession, *, hours: int) -> MonitoringSummaryOut:
+    now = datetime.now(UTC)
+    since = now - timedelta(hours=hours)
+    counts = await repo.metric_counts_since(db, since)
+    gray, listeners, listening = await repo.gray_and_listener_counts(db)
+    attempts = counts.get("listener_connect_attempt", 0)
+    connected = counts.get("listener_connected", 0)
+    dropouts = counts.get("listener_disconnected", 0) + counts.get("listener_error", 0)
+    sent = counts.get("send_success", 0)
+    failed = counts.get("send_failure", 0)
+    return MonitoringSummaryOut(
+        hours=hours,
+        windowStart=since.isoformat(),
+        windowEnd=now.isoformat(),
+        grayAccounts=gray,
+        listenerAccounts=listeners,
+        listeningAccounts=listening,
+        connectionAttempts=attempts,
+        connectionSuccessRate=round(connected * 100 / attempts, 2) if attempts else 0.0,
+        dropoutRate=round(dropouts * 100 / connected, 2) if connected else 0.0,
+        sendSuccessRate=round(sent * 100 / (sent + failed), 2) if sent + failed else 0.0,
+        sendSuccess=sent,
+        sendFailure=failed,
+        quotaRejected=counts.get("quota_rejected", 0),
+        moderationBlocked=counts.get("moderation_blocked", 0),
+        credentialExpired=counts.get("credential_expired", 0),
+        ownershipRejected=counts.get("ownership_rejected", 0),
+        riskControlIncidents=counts.get("risk_control_incident", 0),
+    )
+
+
+async def record_risk_control_incident(
+    db: AsyncSession,
+    inp: MonitoringIncidentIn,
+) -> None:
+    user_id = ""
+    if inp.accountId:
+        account = await db.get(PublishAccount, inp.accountId)
+        if account is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+            )
+        user_id = account.user_id
+    await repo.record_metric_event(
+        db,
+        kind="risk_control_incident",
+        account_id=inp.accountId,
+        user_id=user_id,
+        detail=inp.detail,
+    )
+
+
+async def expire_account_credentials(db: AsyncSession, account_id: str, user_id: str) -> bool:
+    """Fail closed after a Douyin session expires and notify only on the first transition."""
+    from app.core.audit import write_audit
+    from app.modules.notify.service import notify_user
+    from app.modules.publish import repository as publish_repo
+
+    account = await publish_repo.get_account(db, account_id, user_id)
+    if account is None:
+        return False
+    newly_expired = account.status != "expired"
+    account.status = "expired"
+
+    listener_state = await repo.get_listener_state(db, account_id, user_id)
+    if listener_state is not None:
+        listener_state.status = "error"
+        listener_state.error_msg = "cookie_expired"
+    canceled = await repo.disable_account_automation(
+        db,
+        account_id,
+        user_id,
+        reason="CredentialExpired",
+    )
+    logger.warning(
+        "IM credentials expired: account=%s user=%s canceled=%d",
+        account_id[:8],
+        user_id[:8],
+        canceled,
+    )
+    if newly_expired:
+        await record_metric("credential_expired", account_id=account_id, user_id=user_id)
+
+    if newly_expired:
+        await write_audit(
+            "im_account_credential_expired",
+            user_id=user_id,
+            detail=f"account_id={account_id},platform={account.platform}",
+        )
+        try:
+            await notify_user(
+                db,
+                user_id,
+                "warn",
+                f"抖音账号「{account.nickname or account_id[:8]}」登录态失效，请重新授权",
+                "私信监听和待发送自动回复已停止；请在账号管理中重新扫码授权后再手动恢复自动回复。",
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("IM credential expiry notification failed: account=%s", account_id[:8])
+
+    try:
+        await emit(
+            CHANNEL_IM,
+            {
+                "kind": EV_LISTENER_STATUS,
+                "userId": user_id,
+                "accountId": account_id,
+                "status": "error",
+                "errorMsg": "登录态失效，请重新绑定账号",
+            },
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("IM credential expiry event failed: account=%s", account_id[:8])
+    return True
+
+
+async def cleanup_expired_history() -> tuple[int, int]:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=max(1, settings.im_history_retention_days))
+    metric_cutoff = now - timedelta(days=max(1, settings.im_metric_retention_days))
+    async with SessionLocal() as db:
+        deleted = await repo.cleanup_history(db, cutoff=cutoff)
+        deleted_metrics = await repo.cleanup_metric_events(db, cutoff=metric_cutoff)
+    logger.info(
+        "IM history cleanup complete: messages=%d conversations=%d metrics=%d cutoff=%s metric_cutoff=%s",
+        deleted[0],
+        deleted[1],
+        deleted_metrics,
+        cutoff.isoformat(),
+        metric_cutoff.isoformat(),
+    )
+    return deleted
 
 
 # ============ 消息接收处理（供 Worker 调用） ============
@@ -272,38 +731,65 @@ async def handle_incoming_message(
     dy_conversation_id: str = "",
     dy_conversation_short_id: str = "",
     dy_ticket: str = "",
+    remote_message_id: str = "",
+    remote_index: int | None = None,
 ) -> None:
     """Worker 收到新私信后的统一入口：落库 → 推送 → 触发自动回复"""
     async with _session() as db:
+        from app.modules.publish import repository as publish_repo
+
+        if not await publish_repo.get_account(db, account_id, user_id):
+            logger.warning("ignored IM message with stale account ownership: account=%s", account_id[:8])
+            await record_metric("ownership_rejected", account_id=account_id, user_id=user_id)
+            return
+        if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+            logger.warning("ignored IM message outside gray allowlist: account=%s", account_id[:8])
+            return
+
         # 1. 查找或创建会话
-        conv = await repo.get_conversation_by_dy_id(db, account_id, remote_uid)
-        if conv is None:
-            conv = await repo.create_conversation(
-                db,
-                account_id=account_id,
-                user_id=user_id,
-                platform="douyin",
-                remote_uid=remote_uid,
-                remote_nickname=remote_nickname,
-                remote_avatar=remote_avatar,
-                dy_conversation_id=dy_conversation_id,
-                dy_conversation_short_id=dy_conversation_short_id,
-                dy_ticket=dy_ticket,
-                last_message_at=datetime.now(UTC),
-                unread_count=1,
-            )
-        else:
-            conv.last_message_at = datetime.now(UTC)
-            conv.unread_count = (conv.unread_count or 0) + 1
-            if remote_nickname:
-                conv.remote_nickname = remote_nickname
-            await repo.save_conversation(db, conv)
+        conv = await repo.get_or_create_conversation(
+            db,
+            account_id=account_id,
+            user_id=user_id,
+            platform="douyin",
+            remote_uid=remote_uid,
+            remote_nickname=remote_nickname,
+            remote_avatar=remote_avatar,
+            dy_conversation_id=dy_conversation_id,
+            dy_conversation_short_id=dy_conversation_short_id,
+            dy_ticket=dy_ticket,
+            last_message_at=datetime.now(UTC),
+            unread_count=0,
+        )
 
         # 2. 消息落库
         content_json = json.dumps({"text": content}, ensure_ascii=False) if msg_type == 7 else content
-        msg = await repo.create_message(
-            db, conversation_id=conv.id, user_id=user_id, direction="in", msg_type=msg_type, content=content_json
+        msg, created = await repo.create_remote_message(
+            db,
+            conversation_id=conv.id,
+            user_id=user_id,
+            direction="in",
+            msg_type=msg_type,
+            content=content_json,
+            remote_message_id=remote_message_id or None,
+            remote_index=remote_index,
         )
+        if not created:
+            return
+
+        conv.last_message_at = datetime.now(UTC)
+        conv.unread_count = (conv.unread_count or 0) + 1
+        if remote_nickname:
+            conv.remote_nickname = remote_nickname
+        if remote_avatar:
+            conv.remote_avatar = remote_avatar
+        if dy_conversation_id:
+            conv.dy_conversation_id = dy_conversation_id
+        if dy_conversation_short_id:
+            conv.dy_conversation_short_id = dy_conversation_short_id
+        if dy_ticket:
+            conv.dy_ticket = dy_ticket
+        await repo.save_conversation(db, conv)
 
         # 3. 推送前端
         await emit(
@@ -331,97 +817,143 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
     if matched_rule is None:
         return
 
-    # #6 检查每日限额（按 rule_id 过滤）
-    today_count = await repo.count_today_replies(db, conv.user_id, matched_rule.id)
-    if today_count >= matched_rule.daily_limit:
-        logger.info(f"rule {matched_rule.id} daily limit reached ({today_count})")
-        return
-
-    # #13 每分钟频率限制
-    if _is_rate_limited(conv.account_id):
-        logger.info(f"account {conv.account_id[:8]} rate limited (>{MAX_REPLIES_PER_MINUTE}/min)")
-        return
-
     # 生成回复内容
     reply_text = await _generate_reply(db, matched_rule, text, conv)
     if not reply_text:
         return
 
-    # #4 拆分为独立 Task：延迟 + 发送 + 落库（不占用当前 DB Session）
-    delay = random.uniform(max(0, matched_rule.delay_min), max(matched_rule.delay_min, matched_rule.delay_max))
-    asyncio.create_task(
-        _delayed_reply(
-            account_id=conv.account_id,
-            user_id=conv.user_id,
-            conversation_id=conv.id,
-            platform=conv.platform,
-            dy_conversation_id=conv.dy_conversation_id,
-            dy_conversation_short_id=conv.dy_conversation_short_id,
-            dy_ticket=conv.dy_ticket,
-            reply_text=reply_text,
-            rule_id=matched_rule.id,
-            delay=delay,
-        )
-    )
+    from app.modules.im.moderation import review_outgoing
 
-
-async def _delayed_reply(
-    *,
-    account_id: str,
-    user_id: str,
-    conversation_id: str,
-    platform: str,
-    dy_conversation_id: str,
-    dy_conversation_short_id: str,
-    dy_ticket: str,
-    reply_text: str,
-    rule_id: str,
-    delay: float,
-) -> None:
-    """#4 独立 Task：延迟后发送回复并落库"""
-    await asyncio.sleep(delay)
-    try:
-        im_provider = registry.im_driver(platform)
-        session = await _load_account_session(account_id, user_id)
-        await im_provider.send_message(
-            session=session,
-            conversation_id=dy_conversation_id,
-            conversation_short_id=dy_conversation_short_id,
-            ticket=dy_ticket,
-            content=reply_text,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"auto reply send failed: {e}")
-        return
-
-    # 记录频率
-    _rate_window[account_id].append(time.time())
-
-    # 落库（重新获取 Session）
-    async with _session() as db:
-        reply_msg = await repo.create_message(
+    moderation = review_outgoing(reply_text)
+    if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conv.account_id, user_id=conv.user_id)
+        await repo.create_message(
             db,
-            conversation_id=conversation_id,
-            user_id=user_id,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
             direction="out",
             msg_type=7,
             content=json.dumps({"text": reply_text}, ensure_ascii=False),
             auto_replied=True,
-            rule_id=rule_id,
+            rule_id=matched_rule.id,
+            send_status="blocked",
+            moderation_status="blocked",
+            moderation_reason=moderation.reason_text,
         )
-        conv = await repo.get_conversation(db, conversation_id)
-        if conv:
-            conv.last_message_at = datetime.now(UTC)
-            await repo.save_conversation(db, conv)
+        return
+
+    if matched_rule.delivery_mode != "auto":
+        await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
+            direction="out",
+            msg_type=7,
+            content=json.dumps({"text": reply_text}, ensure_ascii=False),
+            auto_replied=True,
+            rule_id=matched_rule.id,
+            send_status="suggested",
+            moderation_status="approved",
+        )
+        return
+
+    block_reason = await repo.automation_block_reason(db, conv.account_id, conv.user_id)
+    if block_reason:
+        await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
+            direction="out",
+            msg_type=7,
+            content=json.dumps({"text": reply_text}, ensure_ascii=False),
+            auto_replied=True,
+            rule_id=matched_rule.id,
+            send_status="suggested",
+            send_error=block_reason,
+            moderation_status="approved",
+        )
+        return
+
+    limiter = _get_reply_limiter()
+    if not await limiter.reserve(
+        account_id=conv.account_id,
+        user_id=conv.user_id,
+        rule_id=matched_rule.id,
+        conversation_id=conv.id,
+        minute_limit=MAX_REPLIES_PER_MINUTE,
+        daily_limit=matched_rule.daily_limit,
+        conversation_limit=MAX_REPLIES_PER_CONVERSATION_PER_DAY,
+    ):
+        logger.info("IM auto reply quota unavailable or exhausted: account=%s", conv.account_id[:8])
+        await record_metric("quota_rejected", account_id=conv.account_id, user_id=conv.user_id)
+        return
+
+    # Persist the reply before publishing the delayed Dramatiq message.
+    delay = random.uniform(max(0, matched_rule.delay_min), max(matched_rule.delay_min, matched_rule.delay_max))
+    reply_message = await repo.create_message(
+        db,
+        conversation_id=conv.id,
+        user_id=conv.user_id,
+        direction="out",
+        msg_type=7,
+        content=json.dumps({"text": reply_text}, ensure_ascii=False),
+        auto_replied=True,
+        rule_id=matched_rule.id,
+        send_status="scheduled",
+        moderation_status="approved",
+        scheduled_at=datetime.now(UTC) + timedelta(seconds=delay),
+    )
+    try:
+        reply_message.queue_message_id = _schedule_auto_reply(reply_message.id, round(delay * 1000))
+        await repo.save_message(db, reply_message)
+    except Exception as error:  # noqa: BLE001
+        reply_message.send_status = "failed"
+        reply_message.send_error = error.__class__.__name__[:256]
+        await repo.save_message(db, reply_message)
+        logger.error("IM auto reply queue dispatch failed: message=%s", reply_message.id[:8])
+
+
+def _schedule_auto_reply(message_id: str, delay_ms: int) -> str:
+    from app.workers.tasks import run_im_auto_reply
+
+    queued = run_im_auto_reply.send_with_options(args=(message_id,), delay=max(0, delay_ms))
+    return queued.message_id
+
+
+async def run_scheduled_reply(message_id: str) -> None:
+    """Resume a durable auto reply using only its persisted message ID."""
+    async with _session() as db:
+        reply_msg = await repo.get_message_by_id(db, message_id)
+        if reply_msg is None or reply_msg.send_status != "scheduled" or reply_msg.manual_takeover:
+            return
+        conv = await repo.get_conversation(db, reply_msg.conversation_id, reply_msg.user_id)
+        if conv is None:
+            reply_msg.send_status = "failed"
+            reply_msg.send_error = "ConversationNotFound"
+            await repo.save_message(db, reply_msg)
+            return
+        block_reason = await repo.automation_block_reason(db, conv.account_id, conv.user_id)
+        if block_reason:
+            reply_msg.send_status = "canceled"
+            reply_msg.send_error = block_reason
+            await repo.save_message(db, reply_msg)
+            return
+        if not await repo.claim_scheduled_message(db, reply_msg.id, reply_msg.user_id):
+            return
+        await db.refresh(reply_msg)
+        try:
+            await _send_existing_message(db, conv, reply_msg, _message_text(reply_msg))
+        except Exception:  # noqa: BLE001
+            return
 
     # 推送前端
     await emit(
         CHANNEL_IM,
         {
             "kind": EV_AUTO_REPLIED,
-            "userId": user_id,
-            "conversationId": conversation_id,
-            "reply": reply_text,
+            "userId": reply_msg.user_id,
+            "conversationId": reply_msg.conversation_id,
+            "reply": _message_text(reply_msg),
             "messageId": reply_msg.id,
         },
     )
@@ -451,12 +983,26 @@ async def _generate_reply(db: AsyncSession, rule: IMAutoReplyRule, incoming_text
     if rule.reply_mode == "template":
         return rule.reply_template
 
-    # LLM 模式：注入 IP 人设上下文
+    from app.modules.im.moderation import contains_prompt_injection
+
+    if contains_prompt_injection(incoming_text):
+        logger.warning("prompt injection blocked for IM conversation=%s", (conv.id or "")[:8])
+        return rule.reply_template or ""
+
+    # LLM mode is blocked unless the current IpAsset persona is readable.
+    try:
+        persona_ctx = await _get_persona_context(db, conv.user_id)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("persona unavailable: user=%s error=%s", conv.user_id[:8], error.__class__.__name__)
+        return rule.reply_template or ""
+    if not persona_ctx:
+        logger.warning("persona unavailable: user=%s no active persona", conv.user_id[:8])
+        return rule.reply_template or ""
+
     try:
         llm = registry.get("llm")
-        persona_ctx = await _get_persona_context(db, conv.user_id)
         base_prompt = rule.llm_prompt or "请简洁友好地回复用户的私信。"
-        prompt = f"{persona_ctx}\n{base_prompt}" if persona_ctx else base_prompt
+        prompt = f"{persona_ctx}\n{base_prompt}"
         reply = await llm.rewrite(text=incoming_text, intensity="light", prompt=prompt)
         return reply[:500]  # 限制长度
     except Exception as e:  # noqa: BLE001
@@ -464,34 +1010,24 @@ async def _generate_reply(db: AsyncSession, rule: IMAutoReplyRule, incoming_text
         return rule.reply_template or ""
 
 
-async def _get_persona_context(db: AsyncSession, user_id: str) -> str:
-    """#5 从 ipasset 模块读取当前激活 IP 人设定义"""
-    try:
-        from app.modules.ipasset import repository as ip_repo
-        from app.modules.ipasset import service as ip_service
+async def _get_persona_context(db: AsyncSession, user_id: str) -> str | None:
+    """Read the current persona through the IpAsset service boundary."""
+    from app.modules.ipasset import service as ip_service
 
-        persona_id = await ip_service.get_active_persona_id(db, user_id)
-        if not persona_id:
-            return ""
-        persona = await ip_repo.get(db, persona_id, user_id)
-        if not persona:
-            return ""
-        return ip_service.persona_prompt_context(persona)
-    except Exception:  # noqa: BLE001
-        return ""
+    return await ip_service.get_active_persona_context(db, user_id)
 
 
 # ============ 辅助 ============
 
 
-def _is_rate_limited(account_id: str) -> bool:
-    """#13 滑动窗口限流：每分钟最多 MAX_REPLIES_PER_MINUTE 条"""
-    now = time.time()
-    window = _rate_window[account_id]
-    # 清除 60s 前的记录
-    while window and window[0] < now - 60:
-        window.popleft()
-    return len(window) >= MAX_REPLIES_PER_MINUTE
+def _get_reply_limiter():
+    global _reply_limiter
+    if _reply_limiter is None:
+        from app.core.config import get_settings
+        from app.modules.im.rate_limit import RedisReplyLimiter
+
+        _reply_limiter = RedisReplyLimiter.from_url(get_settings().redis_url)
+    return _reply_limiter
 
 
 async def _load_account_session(account_id: str, user_id: str) -> dict:
@@ -499,9 +1035,13 @@ async def _load_account_session(account_id: str, user_id: str) -> dict:
     from app.modules.publish import repository as pub_repo
 
     async with SessionLocal() as db:
+        if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+            raise GrayAccountNotApprovedError("account is outside the IM gray allowlist")
         acc = await pub_repo.get_account(db, account_id, user_id)
-        if acc:
+        if acc and acc.status == "active":
             return pub_repo.account_session(acc)
+        if acc:
+            raise AccountCredentialExpiredError("account credentials expired")
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
             detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
@@ -516,6 +1056,37 @@ async def _require_owned_account(db: AsyncSession, user_id: str, account_id: str
             status.HTTP_404_NOT_FOUND,
             detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
         )
+
+
+async def _require_gray_account(db: AsyncSession, account_id: str, user_id: str) -> None:
+    from app.core.config import get_settings
+
+    if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "IM_GRAY_NOT_APPROVED", "message": "该账号尚未进入私信灰度名单"},
+        )
+
+
+async def record_metric(
+    kind: str,
+    *,
+    account_id: str = "",
+    user_id: str = "",
+    detail: str = "",
+) -> None:
+    """Persist monitoring without coupling business transactions to telemetry."""
+    try:
+        async with SessionLocal() as metric_db:
+            await repo.record_metric_event(
+                metric_db,
+                kind=kind,
+                account_id=account_id,
+                user_id=user_id,
+                detail=detail,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("IM metric write failed: kind=%s account=%s", kind, account_id[:8])
 
 
 @asynccontextmanager

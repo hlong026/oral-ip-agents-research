@@ -335,6 +335,21 @@ export interface IMMessage {
   content: string;
   autoReplied: boolean;
   replyContent: string;
+  sendStatus:
+    | "received"
+    | "suggested"
+    | "blocked"
+    | "scheduled"
+    | "canceled"
+    | "pending"
+    | "sent"
+    | "failed"
+    | "manual";
+  sendError: string;
+  retryCount: number;
+  manualTakeover: boolean;
+  moderationStatus: "approved" | "blocked";
+  moderationReason: string;
   createdAt: string;
 }
 
@@ -351,6 +366,7 @@ export interface IMAutoReplyRule {
   dailyLimit: number;
   delayMin: number;
   delayMax: number;
+  deliveryMode: "suggestion" | "auto";
   enabled: boolean;
   createdAt: string;
 }
@@ -365,28 +381,50 @@ export interface IMListenerStatus {
   startedAt?: string | null;
 }
 
+export interface IMAutomationStatus {
+  accountId: string;
+  authorized: boolean;
+  riskVersion: string;
+  acceptedAt?: string | null;
+}
+
 export const imApi = {
-  conversations: (page = 1, pageSize = 20) =>
-    http.get<{
+  conversations: (page = 1, pageSize = 20, search = "", accountId = "") => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (search) params.set("search", search);
+    if (accountId) params.set("accountId", accountId);
+    return http.get<{
       items: IMConversation[];
       total: number;
       page: number;
       pageSize: number;
-    }>(`/im/conversations?page=${page}&pageSize=${pageSize}`),
-  messages: (conversationId: string, page = 1, pageSize = 50) =>
-    http.get<{
+    }>(`/im/conversations?${params}`);
+  },
+  messages: (conversationId: string, page = 1, pageSize = 50, search = "") => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (search) params.set("search", search);
+    return http.get<{
       items: IMMessage[];
       total: number;
       page: number;
       pageSize: number;
-    }>(
-      `/im/conversations/${conversationId}/messages?page=${page}&pageSize=${pageSize}`,
-    ),
+    }>(`/im/conversations/${conversationId}/messages?${params}`);
+  },
   send: (conversationId: string, content: string, msgType = 7) =>
     http.post<IMMessage>(`/im/conversations/${conversationId}/send`, {
       content,
       msgType,
     }),
+  retryMessage: (messageId: string) =>
+    http.post<IMMessage>(`/im/messages/${messageId}/retry`),
+  takeOverMessage: (messageId: string) =>
+    http.post<IMMessage>(`/im/messages/${messageId}/takeover`),
   markRead: (conversationId: string) =>
     http.put<void>(`/im/conversations/${conversationId}/read`),
   rules: () => http.get<IMAutoReplyRule[]>("/im/rules"),
@@ -402,6 +440,16 @@ export const imApi = {
     http.post<IMListenerStatus>("/im/listener/start", { accountId }),
   stopListener: (accountId: string) =>
     http.post<IMListenerStatus>("/im/listener/stop", { accountId }),
+  automationStatus: () =>
+    http.get<IMAutomationStatus[]>("/im/automation/status"),
+  authorizeAutomation: (accountId: string) =>
+    http.post<IMAutomationStatus>("/im/automation/authorize", {
+      accountId,
+      accepted: true,
+      riskVersion: "im-auto-reply-v1",
+    }),
+  disableAutomation: (accountId: string) =>
+    http.post<IMAutomationStatus>(`/im/automation/${accountId}/disable`),
 };
 
 // ---------- dashboard ----------

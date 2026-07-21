@@ -81,6 +81,9 @@ export default function ImRulesPage() {
                   <span className="chip text-[10px]">
                     {rule.replyMode === "llm" ? "AI 生成" : "模板"}
                   </span>
+                  <span className="chip text-[10px]">
+                    {rule.deliveryMode === "auto" ? "自动发送" : "仅建议"}
+                  </span>
                 </div>
                 <div className="mt-0.5 text-xs text-text-3">
                   {rule.triggerType === "keyword" &&
@@ -232,6 +235,9 @@ function RuleForm({
     rule?.triggerPattern ?? "",
   );
   const [replyMode, setReplyMode] = useState(rule?.replyMode ?? "template");
+  const [deliveryMode, setDeliveryMode] = useState(
+    rule?.deliveryMode ?? "suggestion",
+  );
   const [replyTemplate, setReplyTemplate] = useState(rule?.replyTemplate ?? "");
   const [llmPrompt, setLlmPrompt] = useState(rule?.llmPrompt ?? "");
   const [dailyLimit, setDailyLimit] = useState(rule?.dailyLimit ?? 50);
@@ -247,6 +253,7 @@ function RuleForm({
         triggerType,
         triggerPattern,
         replyMode,
+        deliveryMode,
         replyTemplate,
         llmPrompt,
         dailyLimit,
@@ -314,6 +321,18 @@ function RuleForm({
             >
               <option value="template">固定模板</option>
               <option value="llm">AI 生成（LLM）</option>
+            </select>
+          </Field>
+          <Field label="交付方式">
+            <select
+              className="input"
+              value={deliveryMode}
+              onChange={(e) =>
+                setDeliveryMode(e.target.value as "suggestion" | "auto")
+              }
+            >
+              <option value="suggestion">仅生成建议（默认，不自动发送）</option>
+              <option value="auto">审核通过后自动发送</option>
             </select>
           </Field>
           {replyMode === "template" && (

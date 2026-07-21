@@ -50,6 +50,11 @@ async def check_all_accounts() -> None:
                 expired_count += 1
                 platform_names = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
                 async with SessionLocal() as db:
+                    if account.platform == "douyin":
+                        from app.modules.im.service import expire_account_credentials
+
+                        await expire_account_credentials(db, account.id, account.user_id)
+                        continue
                     from app.modules.notify.service import notify_user
                     from app.modules.publish.repository import get_account, save_account
 
@@ -72,7 +77,7 @@ async def check_all_accounts() -> None:
                     user_id=account.user_id,
                 )
         except Exception as e:
-            logger.debug("heartbeat_check_error", account_id=account.id, error=str(e)[:100])
+            logger.warning("heartbeat_check_error", account_id=account.id, error=str(e)[:100])
 
     if expired_count:
         logger.warning("heartbeat_done", expired=expired_count, total=len(accounts))

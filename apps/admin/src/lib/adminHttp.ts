@@ -105,6 +105,39 @@ export interface AuditItem {
   createdAt: string;
 }
 
+export interface ImKillSwitchStatus {
+  stopped: boolean;
+  canceledMessages: number;
+}
+
+export interface ImGrayAccount {
+  accountId: string;
+  userId: string;
+  nickname: string;
+  approvedBy: string;
+  addedAt: string;
+}
+
+export interface ImMonitoringSummary {
+  hours: number;
+  windowStart: string;
+  windowEnd: string;
+  grayAccounts: number;
+  listenerAccounts: number;
+  listeningAccounts: number;
+  connectionAttempts: number;
+  connectionSuccessRate: number;
+  dropoutRate: number;
+  sendSuccessRate: number;
+  sendSuccess: number;
+  sendFailure: number;
+  quotaRejected: number;
+  moderationBlocked: number;
+  credentialExpired: number;
+  ownershipRejected: number;
+  riskControlIncidents: number;
+}
+
 interface ProviderSettingsResponse {
   settings: Record<string, string>;
 }
@@ -286,6 +319,28 @@ export const adminApi = {
       "/cost-analysis",
     ),
   audit: () => adminFetch<{ items: AuditItem[]; total: number }>("/audit"),
+  imKillSwitch: () => adminFetch<ImKillSwitchStatus>("/im/kill-switch"),
+  setImKillSwitch: (stopped: boolean) =>
+    adminFetch<ImKillSwitchStatus>("/im/kill-switch", {
+      method: "PUT",
+      body: JSON.stringify({ stopped }),
+    }),
+  listImGrayAccounts: () => adminFetch<ImGrayAccount[]>("/im/gray/accounts"),
+  approveImGrayAccount: (accountId: string) =>
+    adminFetch<ImGrayAccount>(`/im/gray/accounts/${accountId}`, {
+      method: "PUT",
+    }),
+  removeImGrayAccount: (accountId: string) =>
+    adminFetch<{ ok: boolean }>(`/im/gray/accounts/${accountId}`, {
+      method: "DELETE",
+    }),
+  imMonitoring: (hours = 24) =>
+    adminFetch<ImMonitoringSummary>(`/im/monitoring?hours=${hours}`),
+  recordImRiskIncident: (accountId: string, detail: string) =>
+    adminFetch<{ ok: boolean }>("/im/monitoring/incidents", {
+      method: "POST",
+      body: JSON.stringify({ accountId, detail }),
+    }),
 
   async listProviders(): Promise<ProviderConfig[]> {
     const response = await adminFetch<ProviderSettingsResponse>("/providers");

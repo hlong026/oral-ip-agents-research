@@ -71,6 +71,9 @@ extend-immutable-calls = [
     "fastapi.Cookie",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"app/providers/im/proto/**/*_pb2.py" = ["E501", "I001", "UP009"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = false

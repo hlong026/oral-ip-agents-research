@@ -25,7 +25,17 @@ alembic upgrade head
 uvicorn app.main:app --reload
 # 另开终端启动持久任务 Worker
 uv run dramatiq app.workers.tasks --processes 1 --threads 4
+# IM_ENABLED=true 的开发/测试环境另开独立私信监听 Worker
+uv run python -m app.workers.im_listener
 ```
+
+私信监听意图保存在数据库，实际 WebSocket 连接只由独立监听 Worker 持有；
+Redis 租约保证同一账号不会被多个 Worker 重复监听。生产环境仍受第三阶段
+Go/No-Go 门禁约束，不得仅通过设置 `IM_ENABLED=true` 绕过授权与灰度验收。
+`IM_GRAY_ENFORCED=true` 默认为开启；管理员必须先把账号加入灰度名单，监听、手动发送和自动回复才会进入 Provider 链路。管理端“私信自动回复安全”页面提供灰度名单、24 小时监控和风控事件登记。
+启用 IM 时必须提供真实 `DOUYIN_IM_APP_KEY`，缺失即拒绝启动，不会降级为 Mock 并写入伪成功。灰度账号默认最多 20 个（`IM_GRAY_MAX_ACCOUNTS`）；原始监控事件默认保留 14 天（`IM_METRIC_RETENTION_DAYS`），七日聚合证据由验收脚本单独保存。
+`IM_HISTORY_RETENTION_DAYS` 默认为 90 天，监听 Worker 每
+`IM_CLEANUP_INTERVAL_HOURS` 小时分批清理终态历史；待发送、发送中和失败可重试消息不会被自动清理。
 
 本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的
 ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置 FFmpeg。
@@ -53,6 +63,7 @@ ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker
 | [docs/10-项目三阶段修复与开发计划-复审版.md](docs/10-项目三阶段修复与开发计划-复审版.md)   | 三阶段修复顺序、启动条件、退出门槛和真实验收口径                                                                                                                |
 | [docs/11-第二阶段真实链路验收.md](docs/11-第二阶段真实链路验收.md)                         | 第二阶段真实 Provider、MP4、计费、发布包和真实发布的证据采集方法                                                                                                |
 | [docs/12-第三阶段S3-01-Go-No-Go决策.md](docs/12-第三阶段S3-01-Go-No-Go决策.md)             | 第三阶段当前 No-Go 结论、工程门禁和重新评审所需证据                                                                                                             |
+| [docs/13-第三阶段七天灰度验收.md](docs/13-第三阶段七天灰度验收.md)                         | S3-14 灰度准入、监控指标、每日证据采集和连续七天退出判定                                                                                                        |
 
 ## 调研覆盖产品
 
