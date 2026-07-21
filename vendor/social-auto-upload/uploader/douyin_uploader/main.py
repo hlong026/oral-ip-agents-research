@@ -3,6 +3,7 @@ from datetime import datetime
 
 import asyncio
 import inspect
+import json
 import os
 import sys
 from pathlib import Path
@@ -23,6 +24,56 @@ from utils.log import douyin_logger
 
 DOUYIN_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
+DOUYIN_IM_DEVICE_STORAGE_KEY = "oral_im_device_id"
+
+
+def _extract_douyin_device_id(payload: dict) -> str:
+    """Extract the real browser device id from Douyin's signed query/user response."""
+    if payload.get("status_code") not in (None, 0):
+        return ""
+    device_id = str(payload.get("id", ""))
+    return device_id if device_id.isdigit() else ""
+
+
+async def _capture_douyin_device_id(page: Page) -> str:
+    """Trigger a signed Douyin web request and capture the device id used by this browser session."""
+    found = ""
+    ready = asyncio.Event()
+
+    async def _on_response(response) -> None:
+        nonlocal found
+        if "/aweme/v1/web/query/user" not in response.url:
+            return
+        try:
+            found = _extract_douyin_device_id(await response.json())
+            if found:
+                ready.set()
+        except Exception:
+            return
+
+    page.on("response", _on_response)
+    try:
+        await page.goto("https://www.douyin.com/discover", wait_until="domcontentloaded", timeout=60000)
+        await asyncio.wait_for(ready.wait(), timeout=15)
+    except Exception:
+        return found
+    return found
+
+
+def _store_douyin_device_id(account_file: str, device_id: str) -> None:
+    """Write device_id into Playwright storage_state without corrupting its cookies/origins shape."""
+    path = Path(account_file)
+    state = json.loads(path.read_text(encoding="utf-8"))
+    origins = state.setdefault("origins", [])
+    douyin_origin = next((item for item in origins if item.get("origin") == "https://www.douyin.com"), None)
+    if douyin_origin is None:
+        douyin_origin = {"origin": "https://www.douyin.com", "localStorage": []}
+        origins.append(douyin_origin)
+
+    local_storage = douyin_origin.setdefault("localStorage", [])
+    local_storage[:] = [item for item in local_storage if item.get("name") != DOUYIN_IM_DEVICE_STORAGE_KEY]
+    local_storage.append({"name": DOUYIN_IM_DEVICE_STORAGE_KEY, "value": device_id})
+    path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
 def _msg(emoji: str, text: str) -> str:
@@ -259,7 +310,12 @@ async def douyin_cookie_gen(
             )
             if result["success"]:
                 await asyncio.sleep(2)
+                device_id = await _capture_douyin_device_id(page)
                 await context.storage_state(path=account_file)
+                if device_id:
+                    _store_douyin_device_id(account_file, device_id)
+                else:
+                    douyin_logger.warning(_msg("⚠️", "已登录，但未捕获到私信连接所需的 device_id"))
                 if not await cookie_auth(account_file):
                     result = _build_login_result(
                         False,
