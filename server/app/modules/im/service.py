@@ -104,7 +104,7 @@ async def list_messages(
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
-    items, total = await repo.list_messages(db, conversation_id, page, page_size)
+    items, total = await repo.list_messages(db, conversation_id, user_id, page, page_size)
     return MessagePageOut(items=[msg_to_out(m) for m in items], total=total, page=page, pageSize=page_size)
 
 
@@ -268,11 +268,19 @@ async def handle_incoming_message(
     dy_conversation_id: str = "",
     dy_conversation_short_id: str = "",
     dy_ticket: str = "",
+    remote_message_id: str = "",
+    remote_index: int | None = None,
 ) -> None:
     """Worker 收到新私信后的统一入口：落库 → 推送 → 触发自动回复"""
     async with _session() as db:
+        from app.modules.publish import repository as publish_repo
+
+        if not await publish_repo.get_account(db, account_id, user_id):
+            logger.warning("ignored IM message with stale account ownership: account=%s", account_id[:8])
+            return
+
         # 1. 查找或创建会话
-        conv = await repo.get_conversation_by_dy_id(db, account_id, remote_uid)
+        conv = await repo.get_conversation_by_dy_id(db, account_id, user_id, remote_uid)
         if conv is None:
             conv = await repo.create_conversation(
                 db,
@@ -286,20 +294,29 @@ async def handle_incoming_message(
                 dy_conversation_short_id=dy_conversation_short_id,
                 dy_ticket=dy_ticket,
                 last_message_at=datetime.now(UTC),
-                unread_count=1,
+                unread_count=0,
             )
-        else:
-            conv.last_message_at = datetime.now(UTC)
-            conv.unread_count = (conv.unread_count or 0) + 1
-            if remote_nickname:
-                conv.remote_nickname = remote_nickname
-            await repo.save_conversation(db, conv)
 
         # 2. 消息落库
         content_json = json.dumps({"text": content}, ensure_ascii=False) if msg_type == 7 else content
-        msg = await repo.create_message(
-            db, conversation_id=conv.id, user_id=user_id, direction="in", msg_type=msg_type, content=content_json
+        msg, created = await repo.create_remote_message(
+            db,
+            conversation_id=conv.id,
+            user_id=user_id,
+            direction="in",
+            msg_type=msg_type,
+            content=content_json,
+            remote_message_id=remote_message_id or None,
+            remote_index=remote_index,
         )
+        if not created:
+            return
+
+        conv.last_message_at = datetime.now(UTC)
+        conv.unread_count = (conv.unread_count or 0) + 1
+        if remote_nickname:
+            conv.remote_nickname = remote_nickname
+        await repo.save_conversation(db, conv)
 
         # 3. 推送前端
         await emit(

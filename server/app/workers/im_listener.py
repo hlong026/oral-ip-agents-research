@@ -304,6 +304,8 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
                         dy_conversation_id=message.get("dy_conversation_id", ""),
                         dy_conversation_short_id=message.get("dy_conversation_short_id", ""),
                         dy_ticket=message.get("dy_ticket", ""),
+                        remote_message_id=message.get("remote_message_id", ""),
+                        remote_index=message.get("remote_index"),
                     )
 
                 listen_task = asyncio.create_task(connection.listen(on_message))

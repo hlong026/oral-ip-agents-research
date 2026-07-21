@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -38,6 +38,15 @@ class IMMessage(Base):
     """私信消息记录"""
 
     __tablename__ = "im_messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "remote_message_id", name="uq_im_messages_remote_message"),
+        UniqueConstraint(
+            "conversation_id",
+            "direction",
+            "remote_index",
+            name="uq_im_messages_remote_index",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     conversation_id: Mapped[str] = mapped_column(String(32), index=True)
@@ -48,6 +57,8 @@ class IMMessage(Base):
     auto_replied: Mapped[bool] = mapped_column(Boolean, default=False)
     rule_id: Mapped[str] = mapped_column(String(32), default="", index=True)  # 触发的规则 ID
     reply_content: Mapped[str] = mapped_column(Text, default="")
+    remote_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    remote_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
