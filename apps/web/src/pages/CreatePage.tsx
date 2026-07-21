@@ -1,6 +1,6 @@
 import { avatarApi, contentApi, HttpError, pipelineApi, voiceApi } from "@oral/api-client";
 import { useIp } from "@oral/stores";
-import { PLATFORM_NAMES, type Platform, type RewriteIntensity } from "@oral/types";
+import { PLATFORM_NAMES, PUBLISH_PLATFORMS, type Platform, type RewriteIntensity } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -436,7 +436,7 @@ function StepPublish({ wiz, setWiz }: { wiz: Wizard; setWiz: (w: Wizard) => void
       <div>
         <label className="label">发布平台（可仅生成不发布，稍后在发布管理手动发）</label>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {(Object.keys(PLATFORM_NAMES) as Platform[]).map((p) => (
+          {PUBLISH_PLATFORMS.map((p) => (
             <button
               key={p}
               onClick={() => toggle(p)}
