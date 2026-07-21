@@ -11,7 +11,6 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.core.storage import save_bytes
 from app.providers.hifly import HiFlyAPIError, get_client
 from app.providers.registry import registry
 
@@ -29,7 +28,7 @@ async def list_voices(db: AsyncSession, user_id: str) -> list[VoiceOut]:
 
 
 async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: str | None,
-                      sample_key: str, language: str = "zh") -> VoiceOut:
+                      sample_key: str, language: str = "zh", reservation_id: str = "") -> VoiceOut:
     """
     声音克隆（异步）：
     1. consent_token 强制校验
@@ -38,7 +37,7 @@ async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: 
     4. 前端通过 /voices/{id}/status 轮询 或等待 Webhook 回调
     """
     if not consent_token or len(consent_token.strip()) < 4:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"})
 
     # 声音克隆提交：记录 INFO（§10.6.8-B #4）
@@ -49,13 +48,35 @@ async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: 
         task_id, provider_name = await registry.run_with_fallback(
             "voice", registry.voice_chain, "clone", name, sample_key, consent_token, language)
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail={"code": "CLONE_FAILED", "message": e.user_message})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail={"code": "CLONE_FAILED", "message": e.user_message}) from e
 
     v = await repo.create(db, user_id=user_id, name=name, source="clone", provider=provider_name,
                           provider_voice_id="", provider_task_id=task_id,
-                          sample_key=sample_key, language=language, status="training")
+                          reservation_id=reservation_id, sample_key=sample_key,
+                          language=language, status="training")
     return to_out(v)
+
+
+async def _finalize_clone_billing(db: AsyncSession, voice: Voice, succeeded: bool) -> None:
+    if not voice.reservation_id:
+        await db.commit()
+        return
+    from app.modules.billing.service import release_reservation, settle_reservation
+
+    if succeeded:
+        settled = await settle_reservation(
+            db,
+            voice.reservation_id,
+            voice.id,
+            step="voice_clone",
+        )
+        if settled <= 0:
+            raise RuntimeError("voice clone billing settlement failed")
+    else:
+        released = await release_reservation(db, voice.reservation_id, voice.user_id)
+        if released is None or released.status != "released":
+            raise RuntimeError("voice clone billing reservation missing")
 
 
 async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> CloneStatusOut:
@@ -89,13 +110,15 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
                 v.provider_voice_id = voice_id_remote
                 v.demo_key = demo_key
                 v.status = "pending_confirm"
-                await db.commit()
+                await _finalize_clone_billing(db, v, True)
                 logger.info("voice_clone_done", user_id=user_id, voice_id=v.id,
                             provider_voice_id=voice_id_remote)
             elif task_status == 4:
                 v.status = "failed"
-                await db.commit()
+                await _finalize_clone_billing(db, v, False)
         except Exception as e:
+            await db.rollback()
+            await db.refresh(v)
             logger.warning(f"voice clone status poll failed: {e}")
 
     return CloneStatusOut(
@@ -150,8 +173,8 @@ async def edit_voice_params(db: AsyncSession, user_id: str, voice_id: str,
             "pitch": pitch,
         })
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail={"code": "EDIT_FAILED", "message": e.user_message})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail={"code": "EDIT_FAILED", "message": e.user_message}) from e
 
     v.rate = rate
     v.volume = volume
@@ -213,9 +236,10 @@ async def handle_voice_callback(db: AsyncSession, task_id: str, status_code: int
         v.status = "pending_confirm"
         logger.info("voice_clone_done", user_id=v.user_id, voice_id=v.id,
                     provider_voice_id=voice_id_remote)
+        await _finalize_clone_billing(db, v, True)
     else:
         v.status = "failed"
-    await db.commit()
+        await _finalize_clone_billing(db, v, False)
 
 
 def to_out(v: Voice) -> VoiceOut:

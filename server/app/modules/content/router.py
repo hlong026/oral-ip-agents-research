@@ -1,10 +1,15 @@
 """content HTTP 层：解析 / 仿写 / 去重 / 选题 / 文案资产"""
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+import math
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_active_persona_id, get_current_user_id
+from app.modules.billing.service import metered_operation, quote_operation_unit
+from app.providers.duration_probe import probe_media_bytes
 
 from .schemas import (
     ParseIn,
@@ -37,18 +42,45 @@ router = APIRouter(prefix="/content", tags=["content"])
 async def api_parse(
     body: str | None = Form(None),
     url: str | None = Form(None),
+    quoteId: str | None = Form(None),
     file: UploadFile | None = File(None),
     user_id: str = Depends(get_current_user_id),
     persona_id: str | None = Depends(get_current_active_persona_id),
     db: AsyncSession = Depends(get_db),
 ):
     if file is not None:
-        return await parse_upload(db, user_id, file.filename or "upload.mp4", await file.read(), persona_id)
+        data = await file.read()
+        unit = await quote_operation_unit(db, user_id, quoteId, "asr")
+        duration = await probe_media_bytes(data, Path(file.filename or "").suffix)
+        if unit in {"per_minute", "per_second"} and duration is None:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "MEDIA_DURATION_UNVERIFIED", "message": "无法验证媒体时长，暂不能执行转写"},
+            )
+        seconds = max(1, math.ceil(duration or 1))
+        async with metered_operation(
+            db,
+            user_id,
+            quoteId,
+            "asr",
+            {"seconds": seconds, "assets": 1},
+        ):
+            return await parse_upload(
+                db,
+                user_id,
+                file.filename or "upload.mp4",
+                data,
+                persona_id,
+                duration,
+            )
     target = url or body
     if not target:
         # JSON 形式兼容
         return ParseOut(transcript=None, degraded=True, platform=None, title=None)
-    return await parse_url(db, user_id, target, persona_id)
+    unit = await quote_operation_unit(db, user_id, quoteId, "asr")
+    max_duration = 60 if unit in {"per_minute", "per_second"} else None
+    async with metered_operation(db, user_id, quoteId, "asr", {"seconds": 60, "assets": 1}):
+        return await parse_url(db, user_id, target, persona_id, max_duration)
 
 
 @router.post("/parse/json", response_model=ParseOut)
@@ -59,24 +91,60 @@ async def api_parse_json(
     db: AsyncSession = Depends(get_db),
 ):
     # 支持两种输入：url 或 videoId + platform
-    if body.videoId and body.platform:
-        return await parse_by_id(db, user_id, body.videoId, body.platform, persona_id)
-    return await parse_url(db, user_id, body.url or "", persona_id)
+    unit = await quote_operation_unit(db, user_id, body.quoteId, "asr")
+    max_duration = 60 if unit in {"per_minute", "per_second"} else None
+    async with metered_operation(db, user_id, body.quoteId, "asr", {"seconds": 60, "assets": 1}):
+        if body.videoId and body.platform:
+            return await parse_by_id(db, user_id, body.videoId, body.platform, persona_id, max_duration)
+        return await parse_url(db, user_id, body.url or "", persona_id, max_duration)
 
 
 @router.post("/rewrite", response_model=RewriteOut)
 async def api_rewrite(body: RewriteIn, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
-    return await rewrite(db, user_id, body.text, body.intensity, body.prompt, body.scriptId)
+    billable_text = body.text + (body.prompt or "")
+    characters = max(1, len(billable_text))
+    async with metered_operation(
+        db,
+        user_id,
+        body.quoteId,
+        "script_generation",
+        {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
+    ):
+        return await rewrite(db, user_id, body.text, body.intensity, body.prompt, body.scriptId)
 
 
 @router.post("/similarity", response_model=SimilarityOut)
-async def api_similarity(body: SimilarityIn, _user_id: str = Depends(get_current_user_id)):
-    return await similarity(body.text)
+async def api_similarity(
+    body: SimilarityIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    characters = max(1, len(body.text))
+    async with metered_operation(
+        db,
+        user_id,
+        body.quoteId,
+        "script_generation",
+        {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
+    ):
+        return await similarity(body.text)
 
 
 @router.post("/topics", response_model=TopicsOut)
-async def api_topics(body: TopicsIn, _user_id: str = Depends(get_current_user_id)):
-    return TopicsOut(topics=await topics(body.keyword))
+async def api_topics(
+    body: TopicsIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    characters = max(1, len(body.keyword))
+    async with metered_operation(
+        db,
+        user_id,
+        body.quoteId,
+        "topic_generation",
+        {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
+    ):
+        return TopicsOut(topics=await topics(body.keyword))
 
 
 @router.post("/scripts", response_model=ScriptOut)

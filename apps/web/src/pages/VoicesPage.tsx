@@ -4,6 +4,10 @@ import type { Voice } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import AssetNav from "../components/AssetNav";
+import {
+  confirmMeteredOperation,
+  textOperationUsage,
+} from "../lib/meteredOperation";
 
 /** 克隆新声音表单（合规红线：强制 consent 授权勾选，凭证随克隆任务存证） */
 function CloneForm({ onDone }: { onDone: () => void }) {
@@ -21,13 +25,19 @@ function CloneForm({ onDone }: { onDone: () => void }) {
     try {
       // 授权凭证：勾选即代表确认合法授权，生成 consent_token 随任务存证
       const consentToken = `consent-${Date.now()}`;
-      await voiceApi.clone(name.trim(), consentToken, file);
+      const quoteId = await confirmMeteredOperation("voice_clone", "声音克隆", {
+        assets: 1,
+      });
+      if (!quoteId) return;
+      await voiceApi.clone(name.trim(), consentToken, file, quoteId);
       setName("");
       setFile(null);
       setConsent(false);
       onDone();
     } catch (e) {
-      setError(e instanceof HttpError ? e.body.message : "克隆发起失败，请重试");
+      setError(
+        e instanceof HttpError ? e.body.message : "克隆发起失败，请重试",
+      );
     } finally {
       setBusy(false);
     }
@@ -37,11 +47,18 @@ function CloneForm({ onDone }: { onDone: () => void }) {
     <div className="glass-strong space-y-3 p-5" id="clone">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">克隆一个新声音</h2>
-        <span className="text-xs text-text-3">MiniMax Speech-02 · 约 10 分钟</span>
+        <span className="text-xs text-text-3">
+          MiniMax Speech-02 · 约 10 分钟
+        </span>
       </div>
       <div>
         <label className="label">声音名称</label>
-        <input className="input" placeholder="例：李老师 · 直播切片声" value={name} onChange={(e) => setName(e.target.value)} />
+        <input
+          className="input"
+          placeholder="例：李老师 · 直播切片声"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
       </div>
       <div>
         <label className="label">声音样本（1–5 分钟清晰人声，WAV/MP3）</label>
@@ -60,11 +77,27 @@ function CloneForm({ onDone }: { onDone: () => void }) {
         />
       </div>
       <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-        <input type="checkbox" className="mt-0.5" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
-        <span>我确认拥有该声音的合法授权（F-202 合规要求），授权凭证 consent_token 将随克隆任务一并存证。</span>
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+        />
+        <span>
+          我确认拥有该声音的合法授权（F-202 合规要求），授权凭证 consent_token
+          将随克隆任务一并存证。
+        </span>
       </label>
-      {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error}</div>}
-      <button className="btn-primary w-full" disabled={busy || !file || !consent || !name.trim()} onClick={submit}>
+      {error && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
+      <button
+        className="btn-primary w-full"
+        disabled={busy || !file || !consent || !name.trim()}
+        onClick={submit}
+      >
         {busy ? "克隆任务创建中…" : "开始克隆"}
       </button>
     </div>
@@ -72,7 +105,13 @@ function CloneForm({ onDone }: { onDone: () => void }) {
 }
 
 /** 试听台（TTS 即时合成，返回字级时间戳） */
-function Playground({ voices, defaultVoiceId }: { voices: Voice[]; defaultVoiceId?: string }) {
+function Playground({
+  voices,
+  defaultVoiceId,
+}: {
+  voices: Voice[];
+  defaultVoiceId?: string;
+}) {
   const [voiceId, setVoiceId] = useState(defaultVoiceId ?? "");
   const [text, setText] = useState("我是李老师，做财税 12 年，今天不绕弯子。");
   const [speed, setSpeed] = useState(1.0);
@@ -87,7 +126,14 @@ function Playground({ voices, defaultVoiceId }: { voices: Voice[]; defaultVoiceI
     setBusy(true);
     setError("");
     try {
-      const res = await voiceApi.synthesize(selected, text.trim(), speed);
+      const content = text.trim();
+      const quoteId = await confirmMeteredOperation(
+        "tts",
+        "语音合成试听",
+        textOperationUsage(content),
+      );
+      if (!quoteId) return;
+      const res = await voiceApi.synthesize(selected, content, speed, quoteId);
       setAudioUrl(res.audioUrl);
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "合成失败，请重试");
@@ -102,28 +148,47 @@ function Playground({ voices, defaultVoiceId }: { voices: Voice[]; defaultVoiceI
         <h2 className="font-medium">试听台</h2>
         <span className="text-xs text-text-3">TTS 即时合成</span>
       </div>
-      <textarea className="input min-h-20" value={text} onChange={(e) => setText(e.target.value)} placeholder="输入任意文案，用选中的声音即时合成试听……" />
+      <textarea
+        className="input min-h-20"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="输入任意文案，用选中的声音即时合成试听……"
+      />
       <div className="flex flex-wrap items-center gap-2">
-        <select className="input h-10 flex-1 px-3 py-0 text-sm" value={selected} onChange={(e) => setVoiceId(e.target.value)}>
+        <select
+          className="input h-10 flex-1 px-3 py-0 text-sm"
+          value={selected}
+          onChange={(e) => setVoiceId(e.target.value)}
+        >
           {ready.map((v) => (
             <option key={v.id} value={v.id}>
               {v.name}
             </option>
           ))}
         </select>
-        <select className="input h-10 w-24 px-3 py-0 text-sm" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>
+        <select
+          className="input h-10 w-24 px-3 py-0 text-sm"
+          value={speed}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+        >
           {[0.8, 1.0, 1.2, 1.5].map((s) => (
             <option key={s} value={s}>
               {s}x 语速
             </option>
           ))}
         </select>
-        <button className="btn-primary px-3 py-1 text-xs" disabled={busy || !selected || !text.trim()} onClick={run}>
+        <button
+          className="btn-primary px-3 py-1 text-xs"
+          disabled={busy || !selected || !text.trim()}
+          onClick={run}
+        >
           {busy ? "合成中…" : "▶ 合成试听"}
         </button>
       </div>
       {error && <div className="text-xs text-danger">{error}</div>}
-      {audioUrl && <audio className="w-full" controls autoPlay src={audioUrl} />}
+      {audioUrl && (
+        <audio className="w-full" controls autoPlay src={audioUrl} />
+      )}
     </div>
   );
 }
@@ -136,7 +201,8 @@ export default function VoicesPage() {
   const { data: voices, refetch } = useQuery({
     queryKey: ["voices"],
     queryFn: () => voiceApi.list(),
-    refetchInterval: (q) => ((q.state.data ?? []).some((v) => v.status === "training") ? 5000 : false),
+    refetchInterval: (q) =>
+      (q.state.data ?? []).some((v) => v.status === "training") ? 5000 : false,
   });
 
   const refresh = async () => {
@@ -179,12 +245,24 @@ export default function VoicesPage() {
 
       {/* 首屏：当前 IP 默认声音 */}
       <div className="glass flex flex-wrap items-center gap-5 p-5">
-        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-brand-grad text-2xl text-white">♪</span>
+        <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-brand-grad text-2xl text-white">
+          ♪
+        </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-lg font-bold">{boundVoice ? boundVoice.name : "未绑定默认声音"}</span>
-            {boundVoice && <span className="chip border-success/40 text-success">默认声音</span>}
-            {boundVoice && <span className="chip border-info/40 text-info">{boundVoice.provider}</span>}
+            <span className="text-lg font-bold">
+              {boundVoice ? boundVoice.name : "未绑定默认声音"}
+            </span>
+            {boundVoice && (
+              <span className="chip border-success/40 text-success">
+                默认声音
+              </span>
+            )}
+            {boundVoice && (
+              <span className="chip border-info/40 text-info">
+                {boundVoice.provider}
+              </span>
+            )}
           </div>
           <div className="mt-1.5 text-sm text-text-3">
             {boundVoice
@@ -212,7 +290,9 @@ export default function VoicesPage() {
                 <div
                   key={v.id}
                   className={`card-hover rounded-card border p-4 ${
-                    current?.voiceId === v.id ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"
+                    current?.voiceId === v.id
+                      ? "border-brand-from/60 bg-brand-from/10"
+                      : "border-stroke bg-white/[0.03]"
                   }`}
                 >
                   <div className="flex items-center gap-3">
@@ -232,41 +312,76 @@ export default function VoicesPage() {
                         {v.name}
                       </div>
                       <div className="mt-0.5 text-xs text-text-3">
-                        {v.source === "clone" ? "克隆音色" : "内置音色"} · {v.gender}
+                        {v.source === "clone" ? "克隆音色" : "内置音色"} ·{" "}
+                        {v.gender}
                       </div>
                     </div>
-                    {v.status === "ready" && <span className="chip border-success/40 text-[11px] text-success">就绪</span>}
-                    {v.status === "training" && <span className="chip border-warning/40 text-[11px] text-warning">训练中</span>}
-                    {v.status === "failed" && <span className="chip border-danger/40 text-[11px] text-danger">失败</span>}
+                    {v.status === "ready" && (
+                      <span className="chip border-success/40 text-[11px] text-success">
+                        就绪
+                      </span>
+                    )}
+                    {v.status === "training" && (
+                      <span className="chip border-warning/40 text-[11px] text-warning">
+                        训练中
+                      </span>
+                    )}
+                    {v.status === "failed" && (
+                      <span className="chip border-danger/40 text-[11px] text-danger">
+                        失败
+                      </span>
+                    )}
                   </div>
                   {/* 播放中波形动效 */}
                   {playing && (
-                    <div className="mt-3 flex h-5 items-end gap-0.5" aria-hidden>
-                      {[0.5, 1, 0.7, 0.9, 0.6, 1, 0.8, 0.5, 0.9, 0.65, 1, 0.7, 0.55, 0.85, 0.6, 0.95, 0.7, 0.5].map((h, i) => (
+                    <div
+                      className="mt-3 flex h-5 items-end gap-0.5"
+                      aria-hidden
+                    >
+                      {[
+                        0.5, 1, 0.7, 0.9, 0.6, 1, 0.8, 0.5, 0.9, 0.65, 1, 0.7,
+                        0.55, 0.85, 0.6, 0.95, 0.7, 0.5,
+                      ].map((h, i) => (
                         <span
                           key={i}
                           className="w-1 animate-pulse rounded-full bg-brand-to/70"
-                          style={{ height: `${h * 100}%`, animationDelay: `${i * 90}ms` }}
+                          style={{
+                            height: `${h * 100}%`,
+                            animationDelay: `${i * 90}ms`,
+                          }}
                         />
                       ))}
                     </div>
                   )}
                   <div className="mt-3 flex items-center justify-between">
                     <span className="text-xs text-text-3">
-                      {ip ? <span className="chip text-[11px]">{ip.name}</span> : v.provider}
+                      {ip ? (
+                        <span className="chip text-[11px]">{ip.name}</span>
+                      ) : (
+                        v.provider
+                      )}
                     </span>
-                    {v.status === "ready" && current && current.voiceId !== v.id && (
-                      <button className="btn-ghost px-2.5 py-0.5 text-xs" onClick={() => void bindToCurrent(v)}>
-                        设为默认
-                      </button>
+                    {v.status === "ready" &&
+                      current &&
+                      current.voiceId !== v.id && (
+                        <button
+                          className="btn-ghost px-2.5 py-0.5 text-xs"
+                          onClick={() => void bindToCurrent(v)}
+                        >
+                          设为默认
+                        </button>
+                      )}
+                    {current?.voiceId === v.id && (
+                      <span className="text-xs text-success">当前默认</span>
                     )}
-                    {current?.voiceId === v.id && <span className="text-xs text-success">当前默认</span>}
                   </div>
                 </div>
               );
             })}
             {(voices ?? []).length === 0 && (
-              <div className="col-span-full py-10 text-center text-text-3">暂无声音，先在右侧克隆一个吧</div>
+              <div className="col-span-full py-10 text-center text-text-3">
+                暂无声音，先在右侧克隆一个吧
+              </div>
             )}
           </div>
         </div>

@@ -1,11 +1,12 @@
 """content 出入参（F-101~F-106）"""
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ParseIn(BaseModel):
     url: str | None = None
     videoId: str | None = None      # 视频ID（与 platform 配合使用）
     platform: str | None = None     # douyin | xiaohongshu（videoId 时必填）
+    quoteId: str | None = None
 
 
 class WordTsOut(BaseModel):
@@ -32,10 +33,11 @@ class ParseOut(BaseModel):
 
 
 class RewriteIn(BaseModel):
-    text: str
+    text: str = Field(min_length=1, max_length=50_000)
     intensity: str = "structure"  # light | structure | theme（F-103 三档）
-    prompt: str | None = None
+    prompt: str | None = Field(default=None, max_length=4_000)
     scriptId: str | None = None
+    quoteId: str | None = None
 
 
 class RewriteOut(BaseModel):
@@ -48,6 +50,7 @@ class RewriteOut(BaseModel):
 
 class SimilarityIn(BaseModel):
     text: str
+    quoteId: str | None = None
 
 
 class SpanOut(BaseModel):
@@ -63,6 +66,7 @@ class SimilarityOut(BaseModel):
 
 class TopicsIn(BaseModel):
     keyword: str
+    quoteId: str | None = None
 
 
 class TopicsOut(BaseModel):

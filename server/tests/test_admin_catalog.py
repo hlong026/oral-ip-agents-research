@@ -1,14 +1,17 @@
 """管理员控制面、套餐目录和积分报价的契约测试。"""
+
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 
 from app.core.db import SessionLocal
 from app.core.security import decode_token, hash_password
 from app.modules.auth.models import User
-from app.modules.catalog.service import LEGACY_MODULE_PRICES
+from app.modules.catalog.service import LEGACY_MODULE_PRICES, MODULE_BILLING_UNITS
 
 
 def _phone() -> str:
@@ -85,6 +88,66 @@ def test_legacy_price_catalog_preserves_existing_pipeline_step_prices():
     }
 
 
+def test_provider_modules_only_accept_verifiable_billing_units():
+    assert MODULE_BILLING_UNITS["tts"] == {"per_action", "per_1k_chars", "per_1k_tokens"}
+    assert MODULE_BILLING_UNITS["voice_clone"] == {"per_action", "per_asset"}
+    assert MODULE_BILLING_UNITS["asr"] == {"per_action", "per_minute", "per_second"}
+
+
+def test_operation_quote_rejects_same_module_with_underreported_quantity():
+    from app.modules.billing.models import PriceQuote
+    from app.modules.billing.service import _validate_quote_matches_operation
+
+    quote = PriceQuote(
+        id="quote-test",
+        user_id="user-test",
+        catalog_version_id="catalog-test",
+        price_version="test-v1",
+        items_json='[{"module":"script_generation","unit":"per_1k_chars","quantity":1,"points":1}]',
+        estimated_points=1,
+        expires_at=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    with pytest.raises(HTTPException) as exc:
+        _validate_quote_matches_operation(
+            quote,
+            {
+                "module": "script_generation",
+                "measures": {"characters": 100, "tokens": 50, "assets": 1},
+            },
+        )
+    assert exc.value.detail["code"] == "QUOTE_OPERATION_MISMATCH"
+
+
+async def test_failure_recovery_rolls_back_before_releasing(monkeypatch: pytest.MonkeyPatch):
+    from app.modules.billing import service as billing_service
+
+    class FailedSession:
+        rolled_back = False
+
+        async def rollback(self) -> None:
+            self.rolled_back = True
+
+    failed_db = FailedSession()
+
+    async def release_after_rollback(db, reservation_id: str, user_id: str):
+        assert db is failed_db
+        assert db.rolled_back is True
+        assert reservation_id == "reservation-test"
+        assert user_id == "user-test"
+        return type("Recovered", (), {"status": "released"})()
+
+    monkeypatch.setattr(billing_service, "release_reservation", release_after_rollback)
+
+    recovered = await billing_service.recover_reservation_after_failure(
+        failed_db,  # type: ignore[arg-type]
+        "reservation-test",
+        "user-test",
+    )
+
+    assert recovered is not None
+    assert recovered.status == "released"
+
+
 async def _create_and_publish_plan(
     client: AsyncClient,
     headers: dict[str, str],
@@ -115,6 +178,218 @@ async def test_open_registration_is_disabled(client: AsyncClient):
 async def test_provider_backed_content_endpoint_requires_login(client: AsyncClient):
     response = await client.post("/api/v1/content/topics", json={"keyword": "口播"})
     assert response.status_code == 401
+
+
+async def test_provider_backed_content_operation_requires_and_settles_quote(
+    client: AsyncClient,
+    monkeypatch,
+):
+    headers = await _login(client, role="user")
+    token = headers["Authorization"].removeprefix("Bearer ")
+    user_id = str(decode_token(token)["sub"])
+
+    from app.modules.billing.service import grant_points
+
+    async with SessionLocal() as db:
+        await grant_points(
+            db,
+            user_id,
+            20,
+            source_type="manual",
+            source_id=f"test-{uuid.uuid4().hex}",
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            commit=True,
+        )
+
+    quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=headers,
+        json={"items": [{"module": "topic_generation", "quantity": 1}]},
+    )
+    assert quote.status_code == 200, quote.text
+    failed_quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=headers,
+        json={"items": [{"module": "topic_generation", "quantity": 1}]},
+    )
+    assert failed_quote.status_code == 200, failed_quote.text
+    wrong_module_quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=headers,
+        json={"items": [{"module": "script_generation", "quantity": 1}]},
+    )
+    assert wrong_module_quote.status_code == 200, wrong_module_quote.text
+    settlement_quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=headers,
+        json={"items": [{"module": "topic_generation", "quantity": 1}]},
+    )
+    assert settlement_quote.status_code == 200, settlement_quote.text
+
+    from app.core.config import get_settings
+    from app.modules.content import router as content_router
+
+    monkeypatch.setattr(get_settings(), "app_env", "prod")
+
+    without_quote = await client.post(
+        "/api/v1/content/topics",
+        headers=headers,
+        json={"keyword": "口播"},
+    )
+    assert without_quote.status_code == 409
+    assert without_quote.json()["detail"]["code"] == "QUOTE_REQUIRED"
+
+    mismatched = await client.post(
+        "/api/v1/content/topics",
+        headers=headers,
+        json={"keyword": "口播", "quoteId": wrong_module_quote.json()["quoteId"]},
+    )
+    assert mismatched.status_code == 409
+    assert mismatched.json()["detail"]["code"] == "QUOTE_OPERATION_MISMATCH"
+
+    async def fake_topics(_keyword: str) -> list[str]:
+        return ["选题一"]
+
+    monkeypatch.setattr(content_router, "topics", fake_topics)
+    billed = await client.post(
+        "/api/v1/content/topics",
+        headers=headers,
+        json={"keyword": "口播", "quoteId": quote.json()["quoteId"]},
+    )
+    assert billed.status_code == 200, billed.text
+    assert billed.json() == {"topics": ["选题一"]}
+
+    balance = await client.get("/api/v1/billing/balance", headers=headers)
+    usage = await client.get("/api/v1/billing/usage", headers=headers)
+    assert balance.json()["balance"] == 19
+    assert usage.json()["items"][0]["step"] == "topic_generation"
+    assert usage.json()["items"][0]["points"] == 1
+
+    async def failing_topics(_keyword: str) -> list[str]:
+        raise HTTPException(503, detail={"code": "UPSTREAM_FAILED", "message": "上游失败"})
+
+    monkeypatch.setattr(content_router, "topics", failing_topics)
+    failed = await client.post(
+        "/api/v1/content/topics",
+        headers=headers,
+        json={"keyword": "口播", "quoteId": failed_quote.json()["quoteId"]},
+    )
+    assert failed.status_code == 503
+    balance_after_failure = await client.get("/api/v1/billing/balance", headers=headers)
+    assert balance_after_failure.json()["balance"] == 19
+
+    from app.modules.billing import service as billing_service
+
+    async def failing_settlement(*_args, **_kwargs) -> int:
+        raise HTTPException(503, detail={"code": "SETTLEMENT_DOWN", "message": "结算失败"})
+
+    monkeypatch.setattr(content_router, "topics", fake_topics)
+    monkeypatch.setattr(billing_service, "settle_reservation", failing_settlement)
+    settlement_failed = await client.post(
+        "/api/v1/content/topics",
+        headers=headers,
+        json={"keyword": "口播", "quoteId": settlement_quote.json()["quoteId"]},
+    )
+    assert settlement_failed.status_code == 503
+    balance_after_settlement_failure = await client.get("/api/v1/billing/balance", headers=headers)
+    assert balance_after_settlement_failure.json()["balance"] == 19
+
+
+async def test_async_voice_clone_settles_only_after_provider_success(
+    client: AsyncClient,
+    monkeypatch,
+):
+    headers = await _login(client, role="user")
+    token = headers["Authorization"].removeprefix("Bearer ")
+    user_id = str(decode_token(token)["sub"])
+
+    from app.modules.billing.models import PriceQuote
+    from app.modules.billing.service import grant_points
+
+    quote_id = f"quote_{uuid.uuid4().hex}"
+    async with SessionLocal() as db:
+        await grant_points(
+            db,
+            user_id,
+            20,
+            source_type="manual",
+            source_id=f"test-{uuid.uuid4().hex}",
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+        db.add(
+            PriceQuote(
+                id=quote_id,
+                user_id=user_id,
+                catalog_version_id="test-catalog",
+                price_version="test-v1",
+                items_json='[{"module":"voice_clone","unit":"per_asset","quantity":1,"points":5}]',
+                estimated_points=5,
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            )
+        )
+        await db.commit()
+
+    from app.modules.voice import repository as voice_repo
+    from app.modules.voice import router as voice_router
+    from app.modules.voice.service import to_out
+
+    async def fake_clone(
+        db,
+        current_user_id,
+        name,
+        _consent_token,
+        sample_key,
+        language,
+        reservation_id,
+    ):
+        voice = await voice_repo.create(
+            db,
+            user_id=current_user_id,
+            name=name,
+            source="clone",
+            provider="mock",
+            provider_voice_id="",
+            provider_task_id="mock-task",
+            reservation_id=reservation_id,
+            sample_key=sample_key,
+            language=language,
+            status="training",
+        )
+        return to_out(voice)
+
+    monkeypatch.setattr(voice_router, "clone_voice", fake_clone)
+
+    submitted = await client.post(
+        "/api/v1/voices/clone",
+        headers=headers,
+        data={"name": "测试声音", "consentToken": "consent-test", "quoteId": quote_id},
+        files={"file": ("sample.wav", b"voice-sample", "audio/wav")},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["status"] == "training"
+
+    balance_while_training = await client.get("/api/v1/billing/balance", headers=headers)
+    usage_while_training = await client.get("/api/v1/billing/usage", headers=headers)
+    assert balance_while_training.json()["balance"] == 15
+    assert usage_while_training.json()["items"] == []
+
+    from app.modules.voice import service as voice_service
+
+    async def fake_status(*_args, **_kwargs):
+        return {"status": 3, "voice_id": "mock-voice", "demo_url": ""}, "mock"
+
+    monkeypatch.setattr(voice_service.registry, "run_with_fallback", fake_status)
+
+    completed = await client.get(
+        f"/api/v1/voices/{submitted.json()['id']}/status",
+        headers=headers,
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "pending_confirm"
+
+    usage = await client.get("/api/v1/billing/usage", headers=headers)
+    assert usage.json()["items"][0]["step"] == "voice_clone"
+    assert usage.json()["items"][0]["points"] == 5
 
 
 async def test_user_cannot_access_admin_control_plane(client: AsyncClient):
@@ -647,9 +922,7 @@ async def test_reservation_consumes_earliest_expiring_grant_and_release_restores
         grants = {
             item.source_id: item.remaining_points
             for item in (
-                await db.execute(
-                    select(CreditGrant).where(CreditGrant.source_id.in_([first_source, second_source]))
-                )
+                await db.execute(select(CreditGrant).where(CreditGrant.source_id.in_([first_source, second_source])))
             )
             .scalars()
             .all()
@@ -665,9 +938,7 @@ async def test_reservation_consumes_earliest_expiring_grant_and_release_restores
         restored = {
             item.source_id: item.remaining_points
             for item in (
-                await db.execute(
-                    select(CreditGrant).where(CreditGrant.source_id.in_([first_source, second_source]))
-                )
+                await db.execute(select(CreditGrant).where(CreditGrant.source_id.in_([first_source, second_source])))
             )
             .scalars()
             .all()
@@ -746,9 +1017,7 @@ async def test_pipeline_attaches_quote_reservation_and_cancel_releases_it(client
     from app.modules.pipeline.models import PipelineTask
 
     async with SessionLocal() as db:
-        task = (
-            await db.execute(select(PipelineTask).where(PipelineTask.id == task_id))
-        ).scalar_one()
+        task = (await db.execute(select(PipelineTask).where(PipelineTask.id == task_id))).scalar_one()
         assert task.reservation_id
 
     canceled = await client.post(f"/api/v1/pipelines/{task_id}/cancel", headers=user_headers)
@@ -880,6 +1149,40 @@ async def test_disabled_douyidou_is_skipped_in_direct_and_fallback_parse(client:
         )
 
     assert parsed.transcript is not None
+
+
+async def test_time_priced_url_asr_rejects_missing_exact_duration(monkeypatch: pytest.MonkeyPatch):
+    from app.modules.content import service as content_service
+    from app.providers.douyidou import DouyidouParser, DouyidouParseResult
+    from app.providers.registry import registry
+
+    async def provider_enabled(_provider_name: str) -> bool:
+        return True
+
+    async def parsed_without_duration(*_args, **_kwargs) -> DouyidouParseResult:
+        return DouyidouParseResult(
+            platform="douyin",
+            title="无可信时长",
+            video_url="https://example.com/media.mp4",
+        )
+
+    async def forbidden_estimate(*_args, **_kwargs):
+        raise AssertionError("按时长计费不得使用码率估算值")
+
+    monkeypatch.setattr(registry, "provider_enabled", provider_enabled)
+    monkeypatch.setattr(DouyidouParser, "parse_url_full", parsed_without_duration)
+    monkeypatch.setattr(content_service, "probe_duration", forbidden_estimate)
+
+    with pytest.raises(HTTPException) as exc:
+        await content_service.parse_url(
+            None,  # type: ignore[arg-type]
+            "user-test",
+            "https://www.douyin.com/video/123",
+            None,
+            max_duration_seconds=60,
+        )
+
+    assert exc.value.detail["code"] == "MEDIA_DURATION_UNVERIFIED"
 
 
 async def test_production_engine_rejects_legacy_task_without_reservation(client: AsyncClient, monkeypatch):
@@ -1109,9 +1412,7 @@ async def test_activation_batch_uses_published_sku_version(client: AsyncClient):
 
     activated_user_id = str(decode_token(activated.json()["accessToken"])["sub"])
     async with SessionLocal() as db:
-        grant = (
-            await db.execute(select(CreditGrant).where(CreditGrant.user_id == activated_user_id))
-        ).scalar_one()
+        grant = (await db.execute(select(CreditGrant).where(CreditGrant.user_id == activated_user_id))).scalar_one()
         ledger = (
             await db.execute(
                 select(CreditLedger).where(

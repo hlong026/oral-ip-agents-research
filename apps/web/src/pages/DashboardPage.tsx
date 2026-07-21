@@ -1,4 +1,9 @@
-import { contentApi, dashboardApi, HttpError, pipelineApi } from "@oral/api-client";
+import {
+  contentApi,
+  dashboardApi,
+  HttpError,
+  pipelineApi,
+} from "@oral/api-client";
 import { useRelativeTime } from "@oral/hooks";
 import { useIp, useTasks } from "@oral/stores";
 import { STEP_LABELS, type PipelineTask } from "@oral/types";
@@ -7,6 +12,10 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import LinkSourceInput from "../components/LinkSourceInput";
 import TaskCard from "../components/TaskCard";
+import {
+  confirmMeteredOperation,
+  mediaDurationSeconds,
+} from "../lib/meteredOperation";
 
 /** Hero 大输入框（链接/选题 → 提取文案入工坊 / 一键成片双入口，平台自动识别） */
 function HeroInput() {
@@ -31,7 +40,13 @@ function HeroInput() {
     setBusy(file ? "upload" : "parse");
     setError("");
     try {
-      const res = await contentApi.parse(url, file);
+      const seconds = file ? await mediaDurationSeconds(file) : 60;
+      const quoteId = await confirmMeteredOperation("asr", "提取文案", {
+        seconds,
+        assets: 1,
+      });
+      if (!quoteId) return;
+      const res = await contentApi.parse(url, file, quoteId);
       if (res.scriptId) {
         navigate(`/scripts/${res.scriptId}`);
       } else {
@@ -50,7 +65,9 @@ function HeroInput() {
       <h1 className="text-2xl font-bold">
         粘贴爆款链接，<span className="text-grad">30 秒</span>复刻你的口播视频
       </h1>
-      <p className="mt-1.5 text-sm text-text-3">支持抖音 / 快手 / 小红书 / 视频号链接，或直接输入选题</p>
+      <p className="mt-1.5 text-sm text-text-3">
+        支持抖音 / 快手 / 小红书 / 视频号链接，或直接输入选题
+      </p>
       <div className="mt-4 flex gap-2">
         <div className="flex-1">
           <LinkSourceInput
@@ -72,7 +89,11 @@ function HeroInput() {
             {busy === "parse" ? "提取中…" : "提取文案"}
           </button>
         )}
-        <button onClick={goCreate} disabled={!value.trim() || busy !== null} className="btn-primary h-12 shrink-0 px-6 text-base">
+        <button
+          onClick={goCreate}
+          disabled={!value.trim() || busy !== null}
+          className="btn-primary h-12 shrink-0 px-6 text-base"
+        >
           开始创作 →
         </button>
       </div>
@@ -82,24 +103,48 @@ function HeroInput() {
 }
 
 function StatCards() {
-  const { data } = useQuery({ queryKey: ["overview"], queryFn: () => dashboardApi.overview() });
+  const { data } = useQuery({
+    queryKey: ["overview"],
+    queryFn: () => dashboardApi.overview(),
+  });
   const cards = [
-    { label: "今日成片", value: data?.todayDone ?? 0, delta: data?.todayDelta, suffix: "条" },
+    {
+      label: "今日成片",
+      value: data?.todayDone ?? 0,
+      delta: data?.todayDelta,
+      suffix: "条",
+    },
     { label: "队列中", value: data?.queued ?? 0, suffix: "个任务" },
-    { label: "本周发布", value: data?.published ?? 0, delta: data?.weekDelta, suffix: "条" },
-    { label: "待处理告警", value: data?.pendingAlerts ?? 0, warn: (data?.pendingAlerts ?? 0) > 0, suffix: "条" },
+    {
+      label: "本周发布",
+      value: data?.published ?? 0,
+      delta: data?.weekDelta,
+      suffix: "条",
+    },
+    {
+      label: "待处理告警",
+      value: data?.pendingAlerts ?? 0,
+      warn: (data?.pendingAlerts ?? 0) > 0,
+      suffix: "条",
+    },
   ];
   return (
     <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
       {cards.map((c) => (
         <div key={c.label} className="glass card-hover p-4">
           <div className="text-xs text-text-3">{c.label}</div>
-          <div className={`mt-1 text-2xl font-black ${c.warn ? "text-danger" : ""}`}>
+          <div
+            className={`mt-1 text-2xl font-black ${c.warn ? "text-danger" : ""}`}
+          >
             {c.value}
-            <span className="ml-1 text-xs font-normal text-text-3">{c.suffix}</span>
+            <span className="ml-1 text-xs font-normal text-text-3">
+              {c.suffix}
+            </span>
           </div>
           {c.delta !== undefined && (
-            <div className={`mt-1 text-xs ${c.delta >= 0 ? "text-success" : "text-danger"}`}>
+            <div
+              className={`mt-1 text-xs ${c.delta >= 0 ? "text-success" : "text-danger"}`}
+            >
               {c.delta >= 0 ? "▲" : "▼"} {Math.abs(c.delta)} 较昨/上周
             </div>
           )}
@@ -114,7 +159,9 @@ function RunningTasks() {
   const liveTasks = useMemo(
     () =>
       Object.values(tasksMap)
-        .filter((t: PipelineTask) => ["running", "pending", "waiting_confirm"].includes(t.status))
+        .filter((t: PipelineTask) =>
+          ["running", "pending", "waiting_confirm"].includes(t.status),
+        )
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
         .slice(0, 4),
     [tasksMap],
@@ -159,7 +206,10 @@ function RunningTasks() {
 }
 
 function FeedPanel() {
-  const { data } = useQuery({ queryKey: ["feed"], queryFn: () => dashboardApi.feed() });
+  const { data } = useQuery({
+    queryKey: ["feed"],
+    queryFn: () => dashboardApi.feed(),
+  });
   return (
     <div className="glass p-4">
       <div className="mb-3 font-medium">任务动态</div>
@@ -167,16 +217,28 @@ function FeedPanel() {
         {(data ?? []).slice(0, 10).map((ev) => (
           <FeedItem key={ev.id + ev.createdAt} ev={ev} />
         ))}
-        {(data ?? []).length === 0 && <div className="py-4 text-center text-xs text-text-3">暂无动态</div>}
+        {(data ?? []).length === 0 && (
+          <div className="py-4 text-center text-xs text-text-3">暂无动态</div>
+        )}
       </div>
     </div>
   );
 }
 
-function FeedItem({ ev }: { ev: { id: string; type: string; text: string; createdAt: string } }) {
+function FeedItem({
+  ev,
+}: {
+  ev: { id: string; type: string; text: string; createdAt: string };
+}) {
   const rel = useRelativeTime(ev.createdAt);
   const color =
-    ev.type === "ok" ? "bg-success" : ev.type === "err" ? "bg-danger" : ev.type === "run" ? "bg-info" : "bg-brand-from";
+    ev.type === "ok"
+      ? "bg-success"
+      : ev.type === "err"
+        ? "bg-danger"
+        : ev.type === "run"
+          ? "bg-info"
+          : "bg-brand-from";
   return (
     <div className="flex items-start gap-2.5 text-sm">
       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${color}`} />

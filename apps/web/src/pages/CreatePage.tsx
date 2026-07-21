@@ -23,6 +23,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import LinkSourceInput from "../components/LinkSourceInput";
 import PlatformIcon from "../components/PlatformIcon";
+import {
+  confirmMeteredOperation,
+  mediaDurationSeconds,
+  textOperationUsage,
+} from "../lib/meteredOperation";
 
 const STEPS = [
   { key: "link", label: "链接/选题" },
@@ -125,7 +130,13 @@ function StepLink({
   const upload = async (file: File) => {
     setUploading(true);
     try {
-      const res = await contentApi.parse(undefined, file);
+      const seconds = await mediaDurationSeconds(file);
+      const quoteId = await confirmMeteredOperation("asr", "上传转写", {
+        seconds,
+        assets: 1,
+      });
+      if (!quoteId) return;
+      const res = await contentApi.parse(undefined, file, quoteId);
       if (res.transcript)
         setWiz({
           ...wiz,
@@ -245,14 +256,39 @@ function StepScript({
     const run = async () => {
       try {
         if (wiz.sourceUrl) {
-          const res = await contentApi.parse(wiz.sourceUrl);
+          const parseQuoteId = await confirmMeteredOperation(
+            "asr",
+            "链接转写",
+            {
+              seconds: 60,
+              assets: 1,
+            },
+          );
+          if (!parseQuoteId) return;
+          const res = await contentApi.parse(
+            wiz.sourceUrl,
+            undefined,
+            parseQuoteId,
+          );
           if (res.degraded) setDegraded(true);
           const text = res.transcript?.text ?? "";
           if (!text) {
             setError("未提取到文案，请检查链接是否有效，或尝试上传本地视频");
             return;
           }
-          const rw = await contentApi.rewrite(text, "structure");
+          const rewriteQuoteId = await confirmMeteredOperation(
+            "script_generation",
+            "生成仿写文案",
+            textOperationUsage(text),
+          );
+          if (!rewriteQuoteId) return;
+          const rw = await contentApi.rewrite(
+            text,
+            "structure",
+            undefined,
+            undefined,
+            rewriteQuoteId,
+          );
           setWiz({
             ...wiz,
             scriptText: rw.text,
@@ -261,9 +297,19 @@ function StepScript({
           if (rw.structure) setStructure(rw.structure);
           if (rw.outline) setOutline(rw.outline);
         } else {
+          const prompt = `请围绕选题「${wiz.topic}」生成 60 秒口播文案`;
+          const quoteId = await confirmMeteredOperation(
+            "script_generation",
+            "生成口播文案",
+            textOperationUsage(prompt),
+          );
+          if (!quoteId) return;
           const rw = await contentApi.rewrite(
-            `请围绕选题「${wiz.topic}」生成 60 秒口播文案`,
+            prompt,
             "theme",
+            undefined,
+            undefined,
+            quoteId,
           );
           setWiz({
             ...wiz,
@@ -290,7 +336,19 @@ function StepScript({
   const rewrite = async () => {
     setLoading(true);
     try {
-      const rw = await contentApi.rewrite(wiz.scriptText, intensity);
+      const quoteId = await confirmMeteredOperation(
+        "script_generation",
+        "仿写文案",
+        textOperationUsage(wiz.scriptText),
+      );
+      if (!quoteId) return;
+      const rw = await contentApi.rewrite(
+        wiz.scriptText,
+        intensity,
+        undefined,
+        undefined,
+        quoteId,
+      );
       setWiz({
         ...wiz,
         scriptText: rw.text,
@@ -306,7 +364,13 @@ function StepScript({
   const checkSim = async () => {
     setLoading(true);
     try {
-      const sim = await contentApi.similarity(wiz.scriptText);
+      const quoteId = await confirmMeteredOperation(
+        "script_generation",
+        "检测相似度",
+        textOperationUsage(wiz.scriptText),
+      );
+      if (!quoteId) return;
+      const sim = await contentApi.similarity(wiz.scriptText, quoteId);
       setWiz({ ...wiz, similarity: sim.score });
     } finally {
       setLoading(false);

@@ -28,6 +28,19 @@ ALLOWED_MODULES = {
     "hd_export",
 }
 
+MODULE_BILLING_UNITS = {
+    "topic_generation": {"per_action", "per_1k_chars", "per_1k_tokens"},
+    "script_generation": {"per_action", "per_1k_chars", "per_1k_tokens"},
+    "asr": {"per_action", "per_minute", "per_second"},
+    "tts": {"per_action", "per_1k_chars", "per_1k_tokens"},
+    "voice_clone": {"per_action", "per_asset"},
+    "digital_human": {"per_action", "per_minute", "per_second", "per_asset"},
+    "image_generation": {"per_action", "per_image"},
+    "video_generation": {"per_action", "per_minute", "per_second", "per_asset"},
+    "video_translation": {"per_action", "per_minute", "per_second"},
+    "hd_export": {"per_action", "per_asset"},
+}
+
 # 迁移前流水线按步骤固定扣费。首个目录保持相同积分，避免部署后价格目录为空，
 # 也避免存量用户在管理员首次配置前遭遇意外涨价。
 LEGACY_MODULE_PRICES = [
@@ -251,6 +264,15 @@ async def list_public_plans(db: AsyncSession) -> list[PlanOut]:
 async def upsert_module_price(db: AsyncSession, version_id: str, module: str, values: dict) -> ModulePriceAdminOut:
     if module not in ALLOWED_MODULES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "UNKNOWN_MODULE", "message": "模块不存在"})
+    billing_unit = str(values.get("billing_unit") or "")
+    if billing_unit not in MODULE_BILLING_UNITS[module]:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "UNSUPPORTED_BILLING_UNIT",
+                "message": f"{module} 不支持 {billing_unit} 计费",
+            },
+        )
     version = await repo.get_price_version(db, version_id)
     if not version:
         raise HTTPException(
@@ -310,6 +332,14 @@ async def build_quote(db: AsyncSession, items: list[dict]) -> dict:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 detail={"code": "PRICE_NOT_FOUND", "message": f"{module} 未配置价格"},
+            )
+        if price.billing_unit not in MODULE_BILLING_UNITS[module]:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "INVALID_PRICE_CONFIGURATION",
+                    "message": f"{price.display_name} 计费单位配置无效，模块已暂停",
+                },
             )
         provider_switch = provider_switches.get(module)
         if get_settings().app_env != "dev" and provider_switch:

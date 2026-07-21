@@ -1,11 +1,17 @@
 """voice HTTP 层：音色库 / 克隆 / 试听确认 / TTS（白标：不暴露供应商品牌）"""
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user_id
 from app.core.storage import save_bytes
+from app.modules.billing.service import (
+    metered_operation,
+    recover_reservation_after_failure,
+    reserve_metered_operation,
+)
 
 from .schemas import CloneStatusOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, VoiceOut
 from .service import (
@@ -32,14 +38,25 @@ async def api_clone(
     name: str = Form(...),
     consentToken: str = Form(...),
     language: str = Form(default="zh"),
+    quoteId: str | None = Form(None),
     file: UploadFile = File(...),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     """提交声音克隆（异步，返回 status=training）"""
+    if len(consentToken.strip()) < 4:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"},
+        )
     data = await file.read()
-    key = await save_bytes("voice-samples", file.filename or "sample.wav", data)
-    return await clone_voice(db, user_id, name, consentToken, key, language)
+    reservation_id = await reserve_metered_operation(db, user_id, quoteId, "voice_clone", {"assets": 1})
+    try:
+        key = await save_bytes("voice-samples", file.filename or "sample.wav", data)
+        return await clone_voice(db, user_id, name, consentToken, key, language, reservation_id)
+    except BaseException:
+        await recover_reservation_after_failure(db, reservation_id, user_id)
+        raise
 
 
 @router.get("/{voice_id}/status", response_model=CloneStatusOut)
@@ -85,7 +102,16 @@ async def api_edit(
 
 
 @router.post("/synthesize", response_model=SynthesizeOut)
-async def api_synthesize(body: SynthesizeIn, user_id: str = Depends(get_current_user_id),
-                         db: AsyncSession = Depends(get_db)):
+async def api_synthesize(
+    body: SynthesizeIn, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)
+):
     """TTS 合成试听"""
-    return await synthesize(db, user_id, body.voiceId, body.text, body.speed)
+    characters = max(1, len(body.text))
+    async with metered_operation(
+        db,
+        user_id,
+        body.quoteId,
+        "tts",
+        {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
+    ):
+        return await synthesize(db, user_id, body.voiceId, body.text, body.speed)

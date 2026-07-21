@@ -22,6 +22,7 @@ class Avatar(Base):
     provider: Mapped[str] = mapped_column(String(32), default="")  # 内部用，不暴露给用户
     provider_avatar_id: Mapped[str] = mapped_column(String(64), default="")
     provider_task_id: Mapped[str] = mapped_column(String(64), default="")  # 克隆任务 ID
+    reservation_id: Mapped[str] = mapped_column(String(32), default="", index=True)
     avatar_type: Mapped[str] = mapped_column(String(16), default="video")  # video | image
     scene: Mapped[str] = mapped_column(String(32), default="")  # 场景标签（商务/生活/知识/电商等）
     style: Mapped[str] = mapped_column(String(32), default="")

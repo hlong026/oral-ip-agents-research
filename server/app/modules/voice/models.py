@@ -22,6 +22,7 @@ class Voice(Base):
     provider: Mapped[str] = mapped_column(String(32), default="")  # 内部用，不暴露给用户
     provider_voice_id: Mapped[str] = mapped_column(String(64), default="")
     provider_task_id: Mapped[str] = mapped_column(String(64), default="")  # 异步克隆任务 ID
+    reservation_id: Mapped[str] = mapped_column(String(32), default="", index=True)
     gender: Mapped[str] = mapped_column(String(16), default="")
     emotion: Mapped[str] = mapped_column(String(32), default="")
     language: Mapped[str] = mapped_column(String(16), default="zh")  # zh/en/jp/ko 等

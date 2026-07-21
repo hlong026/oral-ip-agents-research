@@ -27,7 +27,13 @@ from .schemas import ParseOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut,
 logger = get_logger("oral.content")
 
 
-async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | None) -> ParseOut:
+async def parse_url(
+    db: AsyncSession,
+    user_id: str,
+    url: str,
+    persona_id: str | None,
+    max_duration_seconds: int | None = None,
+) -> ParseOut:
     """链接解析 → 文案优先 / ASR 转写 → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
@@ -62,9 +68,21 @@ async def parse_url(db: AsyncSession, user_id: str, url: str, persona_id: str | 
     if not video_url:
         return ParseOut(transcript=None, degraded=True, platform=platform, title=title)
 
-    # 探测视频时长（用于 ASR 分流决策：≤阈值走Flash同步，>阈值走异步）
+    # 按时长计费时只能使用供应商明确返回的时长，不得用码率估算值授权执行。
     known_dur = douyidou_result.duration_sec if douyidou_result else None
-    duration_sec = await probe_duration(video_url, platform=platform, known_duration=known_dur)
+    duration_sec = (
+        known_dur
+        if max_duration_seconds is not None
+        else await probe_duration(video_url, platform=platform, known_duration=known_dur)
+    )
+    if max_duration_seconds is not None and (duration_sec is None or duration_sec > max_duration_seconds):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_DURATION_UNVERIFIED",
+                "message": f"链接媒体无法按 {max_duration_seconds} 秒报价安全执行，请上传本地文件后重试",
+            },
+        )
     logger.info(f"ASR 分流决策: duration={duration_sec}, threshold={300}s")
 
     # ASR 转写（直传视频URL，按时长智能分流）
@@ -125,7 +143,14 @@ async def _save_text_result(
     )
 
 
-async def parse_by_id(db: AsyncSession, user_id: str, video_id: str, platform: str, persona_id: str | None) -> ParseOut:
+async def parse_by_id(
+    db: AsyncSession,
+    user_id: str,
+    video_id: str,
+    platform: str,
+    persona_id: str | None,
+    max_duration_seconds: int | None = None,
+) -> ParseOut:
     """通过视频ID + 平台解析（内部拼接URL后走统一链路）"""
     if platform == "douyin":
         url = f"https://www.douyin.com/video/{video_id}"
@@ -133,15 +158,24 @@ async def parse_by_id(db: AsyncSession, user_id: str, video_id: str, platform: s
         url = f"https://www.xiaohongshu.com/explore/{video_id}"
     else:
         url = video_id  # 透传
-    return await parse_url(db, user_id, url, persona_id)
+    return await parse_url(db, user_id, url, persona_id, max_duration_seconds)
 
 
-async def parse_upload(db: AsyncSession, user_id: str, filename: str, data: bytes, persona_id: str | None) -> ParseOut:
+async def parse_upload(
+    db: AsyncSession,
+    user_id: str,
+    filename: str,
+    data: bytes,
+    persona_id: str | None,
+    duration_seconds: float | None = None,
+) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
     key = await save_bytes("uploads", filename, data)
     # 按文件大小估算时长（用于 ASR 分流决策，短视频可走 Flash 同步）
-    estimated_dur = len(data) / 300_000  # 默认码率 ~2.4Mbps
-    tr, _ = await registry.run_with_fallback("asr", registry.asr_chain, "transcribe", key, duration_sec=estimated_dur)
+    verified_duration = duration_seconds or len(data) / 300_000
+    tr, _ = await registry.run_with_fallback(
+        "asr", registry.asr_chain, "transcribe", key, duration_sec=verified_duration
+    )
     script = await repo.create(
         db,
         user_id=user_id,

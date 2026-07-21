@@ -125,6 +125,19 @@ const defaultModules: ModulePrice[] = [
   },
 ];
 
+const moduleBillingUnits: Record<string, string[]> = {
+  topic_generation: ["per_action", "per_1k_chars", "per_1k_tokens"],
+  script_generation: ["per_action", "per_1k_chars", "per_1k_tokens"],
+  asr: ["per_action", "per_minute", "per_second"],
+  tts: ["per_action", "per_1k_chars", "per_1k_tokens"],
+  voice_clone: ["per_action", "per_asset"],
+  digital_human: ["per_action", "per_minute", "per_second", "per_asset"],
+  image_generation: ["per_action", "per_image"],
+  video_generation: ["per_action", "per_minute", "per_second", "per_asset"],
+  video_translation: ["per_action", "per_minute", "per_second"],
+  hd_export: ["per_action", "per_asset"],
+};
+
 export default function PriceVersionsPage() {
   const queryClient = useQueryClient();
   const [version, setVersion] = useState(
@@ -335,6 +348,7 @@ export default function PriceVersionsPage() {
                 className="lg:col-span-1"
                 label="单位"
                 value={price.billingUnit}
+                units={moduleBillingUnits[price.module] ?? ["per_action"]}
                 onChange={(billingUnit) => updateModule(index, { billingUnit })}
               />
               <NumberField
@@ -447,23 +461,16 @@ function NumberField({
 function Select({
   label,
   value,
+  units,
   onChange,
   className = "",
 }: {
   label: string;
   value: string;
+  units: string[];
   onChange: (value: string) => void;
   className?: string;
 }) {
-  const units = [
-    "per_action",
-    "per_minute",
-    "per_second",
-    "per_1k_chars",
-    "per_1k_tokens",
-    "per_image",
-    "per_asset",
-  ];
   return (
     <label className={className}>
       <span className="label">{label}</span>

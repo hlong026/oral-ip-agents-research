@@ -34,6 +34,7 @@ class SynthesizeIn(BaseModel):
     voiceId: str
     text: str
     speed: float = 1.0
+    quoteId: str | None = None
 
 
 class WordTsOut(BaseModel):

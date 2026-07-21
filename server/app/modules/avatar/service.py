@@ -7,7 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
-from app.providers.hifly import HiFlyAPIError, get_client
+from app.providers.hifly import HiFlyAPIError
 from app.providers.registry import registry
 
 from . import repository as repo
@@ -25,7 +25,8 @@ async def list_avatars(db: AsyncSession, user_id: str) -> list[AvatarOut]:
 
 async def clone_avatar_by_video(db: AsyncSession, user_id: str, name: str,
                                 consent_token: str | None, video_key: str,
-                                scene: str = "", cover_key: str | None = None) -> AvatarOut:
+                                scene: str = "", cover_key: str | None = None,
+                                reservation_id: str = "") -> AvatarOut:
     """
     视频数字人克隆（异步）：
     1. consent_token 强制校验
@@ -33,7 +34,7 @@ async def clone_avatar_by_video(db: AsyncSession, user_id: str, name: str,
     3. 入库 status=training
     """
     if not consent_token or len(consent_token.strip()) < 4:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail={"code": "CONSENT_REQUIRED", "message": "形象克隆须本人授权（consent_token 缺失）"})
 
     # 数字人克隆提交：记录 INFO（§10.6.8-B #4）
@@ -43,11 +44,12 @@ async def clone_avatar_by_video(db: AsyncSession, user_id: str, name: str,
         task_id, provider_name = await registry.run_with_fallback(
             "avatar", registry.avatar_chain, "clone_by_video", name, video_key, consent_token)
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail={"code": "CLONE_FAILED", "message": e.user_message})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail={"code": "CLONE_FAILED", "message": e.user_message}) from e
 
     a = await repo.create(db, user_id=user_id, name=name, source="clone", provider=provider_name,
                           provider_avatar_id="", provider_task_id=task_id,
+                          reservation_id=reservation_id,
                           avatar_type="video", scene=scene,
                           cover_key=cover_key, preview_key=video_key, status="training")
     return to_out(a)
@@ -55,7 +57,7 @@ async def clone_avatar_by_video(db: AsyncSession, user_id: str, name: str,
 
 async def clone_avatar_by_image(db: AsyncSession, user_id: str, name: str,
                                 consent_token: str | None, image_key: str,
-                                scene: str = "") -> AvatarOut:
+                                scene: str = "", reservation_id: str = "") -> AvatarOut:
     """
     图片数字人克隆（异步）：
     1. consent_token 强制校验
@@ -63,7 +65,7 @@ async def clone_avatar_by_image(db: AsyncSession, user_id: str, name: str,
     3. 入库 status=training
     """
     if not consent_token or len(consent_token.strip()) < 4:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
                             detail={"code": "CONSENT_REQUIRED", "message": "形象克隆须本人授权（consent_token 缺失）"})
 
     # 数字人克隆提交：记录 INFO（§10.6.8-B #4）
@@ -73,14 +75,36 @@ async def clone_avatar_by_image(db: AsyncSession, user_id: str, name: str,
         task_id, provider_name = await registry.run_with_fallback(
             "avatar", registry.avatar_chain, "clone_by_image", name, image_key, 2)
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                            detail={"code": "CLONE_FAILED", "message": e.user_message})
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
+                            detail={"code": "CLONE_FAILED", "message": e.user_message}) from e
 
     a = await repo.create(db, user_id=user_id, name=name, source="clone", provider=provider_name,
                           provider_avatar_id="", provider_task_id=task_id,
+                          reservation_id=reservation_id,
                           avatar_type="image", scene=scene,
                           cover_key=image_key, preview_key=image_key, status="training")
     return to_out(a)
+
+
+async def _finalize_clone_billing(db: AsyncSession, avatar: Avatar, succeeded: bool) -> None:
+    if not avatar.reservation_id:
+        await db.commit()
+        return
+    from app.modules.billing.service import release_reservation, settle_reservation
+
+    if succeeded:
+        settled = await settle_reservation(
+            db,
+            avatar.reservation_id,
+            avatar.id,
+            step="digital_human",
+        )
+        if settled <= 0:
+            raise RuntimeError("avatar clone billing settlement failed")
+    else:
+        released = await release_reservation(db, avatar.reservation_id, avatar.user_id)
+        if released is None or released.status != "released":
+            raise RuntimeError("avatar clone billing reservation missing")
 
 
 async def get_clone_status(db: AsyncSession, user_id: str, avatar_id: str) -> AvatarStatusOut:
@@ -108,14 +132,16 @@ async def get_clone_status(db: AsyncSession, user_id: str, avatar_id: str) -> Av
                 a.provider_avatar_id = result.get("avatar_id", "")
                 a.status = "ready"
                 progress = 100
-                await db.commit()
+                await _finalize_clone_billing(db, a, True)
                 logger.info("avatar_clone_done", user_id=user_id, avatar_id=a.id,
                             provider_avatar_id=a.provider_avatar_id)
             elif task_status == 4:
                 a.status = "failed"
                 progress = 100
-                await db.commit()
+                await _finalize_clone_billing(db, a, False)
         except Exception as e:
+            await db.rollback()
+            await db.refresh(a)
             logger.warning(f"avatar clone status poll failed: {e}")
     elif a.status == "ready":
         progress = 100
@@ -128,6 +154,10 @@ async def delete_avatar(db: AsyncSession, user_id: str, avatar_id: str) -> None:
     a = await repo.get(db, avatar_id, user_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "数字人不存在"})
+    if a.status == "training" and a.reservation_id:
+        from app.modules.billing.service import release_reservation
+
+        await release_reservation(db, a.reservation_id, user_id)
     await repo.delete(db, a)
 
 
@@ -162,9 +192,10 @@ async def handle_avatar_callback(db: AsyncSession, task_id: str, status_code: in
         a.status = "ready"
         logger.info("avatar_clone_done", user_id=a.user_id, avatar_id=a.id,
                     provider_avatar_id=avatar_id_remote)
+        await _finalize_clone_billing(db, a, True)
     else:
         a.status = "failed"
-    await db.commit()
+        await _finalize_clone_billing(db, a, False)
 
 
 def to_out(a: Avatar) -> AvatarOut:

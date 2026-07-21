@@ -4,7 +4,10 @@
 - 兜底：HEAD 请求获取 Content-Length → 按平台典型码率估算时长
 - 用于 ASR 分流决策：≤阈值走 Flash 同步，>阈值走异步轮询
 """
+import asyncio
 import logging
+import tempfile
+from pathlib import Path
 
 import httpx
 
@@ -20,6 +23,39 @@ PLATFORM_BITRATE: dict[str, float] = {
     "weibo": 200_000,        # ~1.6 Mbps
 }
 DEFAULT_BITRATE = 300_000  # 默认 ~2.4 Mbps
+
+
+async def probe_media_bytes(data: bytes, suffix: str = ".bin") -> float | None:
+    """用 ffprobe 读取上传媒体的真实时长；无法验证时返回 None。"""
+    if not data:
+        return None
+    with tempfile.TemporaryDirectory(prefix="oral-duration-") as directory:
+        path = Path(directory) / f"upload{suffix or '.bin'}"
+        await asyncio.to_thread(path.write_bytes, data)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=15)
+        except (FileNotFoundError, TimeoutError):
+            logger.error("ffprobe 不可用或执行超时，无法验证媒体时长")
+            return None
+        if process.returncode != 0:
+            return None
+        try:
+            duration = float(stdout.decode().strip())
+        except ValueError:
+            return None
+        return duration if duration > 0 else None
 
 
 async def probe_duration(

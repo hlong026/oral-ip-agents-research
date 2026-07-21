@@ -25,6 +25,9 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的
+ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置 FFmpeg。
+
 首次部署可临时设置 `BOOTSTRAP_ADMIN_PHONE` 和至少 12 位的
 `BOOTSTRAP_ADMIN_PASSWORD`。管理员创建成功后，应从部署环境删除引导密码。
 生产环境必须分别配置 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY` 和

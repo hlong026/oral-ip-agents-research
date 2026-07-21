@@ -2,17 +2,23 @@
 
 import json
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import SessionLocal
+from app.core.logging import get_logger
+
 from . import repository as repo
 from .models import CreditGrant, CreditLedger, CreditReservation, PriceQuote, QuotaAccount, QuotaUsage
 from .schemas import QuotaOut, ReservationBatchOut, ReservationItemOut, ReservationStateOut, UsageItemOut
 
 INITIAL_GRANT = 12430.0  # 开户礼点数（对齐效果图额度卡）
+logger = get_logger("oral.billing")
 
 
 async def grant_initial_quota(db: AsyncSession, user_id: str) -> None:
@@ -229,6 +235,7 @@ async def reserve_quote(
     quote_id: str,
     count: int = 1,
     task: dict | None = None,
+    operation: dict | None = None,
     commit: bool = True,
 ) -> ReservationBatchOut:
     """原子冻结报价积分；同一 quote 只能成功冻结一次。"""
@@ -242,6 +249,8 @@ async def reserve_quote(
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "QUOTE_ALREADY_USED", "message": "报价已使用"})
     if task is not None:
         _validate_quote_matches_task(quote, task)
+    if operation is not None:
+        _validate_quote_matches_operation(quote, operation)
     expires_at = quote.expires_at if quote.expires_at.tzinfo else quote.expires_at.replace(tzinfo=UTC)
     if expires_at < datetime.now(UTC):
         quote.status = "expired"
@@ -444,6 +453,114 @@ def _validate_quote_matches_task(quote: PriceQuote, task: dict) -> None:
         )
 
 
+def _validate_quote_matches_operation(quote: PriceQuote, operation: dict) -> None:
+    """校验独立 Provider 操作的模块和原始用量，避免复用低价报价。"""
+    quote_items = json.loads(quote.items_json or "[]")
+    if len(quote_items) != 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "QUOTE_OPERATION_MISMATCH", "message": "报价与当前操作不一致，请重新报价"},
+        )
+    item = quote_items[0]
+    unit = str(item.get("unit") or "")
+    measures = operation.get("measures") or {}
+    quantity_by_unit = {
+        "per_action": 1,
+        "per_minute": max(1, int(measures.get("seconds") or 0)),
+        "per_second": max(1, int(measures.get("seconds") or 0)),
+        "per_1k_chars": max(1, int(measures.get("characters") or 0)),
+        "per_1k_tokens": max(1, int(measures.get("tokens") or 0)),
+        "per_image": max(1, int(measures.get("images") or 1)),
+        "per_asset": max(1, int(measures.get("assets") or 1)),
+    }
+    expected_quantity = quantity_by_unit.get(unit)
+    if (
+        str(item.get("module") or "") != str(operation.get("module") or "")
+        or expected_quantity is None
+        or int(item.get("quantity") or 0) != expected_quantity
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "QUOTE_OPERATION_MISMATCH", "message": "报价与当前操作不一致，请重新报价"},
+        )
+
+
+@asynccontextmanager
+async def metered_operation(
+    db: AsyncSession,
+    user_id: str,
+    quote_id: str | None,
+    module: str,
+    measures: dict[str, int],
+) -> AsyncIterator[str]:
+    """为独立 Provider 调用统一执行报价冻结、成功结算和异常释放。"""
+    reservation_id = await reserve_metered_operation(db, user_id, quote_id, module, measures)
+    operation_id = f"operation_{uuid.uuid4().hex}"
+    try:
+        yield operation_id
+    except BaseException:
+        await recover_reservation_after_failure(db, reservation_id, user_id)
+        raise
+    else:
+        try:
+            settled = await settle_reservation(db, reservation_id, operation_id, step=module)
+        except BaseException:
+            await recover_reservation_after_failure(db, reservation_id, user_id)
+            raise
+        if settled <= 0:
+            await recover_reservation_after_failure(db, reservation_id, user_id)
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "BILLING_SETTLEMENT_FAILED", "message": "积分结算失败，请稍后重试"},
+            )
+
+
+async def reserve_metered_operation(
+    db: AsyncSession,
+    user_id: str,
+    quote_id: str | None,
+    module: str,
+    measures: dict[str, int],
+) -> str:
+    """冻结并校验单个 Provider 操作，供同步和异步任务共用。"""
+    if not quote_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "QUOTE_REQUIRED", "message": "该操作需要先确认积分报价"},
+        )
+    batch = await reserve_quote(
+        db,
+        user_id,
+        quote_id,
+        operation={"module": module, "measures": measures},
+    )
+    return batch.items[0].id
+
+
+async def quote_operation_unit(
+    db: AsyncSession,
+    user_id: str,
+    quote_id: str | None,
+    module: str,
+) -> str:
+    """读取一次性报价的单模块计费单位，供执行前选择可验证的计量方式。"""
+    if not quote_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "QUOTE_REQUIRED", "message": "该操作需要先确认积分报价"},
+        )
+    quote = (
+        await db.execute(select(PriceQuote).where(PriceQuote.id == quote_id, PriceQuote.user_id == user_id))
+    ).scalar_one_or_none()
+    items = json.loads(quote.items_json or "[]") if quote else []
+    if len(items) != 1 or str(items[0].get("module") or "") != module:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "QUOTE_OPERATION_MISMATCH", "message": "报价与当前操作不一致，请重新报价"},
+        )
+    return str(items[0].get("unit") or "")
+
+
 async def attach_reservation(db: AsyncSession, reservation_id: str, user_id: str, task_id: str) -> None:
     result = await db.execute(
         update(CreditReservation)
@@ -464,7 +581,13 @@ async def attach_reservation(db: AsyncSession, reservation_id: str, user_id: str
     await db.flush()
 
 
-async def settle_reservation(db: AsyncSession, reservation_id: str, task_id: str = "") -> int:
+async def settle_reservation(
+    db: AsyncSession,
+    reservation_id: str,
+    task_id: str = "",
+    *,
+    step: str = "pipeline",
+) -> int:
     reservation = (
         await db.execute(select(CreditReservation).where(CreditReservation.id == reservation_id))
     ).scalar_one_or_none()
@@ -486,7 +609,8 @@ async def settle_reservation(db: AsyncSession, reservation_id: str, task_id: str
     )
     if int(getattr(result, "rowcount", 0) or 0) != 1:
         await db.rollback()
-        return 0
+        current = await db.get(CreditReservation, reservation_id)
+        return current.actual_points if current and current.status == "settled" else 0
     await db.execute(
         update(QuotaAccount)
         .where(QuotaAccount.user_id == reservation.user_id)
@@ -516,7 +640,7 @@ async def settle_reservation(db: AsyncSession, reservation_id: str, task_id: str
             user_id=reservation.user_id,
             trace_id=task_id or reservation.task_id or reservation.id,
             task_id=task_id or reservation.task_id,
-            step="pipeline",
+            step=step,
             resolution="quoted",
             points=reservation.reserved_points,
             compute="cloud",
@@ -603,6 +727,70 @@ async def release_reservation(
         actualPoints=reservation.actual_points,
         availablePoints=account.balance if account else 0,
     )
+
+
+async def recover_reservation_after_failure(
+    db: AsyncSession,
+    reservation_id: str,
+    user_id: str,
+) -> ReservationStateOut | None:
+    """失败后恢复积分冻结。
+
+    Provider 或结算中的 SQL 异常会让当前 Session 失效，必须先回滚；
+    当前 Session 仍不可用时，用独立 Session 执行最后一次幂等释放。
+    """
+    try:
+        await db.rollback()
+    except Exception:
+        logger.exception(
+            "积分恢复前回滚会话失败",
+            reservation_id=reservation_id,
+            user_id=user_id,
+        )
+
+    try:
+        recovered = await release_reservation(db, reservation_id, user_id)
+        if recovered is not None and recovered.status in {"released", "settled"}:
+            return recovered
+        logger.error(
+            "积分冻结恢复后仍未结束",
+            reservation_id=reservation_id,
+            user_id=user_id,
+            reservation_status=recovered.status if recovered else "missing",
+        )
+    except Exception:
+        logger.exception(
+            "使用当前会话恢复积分冻结失败",
+            reservation_id=reservation_id,
+            user_id=user_id,
+        )
+        try:
+            await db.rollback()
+        except Exception:
+            logger.exception(
+                "重试恢复前回滚会话失败",
+                reservation_id=reservation_id,
+                user_id=user_id,
+            )
+
+    try:
+        async with SessionLocal() as recovery_db:
+            recovered = await release_reservation(recovery_db, reservation_id, user_id)
+            if recovered is None or recovered.status not in {"released", "settled"}:
+                logger.error(
+                    "独立会话未能恢复积分冻结",
+                    reservation_id=reservation_id,
+                    user_id=user_id,
+                    reservation_status=recovered.status if recovered else "missing",
+                )
+            return recovered
+    except Exception:
+        logger.exception(
+            "独立会话恢复积分冻结失败",
+            reservation_id=reservation_id,
+            user_id=user_id,
+        )
+        return None
 
 
 def usage_to_out(u: QuotaUsage) -> UsageItemOut:

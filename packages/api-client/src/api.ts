@@ -117,14 +117,20 @@ export const personaApi = {
 
 // ---------- content（文案模块 F-101~F-106） ----------
 export const contentApi = {
-  parse: (url?: string, file?: File): Promise<ParseResult> => {
+  parse: (
+    url?: string,
+    file?: File,
+    quoteId?: string,
+  ): Promise<ParseResult> => {
     if (file) {
       const fd = new FormData();
       fd.append("file", file);
+      if (quoteId) fd.append("quoteId", quoteId);
       return http.post<ParseResult>("/content/parse", fd);
     }
     const fd = new FormData();
     if (url) fd.append("url", url);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<ParseResult>("/content/parse", fd);
   },
   rewrite: (
@@ -132,17 +138,19 @@ export const contentApi = {
     intensity: RewriteIntensity,
     prompt?: string,
     scriptId?: string,
+    quoteId?: string,
   ) =>
     http.post<RewriteResult>("/content/rewrite", {
       text,
       intensity,
       prompt,
       scriptId,
+      quoteId,
     }),
-  similarity: (text: string) =>
-    http.post<SimilarityResult>("/content/similarity", { text }),
-  topics: (keyword: string) =>
-    http.post<{ topics: string[] }>("/content/topics", { keyword }),
+  similarity: (text: string, quoteId?: string) =>
+    http.post<SimilarityResult>("/content/similarity", { text, quoteId }),
+  topics: (keyword: string, quoteId?: string) =>
+    http.post<{ topics: string[] }>("/content/topics", { keyword, quoteId }),
   scripts: () => http.get<Script[]>("/content/scripts"),
   script: (id: string) => http.get<Script>(`/content/scripts/${id}`),
   createScript: (input: {
@@ -156,27 +164,29 @@ export const contentApi = {
 // ---------- voices / avatars（克隆强制 consent_token；绑定 IP 走 personaApi.update） ----------
 export const voiceApi = {
   list: () => http.get<Voice[]>("/voices"),
-  clone: (name: string, consentToken: string, file: File) => {
+  clone: (name: string, consentToken: string, file: File, quoteId?: string) => {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("consentToken", consentToken);
     fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Voice>("/voices/clone", fd);
   },
-  synthesize: (voiceId: string, text: string, speed = 1.0) =>
+  synthesize: (voiceId: string, text: string, speed = 1.0, quoteId?: string) =>
     http.post<{ audioUrl: string; words: WordTimestamp[] }>(
       "/voices/synthesize",
-      { voiceId, text, speed },
+      { voiceId, text, speed, quoteId },
     ),
 };
 
 export const avatarApi = {
   list: () => http.get<Avatar[]>("/avatars"),
-  clone: (name: string, consentToken: string, file: File) => {
+  clone: (name: string, consentToken: string, file: File, quoteId?: string) => {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("consentToken", consentToken);
     fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
 };
