@@ -12,7 +12,7 @@ import {
   type PublishAccount,
 } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 import { IM_ENABLED } from "../config/features";
 
@@ -20,7 +20,7 @@ interface QrSession {
   platform: Platform;
   ticket: string;
   qrcodeUrl: string;
-  status: "waiting" | "success" | "expired";
+  status: "starting" | "waiting" | "success" | "expired";
 }
 
 /** 扫码授权弹层（F-502：qrcode 发起 → 2s 轮询 → 成功/过期；等待中同步刷新后的新二维码） */
@@ -35,63 +35,87 @@ function QrPanel({
 }) {
   const [status, setStatus] = useState(session.status);
   const [qrUrl, setQrUrl] = useState(session.qrcodeUrl);
+  const [statusMessage, setStatusMessage] = useState("");
 
   useEffect(() => {
     if (status !== "waiting") return;
-    const timer = setInterval(async () => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+
+    const poll = async () => {
       try {
         const res = await publishApi.qrcodePoll(
           session.ticket,
           session.platform,
         );
+        if (cancelled) return;
         // 平台二维码过期后后端会自动刷新，轮询拿到新图立即替换
         if (res.qrcodeUrl) setQrUrl(res.qrcodeUrl);
+        if (res.message) setStatusMessage(res.message);
         setStatus(res.status);
-        if (res.status === "success") {
-          clearInterval(timer);
-          setTimeout(onSuccess, 800);
-        }
       } catch {
         /* 网络抖动时继续轮询 */
       }
-    }, 2000);
-    return () => clearInterval(timer);
-  }, [session, status, onSuccess]);
+      if (!cancelled) timer = setTimeout(() => void poll(), 2000);
+    };
+
+    timer = setTimeout(() => void poll(), 2000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [session.platform, session.ticket, status]);
+
+  useEffect(() => {
+    if (status !== "success") return;
+    const timer = setTimeout(onSuccess, 800);
+    return () => clearTimeout(timer);
+  }, [status, onSuccess]);
 
   return (
-    <div className="glass-strong flex items-center gap-4 border-brand-from/40 p-4">
-      <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-white p-2">
-        {qrUrl ? (
-          <img
-            src={qrUrl}
-            alt="授权二维码"
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <span className="text-4xl">▦</span>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">
-          <PlatformIcon platform={session.platform} size={18} /> 绑定
-          {PLATFORM_NAMES[session.platform]}账号
-        </div>
-        <div className="mt-1 text-sm text-text-3">
-          {status === "waiting" &&
-            "请使用手机 App 扫码，并在手机上确认授权（二维码过期会自动刷新）"}
-          {status === "success" && (
-            <span className="text-success">✓ 授权成功，正在写入账号…</span>
-          )}
-          {status === "expired" && (
-            <span className="text-warning">
-              授权未完成或二维码已过期，请关闭后重新发起
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`添加${PLATFORM_NAMES[session.platform]}账号`}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    >
+      <div className="glass-strong flex w-full max-w-md items-center gap-4 border-brand-from/40 p-5 shadow-2xl">
+        <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-xl bg-white p-2">
+          {qrUrl ? (
+            <img
+              src={qrUrl}
+              alt="授权二维码"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <span className="text-center text-sm text-slate-500">
+              {status === "starting" ? "正在生成二维码…" : "二维码加载中…"}
             </span>
           )}
         </div>
+        <div className="min-w-0 flex-1">
+          <div className="font-medium">
+            <PlatformIcon platform={session.platform} size={18} /> 绑定
+            {PLATFORM_NAMES[session.platform]}账号
+          </div>
+          <div className="mt-1 text-sm text-text-3">
+            {status === "starting" && "正在连接平台并生成二维码，请稍候"}
+            {status === "waiting" &&
+              "请使用手机 App 扫码，并按平台提示完成授权（二维码过期会自动刷新）"}
+            {status === "success" && (
+              <span className="text-success">✓ 授权成功，正在写入账号…</span>
+            )}
+            {status === "expired" && (
+              <span className="text-warning">
+                {statusMessage || "授权未完成或二维码已过期，请关闭后重新发起"}
+              </span>
+            )}
+          </div>
+        </div>
+        <button className="btn-ghost px-3 py-1 text-xs" onClick={onClose}>
+          取消
+        </button>
       </div>
-      <button className="btn-ghost px-3 py-1 text-xs" onClick={onClose}>
-        取消
-      </button>
     </div>
   );
 }
@@ -104,8 +128,9 @@ export default function PublishAccountsPage() {
   const [editingId, setEditingId] = useState("");
   const [error, setError] = useState("");
   const startingRef = useRef(false);
+  const qrRequestRef = useRef(0);
 
-  const { data: accounts, refetch } = useQuery({
+  const { data: accounts } = useQuery({
     queryKey: ["publish-accounts"],
     queryFn: () => publishApi.accounts(),
     refetchInterval: 30_000,
@@ -118,17 +143,30 @@ export default function PublishAccountsPage() {
   const list = accounts ?? [];
   const expired = list.filter((a) => a.status === "expired");
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["publish-accounts"] });
-    await refetch();
-  };
+  }, [queryClient]);
+
+  const handleQrSuccess = useCallback(() => {
+    setQr(null);
+    void refresh();
+  }, [refresh]);
+
+  const closeQr = useCallback(() => {
+    qrRequestRef.current += 1;
+    startingRef.current = false;
+    setQr(null);
+  }, []);
 
   const startBind = async (platform: Platform) => {
     if (startingRef.current) return;
     startingRef.current = true;
+    const requestId = ++qrRequestRef.current;
     setError("");
+    setQr({ platform, ticket: "", qrcodeUrl: "", status: "starting" });
     try {
       const res = await publishApi.qrcodeStart(platform);
+      if (requestId !== qrRequestRef.current) return;
       setQr({
         platform,
         ticket: res.ticket,
@@ -136,17 +174,27 @@ export default function PublishAccountsPage() {
         status: "waiting",
       });
     } catch (e) {
+      if (requestId !== qrRequestRef.current) return;
+      setQr(null);
       setError(e instanceof HttpError ? e.body.message : "发起扫码授权失败");
     } finally {
-      startingRef.current = false;
+      if (requestId === qrRequestRef.current) startingRef.current = false;
     }
   };
 
   const reauth = async (account: PublishAccount) => {
     setBusyId(account.id);
+    const requestId = ++qrRequestRef.current;
     setError("");
+    setQr({
+      platform: account.platform,
+      ticket: "",
+      qrcodeUrl: "",
+      status: "starting",
+    });
     try {
       const res = await publishApi.reauth(account.id);
+      if (requestId !== qrRequestRef.current) return;
       setQr({
         platform: account.platform,
         ticket: res.ticket,
@@ -154,6 +202,8 @@ export default function PublishAccountsPage() {
         status: "waiting",
       });
     } catch (e) {
+      if (requestId !== qrRequestRef.current) return;
+      setQr(null);
       setError(e instanceof HttpError ? e.body.message : "发起重新授权失败");
     } finally {
       setBusyId("");
@@ -232,12 +282,10 @@ export default function PublishAccountsPage() {
       {/* 扫码授权面板 */}
       {qr && (
         <QrPanel
+          key={`${qr.platform}:${qr.ticket || "starting"}`}
           session={qr}
-          onClose={() => setQr(null)}
-          onSuccess={() => {
-            setQr(null);
-            void refresh();
-          }}
+          onClose={closeQr}
+          onSuccess={handleQrSuccess}
         />
       )}
 

@@ -27,6 +27,18 @@ DOUYIN_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 DOUYIN_IM_DEVICE_STORAGE_KEY = "oral_im_device_id"
 
 
+def _build_launch_kwargs(headless: bool) -> dict:
+    launch_kwargs = {
+        "headless": headless,
+        "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    }
+    if LOCAL_CHROME_PATH:
+        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    else:
+        launch_kwargs["channel"] = "msedge"
+    return launch_kwargs
+
+
 def _extract_douyin_device_id(payload: dict) -> str:
     """Extract the real browser device id from Douyin's signed query/user response."""
     if payload.get("status_code") not in (None, 0):
@@ -125,7 +137,7 @@ async def cookie_auth(account_file, headless: bool | None = None):
         headless = True
     elif env_override in ("0", "false", "no"):
         headless = False
-    launch_kwargs = {"headless": headless, "channel": "msedge", "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"]}
+    launch_kwargs = _build_launch_kwargs(headless)
     for _attempt in range(3):
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(**launch_kwargs)
@@ -288,7 +300,7 @@ async def douyin_cookie_gen(
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             should_close_context = False
         else:
-            browser = await playwright.chromium.launch(headless=headless, channel="msedge")
+            browser = await playwright.chromium.launch(**_build_launch_kwargs(headless))
             context = await browser.new_context()
             should_close_context = True
         context = await set_init_script(context)
@@ -730,7 +742,7 @@ class DouYinVideo(DouYinBaseUploader):
         await self.validate_upload_args()
         douyin_logger.info(_msg("🥳", "上传前检查通过"))
 
-        browser = await playwright.chromium.launch(headless=self.headless, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(self.headless))
         context = await browser.new_context(
             storage_state=f"{self.account_file}",
             permissions=["geolocation"],
@@ -966,7 +978,7 @@ class DouYinNote(DouYinBaseUploader):
         await self.validate_upload_args()
         douyin_logger.info(_msg("🥳", "图文上传前检查通过"))
 
-        browser = await playwright.chromium.launch(headless=self.headless, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(self.headless))
         context = await browser.new_context(
             storage_state=f"{self.account_file}",
             permissions=["geolocation"],

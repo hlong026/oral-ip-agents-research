@@ -274,6 +274,7 @@ export const publishApi = {
       status: "waiting" | "success" | "expired";
       account?: PublishAccount | null;
       qrcodeUrl?: string | null;
+      message?: string | null;
     }>(`/publish/accounts/qrcode/${ticket}?platform=${platform}`),
   reauth: (accountId: string) =>
     http.post<{ ticket: string; qrcodeUrl: string }>(
