@@ -45,9 +45,65 @@ ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker
 生产环境必须分别配置 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY` 和
 `ACTIVATION_SECRET`；供应商密钥只保存在后端，用户端没有配置入口。
 
+## 容器化前后端联调
+
+这套方式与远程服务器的服务边界一致：PostgreSQL、Redis、MinIO、数据库迁移、
+FastAPI 和任务 Worker 都运行在容器中；本地用户端和管理端只通过
+`http://127.0.0.1:8000` 调用容器 API。
+
+```bash
+cp server/.env.example server/.env
+# 编辑 server/.env：将 APP_ENV 改为 staging，替换所有 change-me 安全值，
+# 并设置 STORAGE_DRIVER=s3；真实 Provider 密钥可在只测基础联调时留空。
+docker compose up -d --build
+curl --fail http://127.0.0.1:8000/readyz
+
+pnpm dev:web
+pnpm dev:admin
+# 或自动验证容器 API、Vite 代理和现有端到端流程
+pnpm e2e:container
+```
+
+`/readyz` 只有在数据库、Redis 和对象存储全部可用时才返回 200。Compose 会先
+创建 MinIO bucket、执行 Alembic 迁移，再启动 API 和 Worker；不会把宿主机源码
+挂进容器，因此这里验证的是实际构建出的镜像。需要启用已审批的 IM 监听器时，
+使用 `docker compose --profile im up -d`；当前生产 No-Go 门禁仍会拒绝直接启用。
+
+前端部署到其他电脑或域名时，在构建用户端前设置 `VITE_API_BASE`；
+`VITE_WS_BASE` 可省略，客户端会从 API 域名自动推导 `ws://`/`wss://` 地址。
+管理端使用 `VITE_ADMIN_API_BASE`。示例分别见 `apps/web/.env.example` 和
+`apps/admin/.env.example`。
+
 价格目录首次启动会从旧流水线固定扣费生成 `legacy-v1` 已发布版本，保证迁移前后扣费口径一致。后续价格变更必须新建并发布版本，已报价或已冻结的任务继续使用原价格快照。
 
 包年套餐首月积分在激活时发放，后续按 30 天周期在用户查询余额或订阅时幂等补发，且不超过套餐到期日。积分以带到期日的批次保存，冻结时优先消耗最早到期批次，取消或失败时按原批次恢复。管理员赠送或扣减积分只能通过带原因的调整流水完成，不能直接改余额。
+
+## 测试环境
+
+后端单元测试会在 `server/tests/conftest.py` 中创建临时 SQLite、临时存储和
+进程内通知，不需要配置服务器环境变量。Playwright 默认也会临时注入测试
+变量并启动 API。只有手动启动本地测试 API 时，才需执行：
+
+```bash
+cp server/.env.test.example server/.env.test
+cd server
+set -a; source .env.test; set +a
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+该模板只用于本地测试，刻意不配置任何真实 Provider、发布账号或 IM 凭据；
+`REDIS_URL` 指向不可用端口以验证进程内通知降级，因此不能据此判断生产
+`/readyz` 状态。本地 API 存活检查使用 `/healthz`。
+
+`pnpm e2e:container` 专门验证容器依赖和 `/readyz`，运行前必须通过
+`docker compose up -d --build postgres redis minio minio-init migrate server worker`
+启动 PostgreSQL、Redis、MinIO、API 和 Worker；它不使用 `.env.test` 的降级配置。
+
+第二阶段真实验收则必须使用真实、受控的预发布基础设施和 Provider 凭据。复制
+`server/.env.stage2.example` 为未跟踪的 `server/.env.stage2`，填入密钥管理服务
+注入的值后，在同一终端 `source .env.stage2`，再执行
+`uv run python scripts/stage2_acceptance.py`。该模板刻意保持 `IM_ENABLED=false`；
+私信灰度必须等待 Go/No-Go 条件和独立审批完成。
 
 ## 文档结构
 

@@ -93,8 +93,70 @@ async def _pipeline_quote(client: AsyncClient, user_headers: dict) -> str:
 
 async def test_healthz(client: AsyncClient):
     r = await client.get("/healthz")
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert r.json()["ok"] is True
+    assert "storage" in r.json()
+
+
+async def test_readyz_reports_dependency_state(client: AsyncClient, monkeypatch):
+    from app.core import events, storage
+
+    async def ready() -> bool:
+        return True
+
+    monkeypatch.setattr(events, "redis_ready", ready, raising=False)
+    monkeypatch.setattr(storage, "storage_ready", ready, raising=False)
+
+    r = await client.get("/readyz")
+
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "database": True, "redis": True, "storage": True}
+
+
+async def test_readyz_fails_closed_when_redis_is_unavailable(client: AsyncClient, monkeypatch):
+    from app.core import events, storage
+
+    async def unavailable() -> bool:
+        return False
+
+    async def ready() -> bool:
+        return True
+
+    monkeypatch.setattr(events, "redis_ready", unavailable, raising=False)
+    monkeypatch.setattr(storage, "storage_ready", ready, raising=False)
+
+    r = await client.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json().get("detail") == {
+        "code": "NOT_READY",
+        "database": True,
+        "redis": False,
+        "storage": True,
+    }, r.text
+
+
+async def test_readyz_fails_closed_when_storage_is_unavailable(client: AsyncClient, monkeypatch):
+    from app.core import events, storage
+
+    async def ready() -> bool:
+        return True
+
+    async def unavailable() -> bool:
+        return False
+
+    monkeypatch.setattr(events, "redis_ready", ready, raising=False)
+    monkeypatch.setattr(storage, "storage_ready", unavailable, raising=False)
+
+    r = await client.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json().get("detail") == {
+        "code": "NOT_READY",
+        "database": True,
+        "redis": True,
+        "storage": False,
+    }, r.text
 
 
 async def test_auth_and_quota_flow(client: AsyncClient):

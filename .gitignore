@@ -22,6 +22,8 @@ venv/
 .env
 .env.*
 !.env.example
+!server/.env.test.example
+!server/.env.stage2.example
 
 # storage / data
 data/

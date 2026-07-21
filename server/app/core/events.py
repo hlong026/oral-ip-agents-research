@@ -42,6 +42,15 @@ async def init_redis(redis_url: str) -> None:
         logger.warning(f"event bus: redis unavailable ({e}), fallback to in-process broadcast")
 
 
+async def redis_ready() -> bool:
+    if _redis is None:
+        return False
+    try:
+        return bool(await _redis.ping())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def publish(channel: str, payload: dict) -> None:
     """发布领域事件：trace_id 贯穿"""
     data = json.dumps(payload, ensure_ascii=False, default=str)

@@ -18,6 +18,7 @@
     "test": "turbo run test",
     "gen:api": "node scripts/gen-api-types.mjs",
     "e2e": "playwright test",
+    "e2e:container": "E2E_REUSE_API_SERVER=1 playwright test e2e/container-proxy.spec.ts",
     "clean": "turbo run clean"
   },
   "devDependencies": {

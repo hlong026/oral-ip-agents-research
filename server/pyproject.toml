@@ -29,6 +29,9 @@ dependencies = [
     "qrcode>=8.0",
     "segno>=1.6",
     "opencv-python-headless>=4.10",
+    "boto3>=1.43.52",
+    "loguru>=0.7.3",
+    "requests>=2.32.3",
 ]
 
 [project.optional-dependencies]

@@ -28,6 +28,50 @@ export type TaskEvent =
 
 type Listener = (ev: TaskEvent) => void;
 
+type ClientEnv = { VITE_API_BASE?: string; VITE_WS_BASE?: string };
+type ImportMetaWithEnv = ImportMeta & { env?: ClientEnv };
+type RuntimeGlobal = typeof globalThis & { process?: { env?: ClientEnv } };
+
+function appendTasksPath(base: string): string {
+  const trimmed = base.trim().replace(/\/+$/, "");
+  if (trimmed.endsWith("/ws/tasks")) return trimmed;
+  if (trimmed.endsWith("/ws")) return `${trimmed}/tasks`;
+  return `${trimmed}/ws/tasks`;
+}
+
+function toWebSocketUrl(base: string): string {
+  const url = new URL(appendTasksPath(base), location.origin);
+  if (url.protocol === "https:") url.protocol = "wss:";
+  if (url.protocol === "http:") url.protocol = "ws:";
+  return url.toString();
+}
+
+function wsUrlFromApiBase(apiBase: string): string {
+  const url = new URL(apiBase, location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/ws/tasks";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function buildTaskSocketUrl(): string {
+  const env = {
+    ...(globalThis as RuntimeGlobal).process?.env,
+    ...(import.meta as ImportMetaWithEnv).env,
+  };
+  const explicitWsBase = env.VITE_WS_BASE?.trim();
+  if (explicitWsBase) return toWebSocketUrl(explicitWsBase);
+
+  const apiBase = env.VITE_API_BASE?.trim();
+  if (apiBase && /^https?:\/\//.test(apiBase)) {
+    return wsUrlFromApiBase(apiBase);
+  }
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/ws/tasks`;
+}
+
 export class TaskSocket {
   private ws: WebSocket | null = null;
   private listeners = new Set<Listener>();
@@ -37,8 +81,7 @@ export class TaskSocket {
   private token: string;
 
   constructor(token: string) {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.url = `${proto}://${location.host}/ws/tasks`;
+    this.url = buildTaskSocketUrl();
     this.token = token;
   }
 
