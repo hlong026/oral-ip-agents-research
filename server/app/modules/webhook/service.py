@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,14 +43,50 @@ async def handle_callback(
         await db.commit()
     except IntegrityError:
         await db.rollback()
+        existing = (
+            await db.execute(
+                select(WebhookEvent).where(
+                    WebhookEvent.provider == "hifly",
+                    or_(
+                        WebhookEvent.event_id == event_id[:128],
+                        (WebhookEvent.msg_type == msg_type)
+                        & (WebhookEvent.provider_task_id == task_id[:64]),
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None or existing.status != "failed":
+            logger.info(
+                "webhook_duplicate_ignored",
+                provider="hifly",
+                event_id=event_id[:128],
+                task_id=task_id[:64],
+                msg_type=msg_type,
+            )
+            return False
+        claimed = await db.execute(
+            update(WebhookEvent)
+            .where(WebhookEvent.id == existing.id, WebhookEvent.status == "failed")
+            .values(
+                status="processing",
+                payload_hash=payload_hash,
+                error_context="",
+                processed_at=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if int(getattr(claimed, "rowcount", 0) or 0) != 1:
+            await db.rollback()
+            return False
+        await db.commit()
+        receipt = existing
         logger.info(
-            "webhook_duplicate_ignored",
+            "webhook_failed_delivery_retried",
             provider="hifly",
             event_id=event_id[:128],
             task_id=task_id[:64],
             msg_type=msg_type,
         )
-        return False
 
     try:
         if not task_id:
