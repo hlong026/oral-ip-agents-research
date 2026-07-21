@@ -1,4 +1,5 @@
 """avatar 数据访问"""
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

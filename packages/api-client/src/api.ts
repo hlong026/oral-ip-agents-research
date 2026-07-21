@@ -65,15 +65,27 @@ export interface RedeemResult {
   newBalance: number;
 }
 
+function activationDeviceFingerprint(): string {
+  const key = "oral_device_id";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  localStorage.setItem(key, created);
+  return created;
+}
+
 export const activationApi = {
   validateCode: (code: string) =>
-    http.post<CodeInfo>("/activation/validate-code", { code }),
+    http.post<CodeInfo>("/activation/validate-code", {
+      code,
+      deviceFingerprint: activationDeviceFingerprint(),
+    }),
   activate: (
     code: string,
     phone: string,
     password: string,
     nickname: string,
-    deviceFingerprint = "web",
+    deviceFingerprint = activationDeviceFingerprint(),
   ) =>
     http.post<ActivateResult>("/activation/activate", {
       code,
@@ -117,6 +129,8 @@ export const personaApi = {
 
 // ---------- content（文案模块 F-101~F-106） ----------
 export const contentApi = {
+  probe: (url: string) =>
+    http.post<{ durationSeconds: number }>("/content/probe", { url }),
   parse: (
     url?: string,
     file?: File,
@@ -172,6 +186,12 @@ export const voiceApi = {
     if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Voice>("/voices/clone", fd);
   },
+  status: (voiceId: string) =>
+    http.get<Pick<Voice, "id" | "status" | "demoUrl">>(
+      `/voices/${voiceId}/status`,
+    ),
+  confirm: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/confirm`),
+  reject: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/reject`),
   synthesize: (voiceId: string, text: string, speed = 1.0, quoteId?: string) =>
     http.post<{ audioUrl: string; words: WordTimestamp[] }>(
       "/voices/synthesize",

@@ -4,6 +4,7 @@ Douyidou 视频解析 Provider（抖音/小红书/快手等多平台去水印 + 
 - 鉴权：MD5 签名（排序参数 + appSecret）
 - 响应：{code:0, data:{type, video[], images[], audio[], cover, text, platform, author, ...}}
 """
+
 import hashlib
 import logging
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ def _is_retryable(exc: BaseException) -> bool:
         return exc.response.status_code >= 500
     return isinstance(exc, httpx.HTTPError)
 
+
 # Douyidou 平台编号映射
 PLATFORM_MAP: dict[int, str] = {
     1: "douyin",
@@ -40,14 +42,15 @@ PLATFORM_MAP: dict[int, str] = {
 @dataclass
 class DouyidouParseResult:
     """Douyidou 完整解析结果（扩展 ParseResult，携带文案/封面等额外信息）"""
+
     platform: str
     title: str
-    video_url: str | None = None       # 视频直链（公网可访问）
-    video_key: str | None = None       # 兼容 ParseResult（此处直接存URL）
-    text: str | None = None            # 已有文案（非空时可跳过ASR）
-    cover: str | None = None           # 封面URL
+    video_url: str | None = None  # 视频直链（公网可访问）
+    video_key: str | None = None  # 兼容 ParseResult（此处直接存URL）
+    text: str | None = None  # 已有文案（非空时可跳过ASR）
+    cover: str | None = None  # 封面URL
     author: dict[str, Any] = field(default_factory=dict)
-    media_type: str = ""               # video / images / audio
+    media_type: str = ""  # video / images / audio
     images: list[str] = field(default_factory=list)
     audio: list[str] = field(default_factory=list)
     duration_sec: float | None = None  # 视频时长(秒)，用于ASR分流决策
@@ -115,7 +118,7 @@ class DouyidouParser:
     async def parse_url_full(self, url: str, is_title: int = 0) -> DouyidouParseResult:
         """
         完整解析：返回视频直链 + 文案 + 封面 + 作者等全部信息。
-        
+
         核心逻辑：
         - text 非空 → 已有文案，可跳过 ASR
         - video 非空 → 视频直链，可传给 ASR 转写

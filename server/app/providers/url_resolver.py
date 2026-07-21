@@ -2,12 +2,13 @@
 URL/ID 识别器：自动识别平台（抖音/小红书）并标准化为可解析的URL。
 支持：分享短链、完整链接、视频ID、发现页链接等多种形式。
 """
+
 import re
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class Platform(str, Enum):
+class Platform(StrEnum):
     DOUYIN = "douyin"
     XIAOHONGSHU = "xiaohongshu"
     UNKNOWN = "unknown"
@@ -23,28 +24,28 @@ class ResolvedInput:
 
 # ---- 抖音 ----
 DOUYIN_PATTERNS: list[re.Pattern] = [
-    re.compile(r'https?://v\.douyin\.com/[\w/]+'),            # 分享短链
-    re.compile(r'https?://www\.douyin\.com/video/\d+'),       # 完整链接
-    re.compile(r'https?://www\.iesdouyin\.com/share/video/[\w/]+'),  # 发现页
-    re.compile(r'https?://www\.douyin\.com/note/\d+'),        # 图文笔记
-    re.compile(r'https?://www\.douyin\.com/discover\?.*modal_id=\d+'),  # 发现页带参数
+    re.compile(r"https?://v\.douyin\.com/[\w/]+"),  # 分享短链
+    re.compile(r"https?://www\.douyin\.com/video/\d+"),  # 完整链接
+    re.compile(r"https?://www\.iesdouyin\.com/share/video/[\w/]+"),  # 发现页
+    re.compile(r"https?://www\.douyin\.com/note/\d+"),  # 图文笔记
+    re.compile(r"https?://www\.douyin\.com/discover\?.*modal_id=\d+"),  # 发现页带参数
 ]
-DOUYIN_ID_PATTERN = re.compile(r'^\d{17,20}$')  # 纯视频ID（17-20位数字）
+DOUYIN_ID_PATTERN = re.compile(r"^\d{17,20}$")  # 纯视频ID（17-20位数字）
 
 # ---- 小红书 ----
 XHS_PATTERNS: list[re.Pattern] = [
-    re.compile(r'https?://xhslink\.com/[\w/]+'),              # 分享短链
-    re.compile(r'https?://www\.xiaohongshu\.com/explore/[\w]+'),   # 探索页
-    re.compile(r'https?://www\.xiaohongshu\.com/discovery/item/[\w]+'),  # 发现页
-    re.compile(r'https?://www\.xiaohongshu\.com/a/[\w]+'),    # 短链变体
+    re.compile(r"https?://xhslink\.com/[\w/]+"),  # 分享短链
+    re.compile(r"https?://www\.xiaohongshu\.com/explore/[\w]+"),  # 探索页
+    re.compile(r"https?://www\.xiaohongshu\.com/discovery/item/[\w]+"),  # 发现页
+    re.compile(r"https?://www\.xiaohongshu\.com/a/[\w]+"),  # 短链变体
 ]
-XHS_ID_PATTERN = re.compile(r'^[0-9a-f]{24}$')  # 笔记ID（24位hex）
+XHS_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")  # 笔记ID（24位hex）
 
 
 def resolve_input(raw: str) -> ResolvedInput:
     """
     识别用户输入的平台类型，并标准化为可传给 Douyidou 的 URL。
-    
+
     支持输入：
     - 抖音：短链 / 完整链接 / 视频ID(17-20位数字)
     - 小红书：短链 / 完整链接 / 笔记ID(24位hex)

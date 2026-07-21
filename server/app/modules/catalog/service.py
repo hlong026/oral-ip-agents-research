@@ -1,4 +1,5 @@
 """套餐与价格目录业务逻辑。"""
+
 import json
 import math
 import uuid
@@ -342,7 +343,7 @@ async def build_quote(db: AsyncSession, items: list[dict]) -> dict:
                 },
             )
         provider_switch = provider_switches.get(module)
-        if get_settings().app_env != "dev" and provider_switch:
+        if get_settings().app_env not in {"dev", "test"} and provider_switch:
             enabled = (await get_config(provider_switch, "false")).lower() == "true"
             if not enabled:
                 raise HTTPException(

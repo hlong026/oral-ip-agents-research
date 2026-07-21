@@ -7,6 +7,7 @@ Provider 注册表（06 文档 §10.3）
 """
 
 import time
+from typing import Any
 
 from app.core.config import get_settings
 from app.core.events import CHANNEL_TASKS, publish
@@ -56,14 +57,14 @@ class ProviderRegistry:
             p: MockPublishDriver(p) for p in ("douyin", "xiaohongshu", "shipinhao")
         }
         # #9 IM Provider：未配置 key 时使用 MockIMProvider
-        _has_im_key = bool(get_settings().douyin_im_app_key)
+        _has_im_key = get_settings().im_enabled and bool(get_settings().douyin_im_app_key)
         self.im_drivers: dict[str, IMProvider] = {
             "douyin": DouyinIMProvider() if _has_im_key else MockIMProvider(),
         }
 
     async def provider_enabled(self, provider_name: str) -> bool:
         """真实 Provider 必须服从管理端开关；开发环境保留 Mock 降级体验。"""
-        if get_settings().app_env == "dev":
+        if get_settings().app_env in {"dev", "test"}:
             return True
         provider_switches = {
             "douyidou": "douyidou_enabled",
@@ -88,7 +89,7 @@ class ProviderRegistry:
             "avatar": "feiying_enabled",
         }
         switch = provider_switches.get(kind)
-        if get_settings().app_env != "dev" and switch:
+        if get_settings().app_env not in {"dev", "test"} and switch:
             from app.core.dynamic_config import get_config
 
             if (await get_config(switch, "false")).lower() != "true":
@@ -177,7 +178,7 @@ class ProviderRegistry:
 
     def get(self, kind: str):
         """按类型获取链首 Provider（供 im 等模块直接调用 LLM）"""
-        chain_map = {
+        chain_map: dict[str, list[Any]] = {
             "llm": self.llm_chain,
             "parse": self.parse_chain,
             "asr": self.asr_chain,

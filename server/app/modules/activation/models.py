@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -73,3 +73,19 @@ class UserSubscription(Base):
     next_grant_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class ActivationRateLimit(Base):
+    """Persistent failed-attempt counter keyed by a protected identity digest."""
+
+    __tablename__ = "activation_rate_limits"
+    __table_args__ = (UniqueConstraint("scope", "subject_hash", "action", name="uq_activation_rate_subject"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    scope: Mapped[str] = mapped_column(String(16))
+    subject_hash: Mapped[str] = mapped_column(String(64), index=True)
+    action: Mapped[str] = mapped_column(String(16))
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

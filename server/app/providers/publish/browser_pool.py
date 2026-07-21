@@ -4,6 +4,7 @@
 - 通过 Semaphore 控制并发数（默认 ≤2），防止资源耗尽
 - 生产环境多 Worker 时应替换为 Redis 分布式信号量
 """
+
 import asyncio
 
 from app.core.config import get_settings

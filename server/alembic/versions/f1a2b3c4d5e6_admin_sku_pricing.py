@@ -4,6 +4,7 @@ Revision ID: f1a2b3c4d5e6
 Revises: f0a1b2c3d4e5
 Create Date: 2026-07-21
 """
+
 import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime

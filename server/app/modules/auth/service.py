@@ -112,6 +112,8 @@ async def refresh(db: AsyncSession, refresh_token: str) -> TokensOut:
 
 
 def to_out(user: User) -> UserOut:
+    plan_expires_at = user.plan_expires_at
+    activated_at = user.activated_at
     return UserOut(
         id=user.id,
         phone=user.phone,
@@ -119,8 +121,6 @@ def to_out(user: User) -> UserOut:
         avatarChar=user.avatar_char,
         createdAt=user.created_at.astimezone(UTC).isoformat(),
         planType=getattr(user, "plan_type", "none") or "none",
-        planExpiresAt=(
-            user.plan_expires_at.astimezone(UTC).isoformat() if getattr(user, "plan_expires_at", None) else None
-        ),
-        activatedAt=user.activated_at.astimezone(UTC).isoformat() if getattr(user, "activated_at", None) else None,
+        planExpiresAt=plan_expires_at.astimezone(UTC).isoformat() if plan_expires_at else None,
+        activatedAt=activated_at.astimezone(UTC).isoformat() if activated_at else None,
     )

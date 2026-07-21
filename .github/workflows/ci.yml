@@ -6,48 +6,8 @@ on:
   pull_request:
 
 jobs:
-  backend:
-    name: 后端质量（ruff / mypy / pytest）
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: server
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: 安装依赖
-        run: uv sync --extra dev
-      - name: Ruff
-        run: uv run ruff check .
-      - name: mypy
-        run: uv run mypy app
-      - name: pytest 冒烟
-        run: uv run pytest -q
-
-  frontend:
-    name: 前端构建（typecheck + vite build）
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: pnpm
-      - name: 安装依赖
-        run: pnpm install --frozen-lockfile
-      - name: Vitest 组件测试
-        run: pnpm test
-      - name: 构建
-        run: pnpm build
-
-  contract:
-    name: 契约零漂移（OpenAPI → TS 类型）
+  quality-gates:
+    name: 第一阶段交付门禁
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,21 +17,65 @@ jobs:
           python-version: "3.12"
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-      - name: 安装依赖
+      - name: 1. 依赖锁与安装
         run: |
+          uv lock --check --directory server
+          uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
-          uv sync --directory server
-      - name: 启动后端
+      - name: 2. 数据库迁移链
+        working-directory: server
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite+aiosqlite:///./ci_migrations.db
         run: |
-          cd server
-          uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          uv run python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; heads=ScriptDirectory.from_config(Config("alembic.ini")).get_heads(); assert len(heads) == 1, heads'
+          uv run alembic upgrade head
+          uv run python -c 'import sqlite3; db=sqlite3.connect("ci_migrations.db"); tables={r[0] for r in db.execute("select name from sqlite_master where type=\"table\"")}; indexes={r[0] for r in db.execute("select name from sqlite_master where type=\"index\"")}; assert {"activation_rate_limits","webhook_events","voices","avatars"} <= tables; assert {"uq_voices_provider_task_id","uq_avatars_provider_task_id"} <= indexes'
+          uv run alembic downgrade base
+          uv run alembic upgrade head
+          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade f2b3c4d5e6f7
+          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade head
+          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic downgrade f2b3c4d5e6f7
+          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade head
+      - name: 3. Ruff
+        working-directory: server
+        run: uv run ruff check .
+      - name: 4. Ruff 格式
+        working-directory: server
+        run: uv run ruff format --check .
+      - name: 5. Mypy
+        working-directory: server
+        run: uv run mypy app
+      - name: 6. Pytest
+        working-directory: server
+        env:
+          APP_ENV: test
+        run: uv run pytest -q
+      - name: 7. OpenAPI 契约零漂移
+        env:
+          APP_ENV: test
+          DATABASE_URL: sqlite+aiosqlite:///./ci_openapi.db
+        run: |
+          uv run --directory server uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          backend_pid=$!
+          trap 'kill "$backend_pid"' EXIT
           for i in $(seq 1 30); do
             curl -sf http://127.0.0.1:8000/healthz && break || sleep 1
           done
-      - name: 零漂移校验（不一致则失败，须先执行 pnpm gen:api 并提交产物）
-        run: node scripts/gen-api-types.mjs --check
+          curl -sf http://127.0.0.1:8000/healthz
+          node scripts/gen-api-types.mjs --check
+      - name: 8. 前端格式
+        run: pnpm lint
+      - name: 9. 前端类型检查
+        run: pnpm typecheck
+      - name: 10. 前端测试
+        run: pnpm test
+      - name: 11. 前端构建
+        run: pnpm build
+      - name: 12. 秘密扫描
+        run: node scripts/scan-secrets.mjs

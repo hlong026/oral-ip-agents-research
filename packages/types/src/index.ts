@@ -215,6 +215,9 @@ export interface Persona {
   avoidTopics: string[];
 }
 
+export type VoiceStatus =
+  "ready" | "training" | "pending_confirm" | "rejected" | "failed";
+
 export interface Voice {
   id: string;
   name: string;
@@ -223,7 +226,8 @@ export interface Voice {
   gender: string;
   emotion: string;
   sampleUrl?: string | null;
-  status: "ready" | "training" | "failed";
+  demoUrl?: string | null;
+  status: VoiceStatus;
   createdAt: string;
 }
 

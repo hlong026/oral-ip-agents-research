@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.oralip.desktop",
   "build": {
-    "frontendDist": "../../apps/web/dist",
+    "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm --filter @oral/web dev",
     "beforeBuildCommand": "pnpm --filter @oral/web build"
@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "macOS": {
+      "signingIdentity": "-"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -47,6 +47,8 @@ describe("用户端导航", () => {
     expect(
       container.querySelector('a[href="/settings"]'),
     ).not.toBeInTheDocument();
+    expect(container.querySelector('a[href="/im"]')).not.toBeInTheDocument();
+    expect(screen.queryByText("私信中心")).not.toBeInTheDocument();
     expect(screen.getByText("充值/续费").closest("a")).toHaveAttribute(
       "href",
       "/pricing",

@@ -4,7 +4,11 @@
 import { useEffect, useRef, useState } from "react";
 
 /** 轮询（WS 断线兜底）：enabled 为 true 时每 intervalMs 触发 fn */
-export function usePolling(fn: () => void | Promise<void>, intervalMs: number, enabled = true) {
+export function usePolling(
+  fn: () => void | Promise<void>,
+  intervalMs: number,
+  enabled = true,
+) {
   const saved = useRef(fn);
   saved.current = fn;
   useEffect(() => {
@@ -41,12 +45,15 @@ export function useRelativeTime(iso: string): string {
 }
 
 /** 识别分享链接平台（Hero 输入框平台识别） */
-export function detectPlatform(url: string): "douyin" | "kuaishou" | "xiaohongshu" | "shipinhao" | null {
+export function detectPlatform(
+  url: string,
+): "douyin" | "kuaishou" | "xiaohongshu" | "shipinhao" | null {
   if (!url) return null;
   const u = url.toLowerCase();
   if (u.includes("douyin.com") || u.includes("iesdouyin")) return "douyin";
   if (u.includes("kuaishou.com") || u.includes("gifshow")) return "kuaishou";
-  if (u.includes("xiaohongshu.com") || u.includes("xhslink")) return "xiaohongshu";
+  if (u.includes("xiaohongshu.com") || u.includes("xhslink"))
+    return "xiaohongshu";
   if (u.includes("channels.weixin") || u.includes("weixin")) return "shipinhao";
   return null;
 }

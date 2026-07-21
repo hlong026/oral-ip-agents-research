@@ -1,4 +1,5 @@
 """套餐 SKU、价格目录 ORM。"""
+
 import uuid
 from datetime import UTC, datetime
 

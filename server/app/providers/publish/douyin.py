@@ -4,6 +4,7 @@
 - 发布：DouYinVideo 上传视频 + 标题/话题/封面/定时
 - Cookie 检测：cookie_auth
 """
+
 from app.core.logging import get_logger
 
 from .base_driver import SAUPublishDriverBase
@@ -39,6 +40,7 @@ class DouyinPublishDriver(SAUPublishDriverBase):
         from uploader.douyin_uploader.main import douyin_cookie_gen
 
         from app.core.config import get_settings
+
         headless = get_settings().publish_browser_headless
 
         session_data = self._login_sessions.get(ticket)
@@ -71,8 +73,9 @@ class DouyinPublishDriver(SAUPublishDriverBase):
             session_data["error"] = str(e)[:200]
             logger.error("douyin_login_error", ticket=ticket, error=str(e)[:200])
 
-    async def _do_publish(self, cookie_file: str, video_path: str, title: str,
-                          topics: list[str], cover_path: str | None, publish_date) -> str:
+    async def _do_publish(
+        self, cookie_file: str, video_path: str, title: str, topics: list[str], cover_path: str | None, publish_date
+    ) -> str:
         """调用 SAU DouYinVideo 执行发布"""
         from uploader.douyin_uploader.main import DouYinVideo
 
@@ -93,4 +96,5 @@ class DouyinPublishDriver(SAUPublishDriverBase):
     async def _do_check_cookie(self, cookie_file: str) -> bool:
         """调用 SAU cookie_auth 检测抖音 Cookie 有效性"""
         from uploader.douyin_uploader.main import cookie_auth
+
         return await cookie_auth(cookie_file)

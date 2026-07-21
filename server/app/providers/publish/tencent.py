@@ -4,6 +4,7 @@
 - 发布：TencentVideo 上传视频 + 标题/话题/定时
 - Cookie 检测：cookie_auth
 """
+
 from app.core.logging import get_logger
 
 from .base_driver import SAUPublishDriverBase
@@ -20,7 +21,8 @@ class TencentPublishDriver(SAUPublishDriverBase):
     # 视频号助手账号信息接口（Cookie 鉴权，返回 {data: {finderUser: {nickname, ...}}}）
     _nickname_api = (
         "https://channels.weixin.qq.com/cgi-bin/mmfinderassistant-bin/auth/auth_data",
-        "POST", {},
+        "POST",
+        {},
     )
     _nickname_paths = [
         ["data", "finderUser", "nickname"],
@@ -41,6 +43,7 @@ class TencentPublishDriver(SAUPublishDriverBase):
         from uploader.tencent_uploader.main import tencent_cookie_gen
 
         from app.core.config import get_settings
+
         headless = get_settings().publish_browser_headless
 
         session_data = self._login_sessions.get(ticket)
@@ -73,8 +76,9 @@ class TencentPublishDriver(SAUPublishDriverBase):
             session_data["error"] = str(e)[:200]
             logger.error("tencent_login_error", ticket=ticket, error=str(e)[:200])
 
-    async def _do_publish(self, cookie_file: str, video_path: str, title: str,
-                          topics: list[str], cover_path: str | None, publish_date) -> str:
+    async def _do_publish(
+        self, cookie_file: str, video_path: str, title: str, topics: list[str], cover_path: str | None, publish_date
+    ) -> str:
         """调用 SAU TencentVideo 执行发布"""
         from uploader.tencent_uploader.main import TencentVideo
 
@@ -93,4 +97,5 @@ class TencentPublishDriver(SAUPublishDriverBase):
     async def _do_check_cookie(self, cookie_file: str) -> bool:
         """调用 SAU cookie_auth 检测视频号 Cookie 有效性"""
         from uploader.tencent_uploader.main import cookie_auth
+
         return await cookie_auth(cookie_file)

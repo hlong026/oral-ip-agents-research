@@ -1,6 +1,6 @@
 """activation HTTP 路由（用户侧 + 管理侧）"""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -32,15 +32,55 @@ admin_router = APIRouter(prefix="/activation", tags=["admin-activation"])
 
 
 @router.post("/validate-code", response_model=CodeInfoOut)
-async def api_validate_code(body: ValidateCodeIn, db: AsyncSession = Depends(get_db)):
+async def api_validate_code(body: ValidateCodeIn, request: Request, db: AsyncSession = Depends(get_db)):
     """预校验激活码有效性（无需登录）"""
-    return await service.validate_code(db, body.code)
+    from .rate_limit import enforce_rate_limit, record_attempt
+
+    ip_address = request.client.host if request.client else "unknown"
+    device = body.deviceFingerprint or request.headers.get("X-Device-Fingerprint", "")
+    await enforce_rate_limit("validate", ip_address=ip_address, device_fingerprint=device)
+    result = await service.validate_code(db, body.code)
+    await record_attempt(
+        "validate",
+        success=result.valid,
+        ip_address=ip_address,
+        device_fingerprint=device,
+    )
+    return result
 
 
 @router.post("/activate", response_model=ActivateOut)
-async def api_activate(body: ActivateIn, db: AsyncSession = Depends(get_db)):
+async def api_activate(body: ActivateIn, request: Request, db: AsyncSession = Depends(get_db)):
     """激活码注册（首次开户，无需登录）"""
-    return await service.activate(db, body.code, body.phone, body.password, body.nickname, body.deviceFingerprint)
+    from .rate_limit import enforce_rate_limit, record_attempt
+
+    ip_address = request.client.host if request.client else "unknown"
+    await enforce_rate_limit(
+        "activate",
+        ip_address=ip_address,
+        device_fingerprint=body.deviceFingerprint,
+        phone=body.phone,
+    )
+    try:
+        result = await service.activate(db, body.code, body.phone, body.password, body.nickname, body.deviceFingerprint)
+    except HTTPException:
+        await db.rollback()
+        await record_attempt(
+            "activate",
+            success=False,
+            ip_address=ip_address,
+            device_fingerprint=body.deviceFingerprint,
+            phone=body.phone,
+        )
+        raise
+    await record_attempt(
+        "activate",
+        success=True,
+        ip_address=ip_address,
+        device_fingerprint=body.deviceFingerprint,
+        phone=body.phone,
+    )
+    return result
 
 
 @router.post("/redeem", response_model=RedeemOut)

@@ -1,4 +1,5 @@
 """套餐和模块积分价格目录路由。"""
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 

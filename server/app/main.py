@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_settings, validate_runtime_security
-from app.core.db import SessionLocal, init_models
+from app.core.db import SessionLocal, init_models, verify_migrations_current
 from app.core.events import init_redis
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import TraceMiddleware
@@ -29,11 +29,18 @@ logger = get_logger("oral")
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     validate_runtime_security(settings)
     os.makedirs(settings.local_storage_dir, exist_ok=True)
-    await init_models()
+    if settings.app_env in {"dev", "test"}:
+        await init_models()
+    else:
+        await verify_migrations_current()
     from app.core.bootstrap import ensure_bootstrap_admin
+    from app.modules.publish.repository import migrate_plaintext_sessions
 
     async with SessionLocal() as db:
         await ensure_bootstrap_admin(db, settings)
+        migrated_sessions = await migrate_plaintext_sessions(db)
+        if migrated_sessions:
+            logger.warning("publish_sessions_encrypted", count=migrated_sessions)
     await init_redis(settings.redis_url)
     # 计费价目种子（quota_price 表）
     from app.modules.billing.repository import seed_prices
@@ -42,20 +49,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with SessionLocal() as db:
         await seed_prices(db)
         await seed_initial_price_catalog(db)
-    # #7 恢复 IM 监听
-    from app.workers.im_listener import restore_listeners
+    if settings.im_enabled:
+        from app.workers.im_listener import restore_listeners
 
-    await restore_listeners()
+        await restore_listeners()
     # 发布模块：启动 Cookie 心跳检测后台任务
     from app.providers.publish.heartbeat import start_heartbeat
 
     start_heartbeat()
     logger.info("oral-ip-agents server ready")
     yield
-    # #7 shutdown 清理 IM 监听
-    from app.workers.im_listener import shutdown_all
+    if settings.im_enabled:
+        from app.workers.im_listener import shutdown_all
 
-    await shutdown_all()
+        await shutdown_all()
 
 
 app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
@@ -129,13 +136,14 @@ user_routers = (
     content_router,
     pipeline_router,
     publish_router,
-    im_router,
     notify_router,
     dashboard_router,
     webhook_router,
 )
 for r in user_routers:
     app.include_router(r, prefix=settings.api_prefix)
+if settings.im_enabled:
+    app.include_router(im_router, prefix=settings.api_prefix)
 for r in (auth_admin_router, activation_admin_router, catalog_admin_router, provider_router, admin_router):
     app.include_router(r, prefix="/api/admin/v1")
 app.include_router(ws_router)

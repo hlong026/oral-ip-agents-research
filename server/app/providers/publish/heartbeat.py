@@ -4,8 +4,8 @@ Cookie 有效性心跳检测
 - 失效时：更新状态为 expired + 推送告警到前端
 - 在 app 启动时注册后台任务
 """
+
 import asyncio
-import json
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
@@ -27,9 +27,7 @@ async def check_all_accounts() -> None:
     from app.modules.publish.models import PublishAccount
 
     async with SessionLocal() as db:
-        result = await db.execute(
-            select(PublishAccount).where(PublishAccount.status == "active")
-        )
+        result = await db.execute(select(PublishAccount).where(PublishAccount.status == "active"))
         accounts = result.scalars().all()
 
     if not accounts:
@@ -45,7 +43,9 @@ async def check_all_accounts() -> None:
             if not hasattr(driver, "check_cookie_valid"):
                 continue
 
-            session = json.loads(account.session_json or "{}")
+            from app.modules.publish.repository import account_session
+
+            session = account_session(account)
             valid = await driver.check_cookie_valid(session, account_id=account.id)
 
             if not valid:
@@ -53,21 +53,24 @@ async def check_all_accounts() -> None:
                 # 更新状态
                 async with SessionLocal() as db:
                     from app.modules.publish.repository import get_account, save_account
+
                     acc = await get_account(db, account.id, account.user_id)
                     if acc and acc.status == "active":
                         acc.status = "expired"
                         await save_account(db, acc)
 
                 # 推送告警
-                platform_names = {"douyin": "抖音",
-                                  "xiaohongshu": "小红书", "shipinhao": "视频号"}
-                await emit(CHANNEL_ALERT, {
-                    "level": "warning",
-                    "userId": account.user_id,
-                    "message": f"{platform_names.get(account.platform, account.platform)}"
-                               f"账号「{account.nickname}」登录态已失效，请重新授权",
-                    "accountId": account.id,
-                })
+                platform_names = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
+                await emit(
+                    CHANNEL_ALERT,
+                    {
+                        "level": "warning",
+                        "userId": account.user_id,
+                        "message": f"{platform_names.get(account.platform, account.platform)}"
+                        f"账号「{account.nickname}」登录态已失效，请重新授权",
+                        "accountId": account.id,
+                    },
+                )
                 logger.warning(
                     "account_expired",
                     account_id=account.id,

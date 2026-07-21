@@ -3,6 +3,7 @@
 - 生产：Redis Pub/Sub，notify 模块 WS 网关订阅广播到各端
 - 开发：Redis 不可用时回落进程内广播（单进程调试）
 """
+
 import asyncio
 import json
 import logging
@@ -11,13 +12,16 @@ from collections.abc import Awaitable, Callable
 logger = logging.getLogger(__name__)
 
 CHANNEL_TASKS = "oral:tasks"  # 任务进度/降级事件
-CHANNEL_FEED = "oral:feed"    # 任务动态流
+CHANNEL_FEED = "oral:feed"  # 任务动态流
 CHANNEL_ALERT = "oral:alert"  # 告警（发布失败/额度不足/Provider 降级）
-CHANNEL_IM = "oral:im"        # 私信事件（新消息/自动回复/监听状态）
+CHANNEL_IM = "oral:im"  # 私信事件（新消息/自动回复/监听状态）
 
 _redis = None
 _local_subs: dict[str, set[asyncio.Queue]] = {
-    CHANNEL_TASKS: set(), CHANNEL_FEED: set(), CHANNEL_ALERT: set(), CHANNEL_IM: set(),
+    CHANNEL_TASKS: set(),
+    CHANNEL_FEED: set(),
+    CHANNEL_ALERT: set(),
+    CHANNEL_IM: set(),
 }
 
 
@@ -73,7 +77,11 @@ async def subscribe(channel: str) -> tuple[Callable[[], Awaitable[dict | None]],
         def unsub_redis() -> None:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(pubsub.unsubscribe(channel))
+
+                async def unsubscribe() -> None:
+                    await pubsub.unsubscribe(channel)
+
+                loop.create_task(unsubscribe())
             except RuntimeError:
                 pass
 

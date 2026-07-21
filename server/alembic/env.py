@@ -1,4 +1,5 @@
 """Alembic 环境（异步引擎；URL 由 app 配置注入，契约同源）"""
+
 import asyncio
 from logging.config import fileConfig
 
@@ -19,10 +20,10 @@ from app.modules.auth import models as _auth  # noqa: E402,F401
 from app.modules.avatar import models as _avatar  # noqa: E402,F401
 from app.modules.billing import models as _billing  # noqa: E402,F401
 from app.modules.content import models as _content  # noqa: E402,F401
+from app.modules.im import models as _im  # noqa: E402,F401
 from app.modules.ipasset import models as _ipasset  # noqa: E402,F401
 from app.modules.notify import models as _notify  # noqa: E402,F401
 from app.modules.pipeline import models as _pipeline  # noqa: E402,F401
-from app.modules.im import models as _im  # noqa: E402,F401
 from app.modules.publish import models as _publish  # noqa: E402,F401
 from app.modules.voice import models as _voice  # noqa: E402,F401
 

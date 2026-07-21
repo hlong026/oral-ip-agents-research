@@ -30,7 +30,9 @@ function NewScriptPanel({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError("");
     try {
-      const seconds = file ? await mediaDurationSeconds(file) : 60;
+      const seconds = file
+        ? await mediaDurationSeconds(file)
+        : (await contentApi.probe(url.trim())).durationSeconds;
       const quoteId = await confirmMeteredOperation("asr", "提取文案", {
         seconds,
         assets: 1,

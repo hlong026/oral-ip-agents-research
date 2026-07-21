@@ -22,7 +22,7 @@ from app.providers.url_resolver import resolve_input
 
 from . import repository as repo
 from .models import Script
-from .schemas import ParseOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut, WordTsOut
+from .schemas import ParseOut, RewriteOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut, WordTsOut
 
 logger = get_logger("oral.content")
 
@@ -32,7 +32,8 @@ async def parse_url(
     user_id: str,
     url: str,
     persona_id: str | None,
-    max_duration_seconds: int | None = None,
+    verified_duration_seconds: float | None = None,
+    require_verified_duration: bool = False,
 ) -> ParseOut:
     """链接解析 → 文案优先 / ASR 转写 → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
@@ -68,19 +69,18 @@ async def parse_url(
     if not video_url:
         return ParseOut(transcript=None, degraded=True, platform=platform, title=title)
 
-    # 按时长计费时只能使用供应商明确返回的时长，不得用码率估算值授权执行。
     known_dur = douyidou_result.duration_sec if douyidou_result else None
-    duration_sec = (
-        known_dur
-        if max_duration_seconds is not None
-        else await probe_duration(video_url, platform=platform, known_duration=known_dur)
+    duration_sec = verified_duration_seconds or await probe_duration(
+        video_url,
+        platform=platform,
+        known_duration=known_dur,
     )
-    if max_duration_seconds is not None and (duration_sec is None or duration_sec > max_duration_seconds):
+    if require_verified_duration and duration_sec is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "MEDIA_DURATION_UNVERIFIED",
-                "message": f"链接媒体无法按 {max_duration_seconds} 秒报价安全执行，请上传本地文件后重试",
+                "message": "无法验证链接媒体时长，请上传本地文件后重试",
             },
         )
     logger.info(f"ASR 分流决策: duration={duration_sec}, threshold={300}s")
@@ -149,7 +149,8 @@ async def parse_by_id(
     video_id: str,
     platform: str,
     persona_id: str | None,
-    max_duration_seconds: int | None = None,
+    verified_duration_seconds: float | None = None,
+    require_verified_duration: bool = False,
 ) -> ParseOut:
     """通过视频ID + 平台解析（内部拼接URL后走统一链路）"""
     if platform == "douyin":
@@ -158,7 +159,55 @@ async def parse_by_id(
         url = f"https://www.xiaohongshu.com/explore/{video_id}"
     else:
         url = video_id  # 透传
-    return await parse_url(db, user_id, url, persona_id, max_duration_seconds)
+    return await parse_url(
+        db,
+        user_id,
+        url,
+        persona_id,
+        verified_duration_seconds,
+        require_verified_duration,
+    )
+
+
+async def probe_url_duration(url: str, *, required: bool) -> float | None:
+    """在报价前解析直链，并只返回供应商值或 ffprobe 验证值。"""
+    resolved = resolve_input(url)
+    result: DouyidouParseResult | None = None
+    if await registry.provider_enabled("douyidou"):
+        try:
+            result = await DouyidouParser().parse_url_full(resolved.url)
+        except Exception as exc:
+            logger.warning(f"Douyidou 时长探测失败，走降级链: {exc}")
+
+    video_url = result.video_url if result else None
+    platform = result.platform if result else resolved.platform.value
+    if not video_url:
+        try:
+            parsed, _ = await registry.run_with_fallback(
+                "parse",
+                registry.parse_chain,
+                "parse_url",
+                resolved.url,
+            )
+            video_url = parsed.video_key
+            platform = parsed.platform
+        except Exception as exc:
+            logger.warning(f"链接直链解析失败，无法探测时长: {exc}")
+
+    duration = await probe_duration(
+        video_url or "",
+        platform=platform,
+        known_duration=result.duration_sec if result else None,
+    )
+    if required and duration is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_DURATION_UNVERIFIED",
+                "message": "无法验证链接媒体时长，请上传本地文件后重试",
+            },
+        )
+    return duration
 
 
 async def parse_upload(
@@ -201,10 +250,8 @@ async def parse_upload(
 
 async def rewrite(
     db: AsyncSession, user_id: str, text: str, intensity: str, prompt: str | None, script_id: str | None
-) -> dict:
+) -> RewriteOut:
     """三阶段IP仿写引擎：结构拆解 → IP化大纲 → 全文生成+校验闭环"""
-    from .schemas import RewriteOut
-
     start_time = time.perf_counter()
     # 人设引擎注入（F-701）
     persona_ctx = ""

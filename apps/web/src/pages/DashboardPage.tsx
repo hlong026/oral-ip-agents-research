@@ -40,7 +40,9 @@ function HeroInput() {
     setBusy(file ? "upload" : "parse");
     setError("");
     try {
-      const seconds = file ? await mediaDurationSeconds(file) : 60;
+      const seconds = file
+        ? await mediaDurationSeconds(file)
+        : (await contentApi.probe(url ?? "")).durationSeconds;
       const quoteId = await confirmMeteredOperation("asr", "提取文案", {
         seconds,
         assets: 1,

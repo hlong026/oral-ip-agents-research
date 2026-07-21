@@ -3,10 +3,10 @@
 - send_message(): POST https://imapi.douyin.com/v1/message/send
 - create_conversation(): POST https://imapi.douyin.com/v2/conversation/create
 """
+
 import hashlib
 import json
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -23,9 +23,11 @@ IM_CONV_CREATE_URL = "https://imapi.douyin.com/v2/conversation/create"
 IM_DEVICE_URL = "https://mcs.zijieapi.com/v1/device/register"
 
 COMMON_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/125.0.0.0 Safari/537.36"),
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
     "Referer": "https://www.douyin.com/",
     "Origin": "https://www.douyin.com",
 }
@@ -50,7 +52,7 @@ class DouyinIMConnection:
     def __init__(self, session: dict[str, Any]):
         self._session = session
         self._alive = False
-        self._ws = None
+        self._ws: Any | None = None
 
     async def listen(self, on_message: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
         """建立 WebSocket 并持续监听私信"""
@@ -107,24 +109,16 @@ class DouyinIMConnection:
                 if self._alive:
                     logger.warning(f"[DouyinIM] ws error: {e}, reconnect in 10s")
                     import asyncio
+
                     await asyncio.sleep(10)
 
-    def _decode_frame(self, raw: bytes) -> dict[str, Any] | None:
-        """解码 Protobuf PushFrame → 提取私信内容（简化版）
-        生产环境需完整 protobuf 解码，MVP 用 protobuf3_to_dict 或 blackboxprotobuf
+    def _decode_frame(self, raw: bytes | str) -> dict[str, Any] | None:
+        """Reject frames until a fixed, versioned Proto contract is available.
+
+        Dynamic black-box decoding was both dependency-incompatible and unsafe:
+        arbitrary field guesses cannot prove the sender or message contract.
         """
-        try:
-            from protobuf3_to_dict import protobuf3_to_dict  # type: ignore
-            # 实际需 .proto 编译；MVP 阶段用 blackboxprotobuf 动态解码
-            import blackboxprotobuf  # type: ignore
-            decoded, _ = blackboxprotobuf.decode_message(raw)
-            # 从嵌套结构提取消息字段（需根据实际 proto 结构调整）
-            payload = decoded.get("payload", b"")
-            if isinstance(payload, bytes) and payload:
-                inner, _ = blackboxprotobuf.decode_message(payload)
-                return self._extract_message(inner)
-        except Exception:  # noqa: BLE001
-            pass
+        logger.debug("[DouyinIM] dropped undecodable frame bytes=%d", len(raw))
         return None
 
     def _extract_message(self, data: dict) -> dict[str, Any] | None:
@@ -154,6 +148,7 @@ class DouyinIMConnection:
     async def _fetch_device_id(self, cookie_str: str) -> str:
         """获取设备 ID（简化：生成随机 device_id）"""
         import random
+
         return str(random.randint(10**18, 10**19 - 1))
 
     async def close(self) -> None:
@@ -169,15 +164,16 @@ class DouyinIMConnection:
 
 class DouyinIMProvider:
     """抖音私信 Provider 实现"""
+
     name = "douyin_im"
     platform = "douyin"
 
     async def connect(self, session: dict[str, Any]) -> DouyinIMConnection:
         return DouyinIMConnection(session)
 
-    async def send_message(self, session: dict[str, Any], conversation_id: str,
-                           conversation_short_id: str, ticket: str,
-                           content: str) -> bool:
+    async def send_message(
+        self, session: dict[str, Any], conversation_id: str, conversation_short_id: str, ticket: str, content: str
+    ) -> bool:
         """通过 imapi 发送文本消息"""
         cookie_str = session.get("cookie_str", "")
         # 构建发送请求（简化版，生产需 Protobuf 编码 + web_protect 签名）
@@ -188,8 +184,7 @@ class DouyinIMProvider:
             "msg_type": 7,
             "ticket": ticket,
         }
-        headers = {**COMMON_HEADERS, "Cookie": cookie_str,
-                   "Content-Type": "application/json"}
+        headers = {**COMMON_HEADERS, "Cookie": cookie_str, "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(IM_SEND_URL, json=payload, headers=headers)
             if resp.status_code == 200:
@@ -201,13 +196,11 @@ class DouyinIMProvider:
                 logger.warning(f"[DouyinIM] send http {resp.status_code}")
         return False
 
-    async def create_conversation(self, session: dict[str, Any],
-                                  to_uid: int) -> dict[str, str]:
+    async def create_conversation(self, session: dict[str, Any], to_uid: int) -> dict[str, str]:
         """创建会话（cmd=609）"""
         cookie_str = session.get("cookie_str", "")
         payload = {"to_user_id": to_uid, "cmd": 609}
-        headers = {**COMMON_HEADERS, "Cookie": cookie_str,
-                   "Content-Type": "application/json"}
+        headers = {**COMMON_HEADERS, "Cookie": cookie_str, "Content-Type": "application/json"}
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(IM_CONV_CREATE_URL, json=payload, headers=headers)
             if resp.status_code == 200:
