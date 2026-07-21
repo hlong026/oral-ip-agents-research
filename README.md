@@ -42,8 +42,10 @@ ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker
 
 首次部署可临时设置 `BOOTSTRAP_ADMIN_PHONE` 和至少 12 位的
 `BOOTSTRAP_ADMIN_PASSWORD`。管理员创建成功后，应从部署环境删除引导密码。
-生产环境必须分别配置 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY` 和
-`ACTIVATION_SECRET`；供应商密钥只保存在后端，用户端没有配置入口。
+生产环境必须分别配置 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY`、
+`ACTIVATION_SECRET`、`PUBLISH_SESSION_ENCRYPTION_KEY` 和
+`FEIYING_WEBHOOK_SECRET`；用途、格式和更换影响已逐项写在
+`server/.env.example` 中。供应商密钥只保存在后端，用户端没有配置入口。
 
 ## 容器化前后端联调
 
@@ -53,8 +55,8 @@ FastAPI 和任务 Worker 都运行在容器中；本地用户端和管理端只�
 
 ```bash
 cp server/.env.example server/.env
-# 编辑 server/.env：将 APP_ENV 改为 staging，替换所有 change-me 安全值，
-# 并设置 STORAGE_DRIVER=s3；真实 Provider 密钥可在只测基础联调时留空。
+# 编辑 server/.env：将 APP_ENV 改为 staging，替换所有 REPLACE_* 安全值。
+# 可选：需要调整宿主机映射端口时执行 cp .env.example .env。
 docker compose up -d --build
 curl --fail http://127.0.0.1:8000/readyz
 
