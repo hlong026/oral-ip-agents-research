@@ -6,7 +6,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from .config import get_settings
 
@@ -68,7 +69,7 @@ def decode_token(token: str, expected_type: str = "access") -> dict | None:
             algorithms=[settings.jwt_algorithm],
             options={"verify_aud": False},
         )
-    except JWTError:
+    except InvalidTokenError:
         return None
     if payload.get("type") != expected_type:
         return None

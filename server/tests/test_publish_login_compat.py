@@ -63,11 +63,14 @@ async def test_publish_materializes_s3_media_for_browser(monkeypatch: pytest.Mon
         async def _do_check_cookie(self, cookie_file: str) -> bool:
             return True
 
-    async def remote_bytes(key: str) -> bytes:
-        return {"compose/video.mp4": b"video", "compose/cover.jpg": b"cover"}[key]
+    async def download_remote(key: str, path: Path) -> None:
+        await asyncio.to_thread(
+            path.write_bytes,
+            {"compose/video.mp4": b"video", "compose/cover.jpg": b"cover"}[key],
+        )
 
     monkeypatch.setattr(base_driver, "storage_settings", SimpleNamespace(storage_driver="s3"), raising=False)
-    monkeypatch.setattr(base_driver, "read_bytes", remote_bytes, raising=False)
+    monkeypatch.setattr(base_driver, "download_to_path", download_remote, raising=False)
 
     post_id = await FakeDriver().publish(
         {},

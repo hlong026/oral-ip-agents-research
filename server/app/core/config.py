@@ -112,22 +112,23 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings) -> None:
+    if settings.jwt_algorithm != "HS256":
+        raise RuntimeError("当前共享密钥实现仅允许 JWT_ALGORITHM=HS256")
     if settings.im_enabled and settings.app_env not in {"dev", "test"}:
         raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED")
     if settings.im_enabled and not settings.douyin_im_app_key:
         raise RuntimeError("启用私信模块必须配置真实 DOUYIN_IM_APP_KEY，禁止使用 Mock 发送")
     if settings.app_env in {"dev", "test"}:
         return
-    missing: list[str] = []
-    if settings.app_secret == "dev-secret-change-me":
-        missing.append("APP_SECRET")
-    if not settings.config_encryption_key:
-        missing.append("CONFIG_ENCRYPTION_KEY")
-    if not settings.activation_secret:
-        missing.append("ACTIVATION_SECRET")
-    if not settings.publish_session_encryption_key:
-        missing.append("PUBLISH_SESSION_ENCRYPTION_KEY")
-    if not settings.feiying_webhook_secret:
-        missing.append("FEIYING_WEBHOOK_SECRET")
-    if missing:
-        raise RuntimeError("生产环境缺少安全配置：" + ", ".join(missing))
+    secrets = {
+        "APP_SECRET": settings.app_secret,
+        "CONFIG_ENCRYPTION_KEY": settings.config_encryption_key,
+        "ACTIVATION_SECRET": settings.activation_secret,
+        "PUBLISH_SESSION_ENCRYPTION_KEY": settings.publish_session_encryption_key,
+        "FEIYING_WEBHOOK_SECRET": settings.feiying_webhook_secret,
+    }
+    weak = [name for name, value in secrets.items() if len(value) < 32]
+    if weak:
+        raise RuntimeError("生产环境安全密钥必须至少 32 字符：" + ", ".join(weak))
+    if len(set(secrets.values())) != len(secrets):
+        raise RuntimeError("生产环境安全密钥必须分别配置，不得复用")

@@ -11,7 +11,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from app.core.logging import get_logger
-from app.core.storage import local_path, read_bytes
+from app.core.storage import download_to_path, local_path
 from app.core.storage import settings as storage_settings
 from app.providers.base import StepRecoverableError
 
@@ -36,8 +36,7 @@ async def _materialize_publish_media(key: str, directory: str, name: str) -> str
         return str(local_path(key))
     suffix = Path(key).suffix
     path = Path(directory) / f"{name}{suffix}"
-    data = await read_bytes(key)
-    await asyncio.to_thread(path.write_bytes, data)
+    await download_to_path(key, path)
     return str(path)
 
 

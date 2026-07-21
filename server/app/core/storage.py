@@ -1,6 +1,7 @@
 """对象存储：local（MVP 默认）/ s3（MinIO）；产物落库用相对 key，访问走 /media 路由。"""
 
 import asyncio
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,21 @@ async def read_bytes(key: str) -> bytes:
         return await asyncio.to_thread(body.read)
     finally:
         body.close()
+
+
+async def download_to_path(key: str, destination: Path) -> None:
+    """Materialize an object without loading large media into application memory."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if settings.storage_driver == "local":
+        await asyncio.to_thread(shutil.copyfile, local_path(key), destination)
+        return
+    client = _s3_client()
+    await asyncio.to_thread(
+        client.download_file,
+        settings.s3_bucket,
+        key,
+        str(destination),
+    )
 
 
 async def get_object(key: str, byte_range: str | None = None) -> dict[str, Any]:

@@ -40,6 +40,42 @@ def test_production_requires_webhook_signature_secret() -> None:
         validate_runtime_security(settings)
 
 
+def test_production_rejects_short_security_secrets() -> None:
+    settings = Settings(
+        app_env="production",
+        app_secret="short",
+        config_encryption_key="c" * 32,
+        activation_secret="a" * 32,
+        publish_session_encryption_key="p" * 32,
+        feiying_webhook_secret="w" * 32,
+    )
+
+    with pytest.raises(RuntimeError, match="APP_SECRET"):
+        validate_runtime_security(settings)
+
+
+def test_production_rejects_reused_security_secrets() -> None:
+    reused = "r" * 32
+    settings = Settings(
+        app_env="production",
+        app_secret=reused,
+        config_encryption_key=reused,
+        activation_secret="a" * 32,
+        publish_session_encryption_key="p" * 32,
+        feiying_webhook_secret="w" * 32,
+    )
+
+    with pytest.raises(RuntimeError, match="不得复用"):
+        validate_runtime_security(settings)
+
+
+def test_runtime_rejects_unapproved_jwt_algorithm() -> None:
+    settings = Settings(app_env="test", jwt_algorithm="none")
+
+    with pytest.raises(RuntimeError, match="JWT_ALGORITHM"):
+        validate_runtime_security(settings)
+
+
 def test_production_rejects_im_until_compliance_go() -> None:
     settings = Settings(
         app_env="prod",

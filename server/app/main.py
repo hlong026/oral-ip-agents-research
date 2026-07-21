@@ -74,7 +74,7 @@ _allowed_origins = (
     if settings.app_env == "dev"
     else [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
 )
-if not _allowed_origins and settings.app_env != "dev":
+if not _allowed_origins and settings.app_env not in {"dev", "test"}:
     import warnings
 
     warnings.warn("CORS_ORIGINS 未配置，生产环境跨域请求将被拒绝", stacklevel=1)
