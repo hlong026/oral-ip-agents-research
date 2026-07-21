@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL = 30 * 60
 COOKIE_CHECK_RETRY_INTERVAL = 60
+CLEANUP_RETRY_INTERVAL = 5 * 60
 RECONCILE_INTERVAL = 5
 STATE_POLL_INTERVAL = 5
 LEASE_TTL_SECONDS = 30
@@ -165,12 +166,24 @@ async def run_supervisor() -> None:
         logger.info("[IMWorker] IM_ENABLED=false; supervisor stopped")
         return
     lease = _get_default_lease()
+    cleanup_interval = max(1, get_settings().im_cleanup_interval_hours) * 60 * 60
+    last_cleanup = 0.0
     try:
         while True:
             try:
                 await reconcile_listeners(lease)
             except Exception:  # noqa: BLE001
                 logger.exception("[IMWorker] reconcile failed")
+            now = asyncio.get_running_loop().time()
+            if now - last_cleanup >= cleanup_interval:
+                try:
+                    from app.modules.im.service import cleanup_expired_history
+
+                    await cleanup_expired_history()
+                    last_cleanup = now
+                except Exception:  # noqa: BLE001
+                    logger.exception("[IMWorker] history cleanup failed")
+                    last_cleanup = now - cleanup_interval + CLEANUP_RETRY_INTERVAL
             await asyncio.sleep(RECONCILE_INTERVAL)
     finally:
         await shutdown_all()

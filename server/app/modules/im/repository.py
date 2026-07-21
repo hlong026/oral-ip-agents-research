@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,28 @@ async def create_conversation(db: AsyncSession, **fields) -> IMConversation:
     return c
 
 
+async def get_or_create_conversation(db: AsyncSession, **fields) -> IMConversation:
+    """Return the durable account/user/remote conversation, including insert races."""
+    account_id = str(fields["account_id"])
+    user_id = str(fields["user_id"])
+    remote_uid = str(fields["remote_uid"])
+    existing = await get_conversation_by_dy_id(db, account_id, user_id, remote_uid)
+    if existing is not None:
+        return existing
+    conversation = IMConversation(**fields)
+    db.add(conversation)
+    try:
+        await db.commit()
+        await db.refresh(conversation)
+        return conversation
+    except IntegrityError:
+        await db.rollback()
+        existing = await get_conversation_by_dy_id(db, account_id, user_id, remote_uid)
+        if existing is None:
+            raise
+        return existing
+
+
 async def get_conversation(db: AsyncSession, conv_id: str, user_id: str | None = None) -> IMConversation | None:
     q = select(IMConversation).where(IMConversation.id == conv_id)
     if user_id:
@@ -55,13 +77,39 @@ async def get_conversation_by_dy_id(
 
 
 async def list_conversations(
-    db: AsyncSession, user_id: str, page: int = 1, page_size: int = 20
+    db: AsyncSession,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    search: str = "",
+    account_id: str = "",
 ) -> tuple[list[IMConversation], int]:
-    base = select(IMConversation).where(IMConversation.user_id == user_id)
+    conditions = [IMConversation.user_id == user_id]
+    if account_id:
+        conditions.append(IMConversation.account_id == account_id)
+    if search:
+        pattern = f"%{search}%"
+        matching_message = exists(
+            select(IMMessage.id).where(
+                IMMessage.conversation_id == IMConversation.id,
+                IMMessage.user_id == user_id,
+                IMMessage.content.ilike(pattern),
+            )
+        )
+        conditions.append(
+            or_(
+                IMConversation.remote_nickname.ilike(pattern),
+                IMConversation.remote_uid.ilike(pattern),
+                matching_message,
+            )
+        )
+    base = select(IMConversation).where(*conditions)
     count_res = await db.execute(select(func.count()).select_from(base.subquery()))
     total = count_res.scalar() or 0
     res = await db.execute(
-        base.order_by(IMConversation.last_message_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        base.order_by(IMConversation.last_message_at.desc(), IMConversation.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
     )
     return list(res.scalars().all()), total
 
@@ -102,16 +150,76 @@ async def save_message(db: AsyncSession, message: IMMessage) -> None:
 
 
 async def list_messages(
-    db: AsyncSession, conversation_id: str, user_id: str, page: int = 1, page_size: int = 50
+    db: AsyncSession,
+    conversation_id: str,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
 ) -> tuple[list[IMMessage], int]:
-    base = select(IMMessage).where(
+    conditions = [
         IMMessage.conversation_id == conversation_id,
         IMMessage.user_id == user_id,
-    )
+    ]
+    if search:
+        conditions.append(IMMessage.content.ilike(f"%{search}%"))
+    base = select(IMMessage).where(*conditions)
     count_res = await db.execute(select(func.count()).select_from(base.subquery()))
     total = count_res.scalar() or 0
-    res = await db.execute(base.order_by(IMMessage.created_at.desc()).offset((page - 1) * page_size).limit(page_size))
+    res = await db.execute(
+        base.order_by(IMMessage.created_at.desc(), IMMessage.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
     return list(res.scalars().all()), total
+
+
+async def cleanup_history(
+    db: AsyncSession,
+    *,
+    cutoff: datetime,
+    batch_size: int = 1000,
+    max_batches: int = 10,
+) -> tuple[int, int]:
+    """Delete expired terminal history in bounded batches; never remove sendable work."""
+    deleted_messages = 0
+    protected_statuses = ("scheduled", "pending", "failed")
+    for _ in range(max_batches):
+        message_ids = (
+            select(IMMessage.id)
+            .where(
+                IMMessage.created_at < cutoff,
+                IMMessage.send_status.not_in(protected_statuses),
+            )
+            .order_by(IMMessage.created_at.asc(), IMMessage.id.asc())
+            .limit(batch_size)
+        )
+        result = await db.execute(delete(IMMessage).where(IMMessage.id.in_(message_ids)))
+        batch_count = int(getattr(result, "rowcount", 0) or 0)
+        await db.commit()
+        deleted_messages += batch_count
+        if batch_count < batch_size:
+            break
+
+    deleted_conversations = 0
+    for _ in range(max_batches):
+        has_messages = exists(select(IMMessage.id).where(IMMessage.conversation_id == IMConversation.id))
+        conversation_ids = (
+            select(IMConversation.id)
+            .where(
+                IMConversation.last_message_at < cutoff,
+                ~has_messages,
+            )
+            .order_by(IMConversation.last_message_at.asc(), IMConversation.id.asc())
+            .limit(batch_size)
+        )
+        result = await db.execute(delete(IMConversation).where(IMConversation.id.in_(conversation_ids)))
+        batch_count = int(getattr(result, "rowcount", 0) or 0)
+        await db.commit()
+        deleted_conversations += batch_count
+        if batch_count < batch_size:
+            break
+    return deleted_messages, deleted_conversations
 
 
 async def get_message_by_remote_key(

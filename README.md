@@ -32,6 +32,8 @@ uv run python -m app.workers.im_listener
 私信监听意图保存在数据库，实际 WebSocket 连接只由独立监听 Worker 持有；
 Redis 租约保证同一账号不会被多个 Worker 重复监听。生产环境仍受第三阶段
 Go/No-Go 门禁约束，不得仅通过设置 `IM_ENABLED=true` 绕过授权与灰度验收。
+`IM_HISTORY_RETENTION_DAYS` 默认为 90 天，监听 Worker 每
+`IM_CLEANUP_INTERVAL_HOURS` 小时分批清理终态历史；待发送、发送中和失败可重试消息不会被自动清理。
 
 本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的
 ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置 FFmpeg。

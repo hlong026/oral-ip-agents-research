@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -17,6 +17,17 @@ class IMConversation(Base):
     """私信会话（一个绑定账号与一个远端用户的对话）"""
 
     __tablename__ = "im_conversations"
+    __table_args__ = (
+        Index(
+            "uq_im_conversations_owner_remote",
+            "account_id",
+            "user_id",
+            "remote_uid",
+            unique=True,
+            sqlite_where=text("remote_uid <> ''"),
+            postgresql_where=text("remote_uid <> ''"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     account_id: Mapped[str] = mapped_column(String(32), index=True)  # FK → publish_accounts.id

@@ -17,6 +17,10 @@ export default function ImCenterPage() {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [filterAccountId, setFilterAccountId] = useState<string>("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [conversationPage, setConversationPage] = useState(1);
+  const [messagePage, setMessagePage] = useState(1);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { data: accounts } = useQuery({
@@ -26,14 +30,20 @@ export default function ImCenterPage() {
   });
 
   const { data: convData } = useQuery({
-    queryKey: ["im-conversations"],
-    queryFn: () => imApi.conversations(1, 50),
+    queryKey: [
+      "im-conversations",
+      conversationPage,
+      searchTerm,
+      filterAccountId,
+    ],
+    queryFn: () =>
+      imApi.conversations(conversationPage, 30, searchTerm, filterAccountId),
     refetchInterval: 10_000,
   });
 
   const { data: msgData } = useQuery({
-    queryKey: ["im-messages", activeConv?.id],
-    queryFn: () => imApi.messages(activeConv!.id, 1, 100),
+    queryKey: ["im-messages", activeConv?.id, messagePage, searchTerm],
+    queryFn: () => imApi.messages(activeConv!.id, messagePage, 50, searchTerm),
     enabled: !!activeConv,
     refetchInterval: 5_000,
   });
@@ -45,11 +55,7 @@ export default function ImCenterPage() {
     return m;
   }, [accountList]);
 
-  const conversations = useMemo(() => {
-    const items = convData?.items ?? [];
-    if (!filterAccountId) return items;
-    return items.filter((c) => c.accountId === filterAccountId);
-  }, [convData, filterAccountId]);
+  const conversations = convData?.items ?? [];
 
   const messages = (msgData?.items ?? []).slice().reverse();
 
@@ -59,7 +65,14 @@ export default function ImCenterPage() {
 
   const selectConv = (conv: IMConversation) => {
     setActiveConv(conv);
-    if (conv.unreadCount > 0) void imApi.markRead(conv.id);
+    setMessagePage(1);
+    if (conv.unreadCount > 0) {
+      void imApi
+        .markRead(conv.id)
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: ["im-conversations"] }),
+        );
+    }
   };
 
   const handleSend = async () => {
@@ -142,11 +155,29 @@ export default function ImCenterPage() {
         {/* 会话列表 */}
         <div className="glass flex w-72 shrink-0 flex-col overflow-hidden">
           {/* 账号筛选器 */}
-          <div className="border-b border-stroke px-3 py-2">
+          <div className="space-y-2 border-b border-stroke px-3 py-2">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                setSearchTerm(searchInput.trim());
+                setConversationPage(1);
+                setMessagePage(1);
+                setActiveConv(null);
+              }}
+            >
+              <input
+                value={searchInput}
+                onChange={(event) => setSearchInput(event.target.value)}
+                placeholder="搜索昵称、UID 或消息"
+                maxLength={100}
+                className="w-full rounded-lg border border-stroke bg-white/5 px-2.5 py-1.5 text-xs outline-none focus:border-brand-from/50"
+              />
+            </form>
             <select
               value={filterAccountId}
               onChange={(e) => {
                 setFilterAccountId(e.target.value);
+                setConversationPage(1);
                 setActiveConv(null);
               }}
               className="w-full rounded-lg border border-stroke bg-white/5 px-2.5 py-1.5 text-xs outline-none focus:border-brand-from/50"
@@ -162,7 +193,7 @@ export default function ImCenterPage() {
             </select>
           </div>
           <div className="border-b border-stroke px-4 py-2.5 text-sm font-medium">
-            会话（{conversations.length}）
+            会话（{convData?.total ?? 0}）
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {conversations.map((conv) => (
@@ -209,6 +240,29 @@ export default function ImCenterPage() {
               </div>
             )}
           </div>
+          <div className="flex items-center justify-between border-t border-stroke px-3 py-2 text-xs text-text-3">
+            <button
+              className="btn-ghost px-2 py-1"
+              disabled={conversationPage <= 1}
+              onClick={() => {
+                setConversationPage((page) => Math.max(1, page - 1));
+                setActiveConv(null);
+              }}
+            >
+              上一页
+            </button>
+            <span>第 {conversationPage} 页</span>
+            <button
+              className="btn-ghost px-2 py-1"
+              disabled={(convData?.total ?? 0) <= conversationPage * 30}
+              onClick={() => {
+                setConversationPage((page) => page + 1);
+                setActiveConv(null);
+              }}
+            >
+              下一页
+            </button>
+          </div>
         </div>
 
         {/* 对话区 */}
@@ -231,6 +285,27 @@ export default function ImCenterPage() {
                 )}
               </div>
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+                {(msgData?.total ?? 0) > 50 && (
+                  <div className="flex items-center justify-center gap-3 text-xs text-text-3">
+                    <button
+                      className="btn-ghost px-2 py-1"
+                      disabled={messagePage <= 1}
+                      onClick={() =>
+                        setMessagePage((page) => Math.max(1, page - 1))
+                      }
+                    >
+                      较新一页
+                    </button>
+                    <span>第 {messagePage} 页</span>
+                    <button
+                      className="btn-ghost px-2 py-1"
+                      disabled={(msgData?.total ?? 0) <= messagePage * 50}
+                      onClick={() => setMessagePage((page) => page + 1)}
+                    >
+                      更早一页
+                    </button>
+                  </div>
+                )}
                 {messages.map((msg) => (
                   <MessageBubble
                     key={msg.id}

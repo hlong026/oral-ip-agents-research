@@ -389,22 +389,33 @@ export interface IMAutomationStatus {
 }
 
 export const imApi = {
-  conversations: (page = 1, pageSize = 20) =>
-    http.get<{
+  conversations: (page = 1, pageSize = 20, search = "", accountId = "") => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (search) params.set("search", search);
+    if (accountId) params.set("accountId", accountId);
+    return http.get<{
       items: IMConversation[];
       total: number;
       page: number;
       pageSize: number;
-    }>(`/im/conversations?page=${page}&pageSize=${pageSize}`),
-  messages: (conversationId: string, page = 1, pageSize = 50) =>
-    http.get<{
+    }>(`/im/conversations?${params}`);
+  },
+  messages: (conversationId: string, page = 1, pageSize = 50, search = "") => {
+    const params = new URLSearchParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (search) params.set("search", search);
+    return http.get<{
       items: IMMessage[];
       total: number;
       page: number;
       pageSize: number;
-    }>(
-      `/im/conversations/${conversationId}/messages?page=${page}&pageSize=${pageSize}`,
-    ),
+    }>(`/im/conversations/${conversationId}/messages?${params}`);
+  },
   send: (conversationId: string, content: string, msgType = 7) =>
     http.post<IMMessage>(`/im/conversations/${conversationId}/send`, {
       content,

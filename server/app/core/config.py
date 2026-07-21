@@ -98,6 +98,8 @@ class Settings(BaseSettings):
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
     douyin_im_access_key_suffix: str = "f8a69f1719916z"
+    im_history_retention_days: int = 90
+    im_cleanup_interval_hours: int = 24
 
 
 @lru_cache

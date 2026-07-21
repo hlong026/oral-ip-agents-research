@@ -35,10 +35,12 @@ admin_router = APIRouter(prefix="/im", tags=["admin-im"])
 async def list_conversations(
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=100),
+    search: str = Query("", max_length=100),
+    accountId: str = Query("", max_length=32),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    return await service.list_conversations(db, user_id, page, pageSize)
+    return await service.list_conversations(db, user_id, page, pageSize, search, accountId)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=MessagePageOut)
@@ -46,10 +48,11 @@ async def list_messages(
     conversation_id: str,
     page: int = Query(1, ge=1),
     pageSize: int = Query(50, ge=1, le=200),
+    search: str = Query("", max_length=100),
     db: AsyncSession = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    return await service.list_messages(db, user_id, conversation_id, page, pageSize)
+    return await service.list_messages(db, user_id, conversation_id, page, pageSize, search)
 
 
 @router.post("/conversations/{conversation_id}/send", response_model=MessageOut)

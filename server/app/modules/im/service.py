@@ -104,18 +104,44 @@ def rule_to_out(r: IMAutoReplyRule) -> RuleOut:
 # ============ 会话管理 ============
 
 
-async def list_conversations(db: AsyncSession, user_id: str, page: int = 1, page_size: int = 20) -> ConversationPageOut:
-    items, total = await repo.list_conversations(db, user_id, page, page_size)
+async def list_conversations(
+    db: AsyncSession,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+    search: str = "",
+    account_id: str = "",
+) -> ConversationPageOut:
+    items, total = await repo.list_conversations(
+        db,
+        user_id,
+        page,
+        page_size,
+        search=search.strip(),
+        account_id=account_id,
+    )
     return ConversationPageOut(items=[conv_to_out(c) for c in items], total=total, page=page, pageSize=page_size)
 
 
 async def list_messages(
-    db: AsyncSession, user_id: str, conversation_id: str, page: int = 1, page_size: int = 50
+    db: AsyncSession,
+    user_id: str,
+    conversation_id: str,
+    page: int = 1,
+    page_size: int = 50,
+    search: str = "",
 ) -> MessagePageOut:
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
-    items, total = await repo.list_messages(db, conversation_id, user_id, page, page_size)
+    items, total = await repo.list_messages(
+        db,
+        conversation_id,
+        user_id,
+        page,
+        page_size,
+        search=search.strip(),
+    )
     return MessagePageOut(items=[msg_to_out(m) for m in items], total=total, page=page, pageSize=page_size)
 
 
@@ -527,6 +553,22 @@ async def expire_account_credentials(db: AsyncSession, account_id: str, user_id:
     return True
 
 
+async def cleanup_expired_history() -> tuple[int, int]:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, settings.im_history_retention_days))
+    async with SessionLocal() as db:
+        deleted = await repo.cleanup_history(db, cutoff=cutoff)
+    logger.info(
+        "IM history cleanup complete: messages=%d conversations=%d cutoff=%s",
+        deleted[0],
+        deleted[1],
+        cutoff.isoformat(),
+    )
+    return deleted
+
+
 # ============ 消息接收处理（供 Worker 调用） ============
 
 
@@ -553,22 +595,20 @@ async def handle_incoming_message(
             return
 
         # 1. 查找或创建会话
-        conv = await repo.get_conversation_by_dy_id(db, account_id, user_id, remote_uid)
-        if conv is None:
-            conv = await repo.create_conversation(
-                db,
-                account_id=account_id,
-                user_id=user_id,
-                platform="douyin",
-                remote_uid=remote_uid,
-                remote_nickname=remote_nickname,
-                remote_avatar=remote_avatar,
-                dy_conversation_id=dy_conversation_id,
-                dy_conversation_short_id=dy_conversation_short_id,
-                dy_ticket=dy_ticket,
-                last_message_at=datetime.now(UTC),
-                unread_count=0,
-            )
+        conv = await repo.get_or_create_conversation(
+            db,
+            account_id=account_id,
+            user_id=user_id,
+            platform="douyin",
+            remote_uid=remote_uid,
+            remote_nickname=remote_nickname,
+            remote_avatar=remote_avatar,
+            dy_conversation_id=dy_conversation_id,
+            dy_conversation_short_id=dy_conversation_short_id,
+            dy_ticket=dy_ticket,
+            last_message_at=datetime.now(UTC),
+            unread_count=0,
+        )
 
         # 2. 消息落库
         content_json = json.dumps({"text": content}, ensure_ascii=False) if msg_type == 7 else content
@@ -589,6 +629,14 @@ async def handle_incoming_message(
         conv.unread_count = (conv.unread_count or 0) + 1
         if remote_nickname:
             conv.remote_nickname = remote_nickname
+        if remote_avatar:
+            conv.remote_avatar = remote_avatar
+        if dy_conversation_id:
+            conv.dy_conversation_id = dy_conversation_id
+        if dy_conversation_short_id:
+            conv.dy_conversation_short_id = dy_conversation_short_id
+        if dy_ticket:
+            conv.dy_ticket = dy_ticket
         await repo.save_conversation(db, conv)
 
         # 3. 推送前端
