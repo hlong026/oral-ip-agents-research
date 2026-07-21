@@ -24,6 +24,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def init_models() -> None:
     """开发模式自动建表（生产走 Alembic 迁移）"""
     # 触发各模块 models 注册
+    from app.modules.activation import models as _activation  # noqa: F401
     from app.modules.auth import models as _auth  # noqa: F401
     from app.modules.avatar import models as _avatar  # noqa: F401
     from app.modules.billing import models as _billing  # noqa: F401

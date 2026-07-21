@@ -40,6 +40,10 @@ playwright-report/
 # sqlite 本地库
 server/*.db
 
+# temp debug files
+server/_tmp_*
+tmp_*
+
 # os / ide
 .DS_Store
 Thumbs.db

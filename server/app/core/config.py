@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 30
     single_session_kick: bool = False
 
+    # 激活码
+    activation_secret: str = ""  # 激活码 HMAC 签名密钥（空则回退 app_secret）
+
     # LLM
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
@@ -72,7 +75,9 @@ class Settings(BaseSettings):
     pipeline_max_concurrency: int = 5
 
     # 发布模块（social-auto-upload 浏览器自动化）
-    publish_browser_headless: bool = False  # 复用本地 Chrome，默认有头模式
+    # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口
+    # （有头窗口易被用户扫完码后顺手关闭，导致后端轮询页面失效、登录判失败）
+    publish_browser_headless: bool = True
     publish_max_concurrency: int = 2  # 浏览器并发槽位数
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
 

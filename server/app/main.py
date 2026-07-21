@@ -84,6 +84,7 @@ async def healthz() -> dict:
 
 
 # ---- 业务路由 ----
+from app.modules.activation.router import router as activation_router  # noqa: E402
 from app.modules.auth.router import router as auth_router  # noqa: E402
 from app.modules.avatar.router import router as avatar_router  # noqa: E402
 from app.modules.billing.router import router as billing_router  # noqa: E402
@@ -99,7 +100,7 @@ from app.modules.settings.router import router as settings_router  # noqa: E402
 from app.modules.voice.router import router as voice_router  # noqa: E402
 from app.modules.webhook.router import router as webhook_router  # noqa: E402
 
-for r in (auth_router, billing_router, ipasset_router, voice_router, avatar_router,
+for r in (auth_router, activation_router, billing_router, ipasset_router, voice_router, avatar_router,
           content_router, pipeline_router, publish_router, im_router, notify_router,
           dashboard_router, webhook_router, settings_router):
     app.include_router(r, prefix=settings.api_prefix)
