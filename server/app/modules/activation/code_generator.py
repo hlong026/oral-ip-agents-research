@@ -4,6 +4,7 @@
 - 16 字符 base32 随机载荷
 - 4 字符 HMAC 校验位（取前 4 位）
 """
+
 import hashlib
 import hmac
 import secrets
@@ -64,3 +65,9 @@ def generate_batch(count: int) -> list[str]:
     while len(codes) < count:
         codes.add(generate_code())
     return list(codes)
+
+
+def hash_code(code: str) -> str:
+    """以服务端 pepper 对规范化激活码做不可逆索引，避免数据库泄露明文码。"""
+    normalized = code.strip().upper().replace(" ", "")
+    return hmac.new(_get_secret(), normalized.encode("utf-8"), hashlib.sha256).hexdigest()

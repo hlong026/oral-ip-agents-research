@@ -1,5 +1,6 @@
 """billing 出入参"""
-from pydantic import BaseModel
+
+from pydantic import BaseModel, Field
 
 
 class QuotaOut(BaseModel):
@@ -23,3 +24,37 @@ class UsagePageOut(BaseModel):
     total: int
     page: int
     pageSize: int
+
+
+class PricePreviewItemIn(BaseModel):
+    module: str
+    quantity: int = Field(gt=0)
+
+
+class PricePreviewIn(BaseModel):
+    items: list[PricePreviewItemIn] = Field(min_length=1, max_length=20)
+
+
+class ReservationCreateIn(BaseModel):
+    quoteId: str
+    count: int = Field(default=1, ge=1, le=20)
+
+
+class ReservationItemOut(BaseModel):
+    id: str
+    quoteId: str
+    reservedPoints: int
+    status: str
+
+
+class ReservationBatchOut(BaseModel):
+    items: list[ReservationItemOut]
+    availablePoints: float
+
+
+class ReservationStateOut(BaseModel):
+    id: str
+    status: str
+    reservedPoints: int
+    actualPoints: int
+    availablePoints: float

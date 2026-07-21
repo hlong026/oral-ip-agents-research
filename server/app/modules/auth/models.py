@@ -1,4 +1,5 @@
 """auth 模块 ORM"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -20,10 +21,12 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128))
     nickname: Mapped[str] = mapped_column(String(64), default="")
     avatar_char: Mapped[str] = mapped_column(String(4), default="口")
+    role: Mapped[str] = mapped_column(String(16), default="user", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # 激活码扩展字段
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     plan_type: Mapped[str] = mapped_column(String(16), default="none")
+    plan_sku_code: Mapped[str] = mapped_column(String(64), default="")
     plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     device_fingerprint: Mapped[str] = mapped_column(String(64), default="web")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

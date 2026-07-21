@@ -1,4 +1,5 @@
 """content HTTP 层：解析 / 仿写 / 去重 / 选题 / 文案资产"""
+
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +18,17 @@ from .schemas import (
     TopicsIn,
     TopicsOut,
 )
-from .service import create_script, get_script, list_scripts, parse_by_id, parse_upload, parse_url, rewrite, similarity, topics
+from .service import (
+    create_script,
+    get_script,
+    list_scripts,
+    parse_by_id,
+    parse_upload,
+    parse_url,
+    rewrite,
+    similarity,
+    topics,
+)
 
 router = APIRouter(prefix="/content", tags=["content"])
 
@@ -54,18 +65,17 @@ async def api_parse_json(
 
 
 @router.post("/rewrite", response_model=RewriteOut)
-async def api_rewrite(body: RewriteIn, user_id: str = Depends(get_current_user_id),
-                      db: AsyncSession = Depends(get_db)):
+async def api_rewrite(body: RewriteIn, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     return await rewrite(db, user_id, body.text, body.intensity, body.prompt, body.scriptId)
 
 
 @router.post("/similarity", response_model=SimilarityOut)
-async def api_similarity(body: SimilarityIn):
+async def api_similarity(body: SimilarityIn, _user_id: str = Depends(get_current_user_id)):
     return await similarity(body.text)
 
 
 @router.post("/topics", response_model=TopicsOut)
-async def api_topics(body: TopicsIn):
+async def api_topics(body: TopicsIn, _user_id: str = Depends(get_current_user_id)):
     return TopicsOut(topics=await topics(body.keyword))
 
 
@@ -85,6 +95,5 @@ async def api_scripts(user_id: str = Depends(get_current_user_id), db: AsyncSess
 
 
 @router.get("/scripts/{script_id}", response_model=ScriptOut)
-async def api_script(script_id: str, user_id: str = Depends(get_current_user_id),
-                     db: AsyncSession = Depends(get_db)):
+async def api_script(script_id: str, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     return await get_script(db, user_id, script_id)

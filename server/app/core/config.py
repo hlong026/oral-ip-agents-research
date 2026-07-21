@@ -1,4 +1,5 @@
 """全局配置（pydantic-settings，.env 驱动）"""
+
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,6 +11,9 @@ class Settings(BaseSettings):
     # 基础
     app_env: str = "dev"
     app_secret: str = "dev-secret-change-me"
+    config_encryption_key: str = ""  # Provider 密钥专用；生产环境必须与 JWT APP_SECRET 分离
+    bootstrap_admin_phone: str = ""
+    bootstrap_admin_password: str = ""
     api_prefix: str = "/api/v1"
 
     # 数据层
@@ -48,9 +52,9 @@ class Settings(BaseSettings):
     # 飞影数字人（内部代号，用户侧白标不暴露）
     feiying_api_key: str = ""
     feiying_base_url: str = "https://hfw-api.hifly.cc"
-    feiying_poll_interval: float = 5.0      # 轮询间隔（秒）
-    feiying_poll_max_attempts: int = 60     # 最大轮询次数（5分钟超时）
-    feiying_webhook_secret: str = ""        # 回调验签（预留）
+    feiying_poll_interval: float = 5.0  # 轮询间隔（秒）
+    feiying_poll_max_attempts: int = 60  # 最大轮询次数（5分钟超时）
+    feiying_webhook_secret: str = ""  # 回调验签（预留）
 
     # 第三方解析兜底
     parse_api_url: str = ""
@@ -90,3 +94,17 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def validate_runtime_security(settings: Settings) -> None:
+    if settings.app_env == "dev":
+        return
+    missing: list[str] = []
+    if settings.app_secret == "dev-secret-change-me":
+        missing.append("APP_SECRET")
+    if not settings.config_encryption_key:
+        missing.append("CONFIG_ENCRYPTION_KEY")
+    if not settings.activation_secret:
+        missing.append("ACTIVATION_SECRET")
+    if missing:
+        raise RuntimeError("生产环境缺少安全配置：" + ", ".join(missing))

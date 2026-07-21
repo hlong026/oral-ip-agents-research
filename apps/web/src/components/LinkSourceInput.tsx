@@ -7,7 +7,16 @@ import PlatformIcon from "./PlatformIcon";
 /** 上传 SVG（内层左侧图标按钮） */
 function UploadSvg({ className = "" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
       <path d="M12 16V4" />
       <path d="m6 10 6-6 6 6" />
       <path d="M4 20h16" />
@@ -45,21 +54,11 @@ export default function LinkSourceInput({
 
   return (
     <div className="relative">
-      {/* 右上角 API Key 申请跳转 */}
+      {/* 用户端只提供本地文件降级入口。 */}
       <div className="absolute -top-5 right-0">
-        <a
-          href="https://www.douyidou.cc"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-0.5 text-[10px] text-text-3 transition-colors hover:text-brand-to"
-        >
-          获取解析 API Key
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-2.5 w-2.5">
-            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-            <polyline points="15 3 21 3 21 9" />
-            <line x1="10" y1="14" x2="21" y2="3" />
-          </svg>
-        </a>
+        <span className="text-[10px] text-text-3">
+          解析不可用时可上传本地文件
+        </span>
       </div>
       {/* 内层上传图标按钮 */}
       <button
@@ -85,7 +84,8 @@ export default function LinkSourceInput({
       />
       {platform && (
         <span className="chip absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-1.5 border-brand-to/40 text-brand-to">
-          <PlatformIcon platform={platform} size={14} /> 已识别 · {PLATFORM_NAMES[platform]}
+          <PlatformIcon platform={platform} size={14} /> 已识别 ·{" "}
+          {PLATFORM_NAMES[platform]}
         </span>
       )}
       <input

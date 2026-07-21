@@ -5,12 +5,14 @@ Provider 注册表（06 文档 §10.3）
 - 新增供应商 = 新建文件实现 Protocol + 在此注册一行
 - 日志：降级链 WARNING/ERROR（§10.6.8-A #4）+ 调用耗时（§10.6.8-B #5）
 """
+
 import time
 
 from app.core.config import get_settings
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
 
+from .aliyun_asr import AliyunASR
 from .base import (
     ASRProvider,
     AvatarProvider,
@@ -20,17 +22,16 @@ from .base import (
     PublishDriver,
     VoiceProvider,
 )
-from .im.base import IMProvider
-from .im.mock_im import MockIMProvider
-from .im.douyin_im import DouyinIMProvider
-from .aliyun_asr import AliyunASR
 from .douyidou import DouyidouParser
-from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPublishDriver, MockVoice
-from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
 from .hifly import HiFlyAvatar, HiFlyVoice
+from .im.base import IMProvider
+from .im.douyin_im import DouyinIMProvider
+from .im.mock_im import MockIMProvider
+from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPublishDriver, MockVoice
 from .publish.douyin import DouyinPublishDriver
-from .publish.xiaohongshu import XiaohongshuPublishDriver
 from .publish.tencent import TencentPublishDriver
+from .publish.xiaohongshu import XiaohongshuPublishDriver
+from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
 
 logger = get_logger("oral.providers.registry")
 
@@ -60,13 +61,50 @@ class ProviderRegistry:
             "douyin": DouyinIMProvider() if _has_im_key else MockIMProvider(),
         }
 
-    async def run_with_fallback(self, kind: str, chain: list, fn_name: str, *args,
-                                trace_id: str = "", task_id: str = "", **kwargs):
+    async def provider_enabled(self, provider_name: str) -> bool:
+        """真实 Provider 必须服从管理端开关；开发环境保留 Mock 降级体验。"""
+        if get_settings().app_env == "dev":
+            return True
+        provider_switches = {
+            "douyidou": "douyidou_enabled",
+        }
+        switch = provider_switches.get(provider_name)
+        if switch is None:
+            return True
+        from app.core.dynamic_config import get_config
+
+        return (await get_config(switch, "false")).lower() == "true"
+
+    async def run_with_fallback(
+        self, kind: str, chain: list, fn_name: str, *args, trace_id: str = "", task_id: str = "", **kwargs
+    ):
         """沿降级链执行；StepRecoverableError 触发切换，降级事件推任务中心"""
         from .base import StepRecoverableError
 
+        provider_switches = {
+            "llm": "deepseek_enabled",
+            "asr": "dashscope_enabled",
+            "voice": "feiying_enabled",
+            "avatar": "feiying_enabled",
+        }
+        switch = provider_switches.get(kind)
+        if get_settings().app_env != "dev" and switch:
+            from app.core.dynamic_config import get_config
+
+            if (await get_config(switch, "false")).lower() != "true":
+                raise StepRecoverableError(f"{kind} provider is disabled by administrator")
+
         last_err: Exception | None = None
         for idx, provider in enumerate(chain):
+            if not await self.provider_enabled(provider.name):
+                logger.warning(
+                    "provider_skipped_disabled",
+                    kind=kind,
+                    provider_name=provider.name,
+                    trace_id=trace_id,
+                    task_id=task_id,
+                )
+                continue
             try:
                 t0 = time.perf_counter()
                 result = await getattr(provider, fn_name)(*args, **kwargs)
@@ -92,11 +130,17 @@ class ProviderRegistry:
                         trace_id=trace_id,
                         task_id=task_id,
                     )
-                    await publish(CHANNEL_TASKS, {
-                        "kind": "provider_fallback", "provider_kind": kind,
-                        "to": provider.name, "taskId": task_id, "traceId": trace_id,
-                        "message": f"{kind} 已降级到 {provider.name}",
-                    })
+                    await publish(
+                        CHANNEL_TASKS,
+                        {
+                            "kind": "provider_fallback",
+                            "provider_kind": kind,
+                            "to": provider.name,
+                            "taskId": task_id,
+                            "traceId": trace_id,
+                            "message": f"{kind} 已降级到 {provider.name}",
+                        },
+                    )
                 return result, provider.name
             except StepRecoverableError as e:
                 # 降级链中某 Provider 失败：记录 WARNING

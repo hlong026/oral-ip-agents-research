@@ -52,7 +52,9 @@ function NotificationBell() {
           </div>
           <div className="max-h-80 overflow-y-auto">
             {(list ?? []).length === 0 && (
-              <div className="px-4 py-6 text-center text-xs text-text-3">暂无通知</div>
+              <div className="px-4 py-6 text-center text-xs text-text-3">
+                暂无通知
+              </div>
             )}
             {(list ?? []).map((n) => (
               <button
@@ -63,12 +65,20 @@ function NotificationBell() {
                 <div className="flex items-center gap-2">
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${
-                      n.level === "error" ? "bg-danger" : n.level === "warn" ? "bg-warning" : "bg-info"
+                      n.level === "error"
+                        ? "bg-danger"
+                        : n.level === "warn"
+                          ? "bg-warning"
+                          : "bg-info"
                     }`}
                   />
                   <span className="flex-1 truncate text-sm">{n.title}</span>
                 </div>
-                {n.body && <div className="mt-1 line-clamp-2 text-xs text-text-3">{n.body}</div>}
+                {n.body && (
+                  <div className="mt-1 line-clamp-2 text-xs text-text-3">
+                    {n.body}
+                  </div>
+                )}
               </button>
             ))}
           </div>
@@ -96,12 +106,15 @@ export default function Topbar() {
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-stroke px-6">
       <div className="relative w-80 max-w-full">
-        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3">⌕</span>
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3">
+          ⌕
+        </span>
         <input
           className="input h-9 pl-9"
           placeholder="搜索任务 / 文案 / 资产…"
           onKeyDown={(e) => {
-            if (e.key === "Enter") navigate(`/tasks?q=${(e.target as HTMLInputElement).value}`);
+            if (e.key === "Enter")
+              navigate(`/tasks?q=${(e.target as HTMLInputElement).value}`);
           }}
         />
       </div>
@@ -115,7 +128,9 @@ export default function Topbar() {
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-grad text-sm font-bold text-white">
             {user?.avatarChar || user?.nickname?.[0] || "U"}
           </span>
-          <span className="max-w-24 truncate text-sm">{user?.nickname || "账号"}</span>
+          <span className="max-w-24 truncate text-sm">
+            {user?.nickname || "账号"}
+          </span>
         </button>
         {menuOpen && (
           <div className="glass-strong absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden p-1">
@@ -131,11 +146,11 @@ export default function Topbar() {
             <button
               onClick={() => {
                 setMenuOpen(false);
-                navigate("/settings");
+                navigate("/pricing");
               }}
               className="block w-full rounded-lg px-3 py-2 text-left text-sm text-text-2 hover:bg-white/5 hover:text-text-1"
             >
-              系统设置
+              套餐与积分
             </button>
             <button
               onClick={logout}

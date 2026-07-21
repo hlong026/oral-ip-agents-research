@@ -5,9 +5,15 @@
 - 合规红线：克隆无 consent_token 被拒绝（C8/C10）
 - F-405：统一 PipelineTask 模型 8 步状态机 + 取消
 """
+
 import uuid
+from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
+
+from app.core.db import SessionLocal
+from app.core.security import hash_password
+from app.modules.auth.models import User
 
 STEP_ORDER = ["parse", "asr", "rewrite", "voice", "avatar", "compose", "edit", "publish"]
 
@@ -17,10 +23,26 @@ def _phone() -> str:
 
 
 async def _register(client: AsyncClient, phone: str) -> dict:
-    r = await client.post(
-        "/api/v1/auth/register",
-        json={"phone": phone, "password": "Test@12345", "nickname": "冒烟测试"},
-    )
+    password = "Test@12345"
+    async with SessionLocal() as db:
+        user = User(
+            phone=phone,
+            password_hash=hash_password(password),
+            nickname="冒烟测试",
+            avatar_char="冒",
+            role="user",
+            plan_type="trial",
+            plan_expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+        db.add(user)
+        await db.flush()
+        from app.modules.billing.service import grant_initial_quota
+        from app.modules.ipasset.service import create_default_persona
+
+        await grant_initial_quota(db, user.id)
+        await create_default_persona(db, user.id, user.nickname)
+        await db.commit()
+    r = await client.post("/api/v1/auth/login", json={"phone": phone, "password": password})
     assert r.status_code == 200, r.text
     return r.json()
 

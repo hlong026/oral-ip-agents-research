@@ -1,4 +1,5 @@
 """pipeline 模块 ORM（06 文档 §10.2 流水线引擎）"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -18,8 +19,14 @@ STEP_ORDER = ["parse", "asr", "rewrite", "voice", "avatar", "compose", "edit", "
 # UI 7 步映射: 链接/选题(parse+asr) → 文案(rewrite) → 声音(voice) → 数字人(avatar)
 #              → 合成(compose) → 剪辑(edit) → 发布(publish)
 UI_STEP_LABELS = {
-    "parse": "链接/选题", "asr": "转写", "rewrite": "文案", "voice": "声音",
-    "avatar": "数字人", "compose": "合成", "edit": "剪辑", "publish": "发布",
+    "parse": "链接/选题",
+    "asr": "转写",
+    "rewrite": "文案",
+    "voice": "声音",
+    "avatar": "数字人",
+    "compose": "合成",
+    "edit": "剪辑",
+    "publish": "发布",
 }
 
 
@@ -43,10 +50,11 @@ class PipelineTask(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     # pending | running | waiting_confirm | done | failed | canceled
     current_step: Mapped[str] = mapped_column(String(16), default="")
-    steps_json: Mapped[str] = mapped_column(Text, default="[]")   # StepState[8]
+    steps_json: Mapped[str] = mapped_column(Text, default="[]")  # StepState[8]
     artifacts_json: Mapped[str] = mapped_column(Text, default="{}")  # ctx.artifacts 持久化
     compute: Mapped[str] = mapped_column(String(8), default="cloud")  # MVP 恒 cloud
     quota_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    reservation_id: Mapped[str] = mapped_column(String(32), default="", index=True)
     randomize: Mapped[bool] = mapped_column(Boolean, default=False)  # 差异化随机化（C5）
     batch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), default=new_id)
@@ -54,4 +62,5 @@ class PipelineTask(Base):
     publish_at: Mapped[str] = mapped_column(String(32), default="")  # ISO 定时（F-503/F-722 预留）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )

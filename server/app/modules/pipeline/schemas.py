@@ -1,4 +1,5 @@
 """pipeline 出入参"""
+
 from pydantic import BaseModel
 
 
@@ -15,6 +16,7 @@ class CreatePipelineIn(BaseModel):
     publishAt: str | None = None
     randomize: bool = False
     count: int = 1  # 批量（F-406，≥20 队列）
+    quoteId: str | None = None
 
 
 class StepStateOut(BaseModel):

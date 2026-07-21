@@ -14,11 +14,11 @@ import ImCenterPage from "./pages/ImCenterPage";
 import ImRulesPage from "./pages/ImRulesPage";
 import LoginPage from "./pages/LoginPage";
 import PersonasPage from "./pages/PersonasPage";
+import PricingPage from "./pages/PricingPage";
 import PublishAccountsPage from "./pages/PublishAccountsPage";
 import PublishJobsPage from "./pages/PublishJobsPage";
 import ScriptDetailPage from "./pages/ScriptDetailPage";
 import ScriptsPage from "./pages/ScriptsPage";
-import SettingsPage from "./pages/SettingsPage";
 import TaskDetailPage from "./pages/TaskDetailPage";
 import TasksPage from "./pages/TasksPage";
 import TemplatesPage from "./pages/TemplatesPage";
@@ -39,7 +39,8 @@ function RequireAuth({ children }: { children: JSX.Element }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!user)
+    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   return children;
 }
 
@@ -73,7 +74,7 @@ export default function App() {
         <Route path="/im" element={<ImCenterPage />} />
         <Route path="/im/rules" element={<ImRulesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>

@@ -1,4 +1,5 @@
 """activation 模块 ORM（激活码 + 批次 + 订阅记录）"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -18,10 +19,13 @@ class ActivationCode(Base):
     __tablename__ = "activation_codes"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # 字段名为兼容既有表保留；新数据只保存 64 位 HMAC 摘要，不保存明文激活码。
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     plan_type: Mapped[str] = mapped_column(String(16), default="monthly")
     quota_amount: Mapped[float] = mapped_column(Float, default=0.0)
     duration_days: Mapped[int] = mapped_column(Integer, default=30)
+    sku_version_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    plan_sku_code: Mapped[str] = mapped_column(String(64), default="")
     status: Mapped[str] = mapped_column(String(16), default="unused", index=True)
     batch_id: Mapped[str] = mapped_column(String(32), default="", index=True)
     channel: Mapped[str] = mapped_column(String(32), default="")
@@ -41,6 +45,8 @@ class ActivationBatch(Base):
     plan_type: Mapped[str] = mapped_column(String(16), default="monthly")
     quota_amount: Mapped[float] = mapped_column(Float, default=0.0)
     duration_days: Mapped[int] = mapped_column(Integer, default=30)
+    sku_version_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    plan_sku_code: Mapped[str] = mapped_column(String(64), default="")
     total_count: Mapped[int] = mapped_column(Integer, default=0)
     used_count: Mapped[int] = mapped_column(Integer, default=0)
     channel: Mapped[str] = mapped_column(String(32), default="")
@@ -58,6 +64,12 @@ class UserSubscription(Base):
     user_id: Mapped[str] = mapped_column(String(32), index=True)
     code_id: Mapped[str] = mapped_column(String(32))
     plan_type: Mapped[str] = mapped_column(String(16))
+    sku_version_id: Mapped[str] = mapped_column(String(32), default="")
+    plan_sku_code: Mapped[str] = mapped_column(String(64), default="")
     quota_granted: Mapped[float] = mapped_column(Float, default=0.0)
     duration_days: Mapped[int] = mapped_column(Integer, default=0)
+    monthly_points: Mapped[int] = mapped_column(Integer, default=0)
+    grants_issued: Mapped[int] = mapped_column(Integer, default=0)
+    next_grant_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

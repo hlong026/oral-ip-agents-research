@@ -1,19 +1,30 @@
-import { billingApi } from "@oral/api-client";
+import { activationApi, billingApi } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 /** 账号与额度（F-602：额度查询 / 用量明细 / CSV 导出） */
 export default function AccountPage() {
   const { user } = useSession();
   const [page, setPage] = useState(1);
-  const { data: quota } = useQuery({ queryKey: ["quota"], queryFn: () => billingApi.quota() });
+  const { data: quota } = useQuery({
+    queryKey: ["quota"],
+    queryFn: () => billingApi.quota(),
+  });
+  const { data: subscription } = useQuery({
+    queryKey: ["subscription"],
+    queryFn: () => activationApi.subscription(),
+  });
   const { data: usage } = useQuery({
     queryKey: ["usage", page],
     queryFn: () => billingApi.usage(page, 10),
   });
 
-  const usedPct = quota && quota.total > 0 ? Math.round((quota.usedThisMonth / quota.total) * 100) : 0;
+  const usedPct =
+    quota && quota.total > 0
+      ? Math.round((quota.usedThisMonth / quota.total) * 100)
+      : 0;
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -32,13 +43,49 @@ export default function AccountPage() {
             </div>
           </div>
           <div className="mt-4 border-t border-stroke pt-3 text-xs text-text-3">
-            注册时间：{user?.createdAt ? new Date(user.createdAt).toLocaleDateString("zh-CN") : "—"}
+            注册时间：
+            {user?.createdAt
+              ? new Date(user.createdAt).toLocaleDateString("zh-CN")
+              : "—"}
           </div>
         </div>
 
-        {/* 额度卡 */}
+        {/* 套餐与额度卡 */}
         <div className="glass p-5">
-          <div className="text-sm text-text-2">算力余额</div>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm text-text-2">当前套餐</div>
+              <div className="mt-1 text-lg font-bold text-text-1">
+                {subscription?.planName || subscription?.planType || "未激活"}
+              </div>
+            </div>
+            <Link to="/pricing" className="btn-ghost px-3 py-1 text-xs">
+              续费/充值
+            </Link>
+          </div>
+          <div className="mt-3 grid gap-1 text-xs text-text-3">
+            <span>
+              到期时间：
+              {subscription?.planExpiresAt
+                ? new Date(subscription.planExpiresAt).toLocaleDateString(
+                    "zh-CN",
+                  )
+                : "—"}
+            </span>
+            <span>
+              下次发放：
+              {subscription?.nextGrantAt
+                ? new Date(subscription.nextGrantAt).toLocaleDateString("zh-CN")
+                : "—"}
+            </span>
+            {(subscription?.monthlyPoints ?? 0) > 0 && (
+              <span>
+                月度积分：{subscription!.monthlyPoints!.toLocaleString()} 点
+              </span>
+            )}
+          </div>
+
+          <div className="mt-4 text-sm text-text-2">算力余额</div>
           <div className="text-grad mt-1 text-3xl font-black">
             {(quota?.balance ?? 0).toLocaleString()}
             <span className="ml-1 text-sm font-normal text-text-3">点</span>
@@ -50,12 +97,11 @@ export default function AccountPage() {
             />
           </div>
           <div className="mt-2 flex justify-between text-xs text-text-3">
-            <span>本月已用 {(quota?.usedThisMonth ?? 0).toLocaleString()} 点</span>
+            <span>
+              本月已用 {(quota?.usedThisMonth ?? 0).toLocaleString()} 点
+            </span>
             <span>累计 {(quota?.total ?? 0).toLocaleString()} 点</span>
           </div>
-          <button className="btn-primary mt-4 w-full" disabled title="支付渠道接入中">
-            充值（支付渠道接入中）
-          </button>
         </div>
       </div>
 
@@ -63,7 +109,11 @@ export default function AccountPage() {
       <div className="glass overflow-hidden">
         <div className="flex items-center justify-between border-b border-stroke px-5 py-3">
           <span className="font-medium">用量明细</span>
-          <a href={billingApi.exportCsvUrl()} className="btn-ghost px-3 py-1 text-xs" download>
+          <a
+            href={billingApi.exportCsvUrl()}
+            className="btn-ghost px-3 py-1 text-xs"
+            download
+          >
             导出 CSV
           </a>
         </div>
@@ -79,15 +129,28 @@ export default function AccountPage() {
           </thead>
           <tbody>
             {(usage?.items ?? []).map((u) => (
-              <tr key={u.id} className="border-b border-stroke/40 last:border-0">
-                <td className="px-5 py-2.5 text-text-2">{new Date(u.createdAt).toLocaleString("zh-CN")}</td>
+              <tr
+                key={u.id}
+                className="border-b border-stroke/40 last:border-0"
+              >
+                <td className="px-5 py-2.5 text-text-2">
+                  {new Date(u.createdAt).toLocaleString("zh-CN")}
+                </td>
                 <td className="px-5 py-2.5">{u.step}</td>
                 <td className="px-5 py-2.5">
-                  <span className="chip">{u.compute === "cloud" ? "云端" : "本地"}</span>
+                  <span className="chip">
+                    {u.compute === "cloud" ? "云端" : "本地"}
+                  </span>
                 </td>
                 <td className="px-5 py-2.5 text-text-3">{u.resolution}</td>
-                <td className={`px-5 py-2.5 text-right font-mono ${u.points < 0 ? "text-success" : "text-text-1"}`}>
-                  {u.points > 0 ? `-${u.points}` : u.points === 0 ? "0（免扣）" : `+${-u.points}（退还）`}
+                <td
+                  className={`px-5 py-2.5 text-right font-mono ${u.points < 0 ? "text-success" : "text-text-1"}`}
+                >
+                  {u.points > 0
+                    ? `-${u.points}`
+                    : u.points === 0
+                      ? "0（免扣）"
+                      : `+${-u.points}（退还）`}
                 </td>
               </tr>
             ))}
@@ -102,7 +165,11 @@ export default function AccountPage() {
         </table>
         {(usage?.total ?? 0) > 10 && (
           <div className="flex items-center justify-end gap-2 border-t border-stroke px-5 py-3 text-sm">
-            <button className="btn-ghost px-3 py-1" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            <button
+              className="btn-ghost px-3 py-1"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
               上一页
             </button>
             <span className="text-text-3">{page}</span>

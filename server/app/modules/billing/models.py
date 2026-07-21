@@ -1,8 +1,9 @@
 """billing 模块 ORM（06 文档 §8.6 / §11.2 扣费事务）"""
+
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -49,6 +50,72 @@ class QuotaUsage(Base):
     resolution: Mapped[str] = mapped_column(String(16), default="1080p")
     points: Mapped[float] = mapped_column(Float)  # 正=扣减，负=退还
     compute: Mapped[str] = mapped_column(String(8), default="cloud")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class PriceQuote(Base):
+    """用户报价快照；任务执行始终引用该版本，不追随后来发布的新价格。"""
+
+    __tablename__ = "price_quotes"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    catalog_version_id: Mapped[str] = mapped_column(String(32), index=True)
+    price_version: Mapped[str] = mapped_column(String(64))
+    items_json: Mapped[str] = mapped_column(Text)
+    estimated_points: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="quoted", index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class CreditReservation(Base):
+    """任务积分冻结；状态迁移只允许 reserved → settled/released。"""
+
+    __tablename__ = "credit_reservations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    quote_id: Mapped[str] = mapped_column(String(64), index=True)
+    task_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    reserved_points: Mapped[int] = mapped_column(Integer)
+    actual_points: Mapped[int] = mapped_column(Integer, default=0)
+    allocations_json: Mapped[str] = mapped_column(Text, default="[]")
+    status: Mapped[str] = mapped_column(String(16), default="reserved", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CreditGrant(Base):
+    """套餐、充值和人工调整的积分批次，为后续按到期日消费保留来源。"""
+
+    __tablename__ = "credit_grants"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    source_type: Mapped[str] = mapped_column(String(24), index=True)
+    source_id: Mapped[str] = mapped_column(String(64), default="")
+    granted_points: Mapped[int] = mapped_column(Integer)
+    remaining_points: Mapped[int] = mapped_column(Integer)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class CreditLedger(Base):
+    """不可变积分流水；所有冻结、结算、释放和发放都追加记录。"""
+
+    __tablename__ = "credit_ledger"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    event_type: Mapped[str] = mapped_column(String(24), index=True)
+    points_delta: Mapped[int] = mapped_column(Integer)
+    reference_type: Mapped[str] = mapped_column(String(24), default="")
+    reference_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    price_version: Mapped[str] = mapped_column(String(64), default="")
+    task_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_by: Mapped[str] = mapped_column(String(32), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 

@@ -4,9 +4,14 @@
 - Provider 运行时通过 get_config(key) 读取凭据
 - 缓存 60s 自动失效 / 设置保存时主动失效
 """
+
 import asyncio
+import base64
+import hashlib
 import logging
 import time
+
+from cryptography.fernet import Fernet, InvalidToken
 
 logger = logging.getLogger("oral.core.dynamic_config")
 
@@ -16,6 +21,35 @@ _cache_loaded: bool = False  # 标记是否已成功加载过（解决空表时 
 _cache_generation: int = 0  # invalidate 时递增，防止并发加载覆盖新值
 _load_lock = asyncio.Lock()
 _CACHE_TTL = 60.0  # 秒
+_ENC_PREFIX = "enc:v1:"
+
+
+def _fernet() -> Fernet:
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    encryption_secret = settings.config_encryption_key
+    if not encryption_secret and settings.app_env != "dev":
+        raise RuntimeError("生产环境必须配置 CONFIG_ENCRYPTION_KEY")
+    secret = (encryption_secret or settings.app_secret).encode("utf-8")
+    key = base64.urlsafe_b64encode(hashlib.sha256(secret).digest())
+    return Fernet(key)
+
+
+def encrypt_config_value(value: str) -> str:
+    if not value or value.startswith(_ENC_PREFIX):
+        return value
+    return _ENC_PREFIX + _fernet().encrypt(value.encode("utf-8")).decode("utf-8")
+
+
+def decrypt_config_value(value: str) -> str:
+    if not value or not value.startswith(_ENC_PREFIX):
+        return value
+    try:
+        return _fernet().decrypt(value.removeprefix(_ENC_PREFIX).encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        logger.warning("provider_config_decrypt_failed")
+        return ""
 
 
 def invalidate_cache() -> None:
@@ -37,7 +71,7 @@ async def _load_from_db() -> dict[str, str]:
     async with SessionLocal() as db:
         result = await db.execute(select(ProviderConfig))
         rows = result.scalars().all()
-        return {row.key: row.value for row in rows}
+        return {row.key: decrypt_config_value(row.value) for row in rows}
 
 
 async def get_config(key: str, default: str = "") -> str:
@@ -69,6 +103,7 @@ async def get_config(key: str, default: str = "") -> str:
 
     # 回退：从 .env 静态配置读取（兼容未迁移场景）
     from app.core.config import get_settings
+
     settings = get_settings()
     return str(getattr(settings, key, default) or default)
 
