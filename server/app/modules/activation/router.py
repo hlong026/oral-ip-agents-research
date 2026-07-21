@@ -1,0 +1,165 @@
+"""activation HTTP 路由（用户侧 + 管理侧）"""
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.db import get_db
+from app.core.deps import get_current_user_id
+
+from . import repository as repo
+from . import service
+from .schemas import (
+    ActivateIn,
+    ActivateOut,
+    BatchCreateIn,
+    BatchGenerateOut,
+    BatchOut,
+    CodeInfoOut,
+    CodeOut,
+    CodeStatsOut,
+    RedeemIn,
+    RedeemOut,
+    SubscriptionOut,
+    ValidateCodeIn,
+)
+
+router = APIRouter(prefix="/activation", tags=["activation"])
+
+
+# ---------- 用户侧 ----------
+
+@router.post("/validate-code", response_model=CodeInfoOut)
+async def api_validate_code(body: ValidateCodeIn, db: AsyncSession = Depends(get_db)):
+    """预校验激活码有效性（无需登录）"""
+    return await service.validate_code(db, body.code)
+
+
+@router.post("/activate", response_model=ActivateOut)
+async def api_activate(body: ActivateIn, db: AsyncSession = Depends(get_db)):
+    """激活码注册（首次开户，无需登录）"""
+    return await service.activate(
+        db, body.code, body.phone, body.password, body.nickname, body.deviceFingerprint
+    )
+
+
+@router.post("/redeem", response_model=RedeemOut)
+async def api_redeem(
+    body: RedeemIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """已登录用户兑换新码（续费/充值）"""
+    return await service.redeem(db, user_id, body.code)
+
+
+@router.get("/subscription", response_model=SubscriptionOut)
+async def api_subscription(
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """查询当前订阅状态"""
+    return await service.get_subscription(db, user_id)
+
+
+# ---------- 管理侧（TODO: 后续加 admin 鉴权） ----------
+
+@router.post("/admin/batch", response_model=BatchGenerateOut)
+async def api_generate_batch(
+    body: BatchCreateIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量生成激活码"""
+    return await service.generate_batch(
+        db, body.name, body.planType, body.quotaAmount, body.durationDays,
+        body.count, body.channel, body.codeExpiresAt, created_by=user_id,
+    )
+
+
+@router.get("/admin/codes")
+async def api_list_codes(
+    status: str | None = Query(None),
+    batchId: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(50, ge=1, le=200),
+    _user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """码列表（分页/筛选）"""
+    codes, total = await repo.list_codes(db, status=status, batch_id=batchId, page=page, page_size=pageSize)
+    return {
+        "items": [_code_to_out(c) for c in codes],
+        "total": total,
+        "page": page,
+        "pageSize": pageSize,
+    }
+
+
+@router.get("/admin/batches")
+async def api_list_batches(
+    page: int = Query(1, ge=1),
+    pageSize: int = Query(50, ge=1, le=200),
+    _user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """批次列表"""
+    batches, total = await repo.list_batches(db, page=page, page_size=pageSize)
+    return {
+        "items": [_batch_to_out(b) for b in batches],
+        "total": total,
+        "page": page,
+        "pageSize": pageSize,
+    }
+
+
+@router.put("/admin/codes/{code_id}/revoke")
+async def api_revoke_code(
+    code_id: str,
+    _user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """作废单个码"""
+    await service.revoke_code_by_id(db, code_id)
+    return {"ok": True}
+
+
+@router.put("/admin/batches/{batch_id}/revoke")
+async def api_revoke_batch(
+    batch_id: str,
+    _user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """批量作废"""
+    count = await service.revoke_batch_codes(db, batch_id)
+    return {"ok": True, "revoked": count}
+
+
+@router.get("/admin/stats", response_model=CodeStatsOut)
+async def api_stats(
+    _user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """码统计"""
+    return await service.get_stats(db)
+
+
+# ---------- 序列化辅助 ----------
+
+def _code_to_out(c) -> CodeOut:
+    from datetime import UTC
+    return CodeOut(
+        id=c.id, code=c.code, planType=c.plan_type, quotaAmount=c.quota_amount,
+        durationDays=c.duration_days, status=c.status, channel=c.channel,
+        boundUserId=c.bound_user_id,
+        activatedAt=c.activated_at.astimezone(UTC).isoformat() if c.activated_at else None,
+        expiresAt=c.expires_at.astimezone(UTC).isoformat() if c.expires_at else None,
+        createdAt=c.created_at.astimezone(UTC).isoformat(),
+    )
+
+
+def _batch_to_out(b) -> BatchOut:
+    from datetime import UTC
+    return BatchOut(
+        id=b.id, name=b.name, planType=b.plan_type, quotaAmount=b.quota_amount,
+        durationDays=b.duration_days, totalCount=b.total_count, usedCount=b.used_count,
+        channel=b.channel, createdAt=b.created_at.astimezone(UTC).isoformat(),
+    )

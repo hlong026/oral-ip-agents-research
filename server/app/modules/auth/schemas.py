@@ -30,3 +30,6 @@ class UserOut(BaseModel):
     nickname: str
     avatarChar: str
     createdAt: str
+    planType: str = "none"
+    planExpiresAt: str | None = None
+    activatedAt: str | None = None

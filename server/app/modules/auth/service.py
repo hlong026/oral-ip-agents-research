@@ -103,4 +103,7 @@ def to_out(user: User) -> UserOut:
         nickname=user.nickname,
         avatarChar=user.avatar_char,
         createdAt=user.created_at.astimezone(UTC).isoformat(),
+        planType=getattr(user, "plan_type", "none") or "none",
+        planExpiresAt=user.plan_expires_at.astimezone(UTC).isoformat() if getattr(user, "plan_expires_at", None) else None,
+        activatedAt=user.activated_at.astimezone(UTC).isoformat() if getattr(user, "activated_at", None) else None,
     )

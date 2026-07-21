@@ -21,6 +21,11 @@ class User(Base):
     nickname: Mapped[str] = mapped_column(String(64), default="")
     avatar_char: Mapped[str] = mapped_column(String(4), default="口")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 激活码扩展字段
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    plan_type: Mapped[str] = mapped_column(String(16), default="none")
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    device_fingerprint: Mapped[str] = mapped_column(String(64), default="web")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
