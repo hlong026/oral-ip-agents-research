@@ -38,3 +38,18 @@ def test_production_requires_webhook_signature_secret() -> None:
 
     with pytest.raises(RuntimeError, match="FEIYING_WEBHOOK_SECRET"):
         validate_runtime_security(settings)
+
+
+def test_production_rejects_im_until_compliance_go() -> None:
+    settings = Settings(
+        app_env="prod",
+        app_secret="production-app-secret",
+        config_encryption_key="provider-config-key",
+        activation_secret="activation-key",
+        publish_session_encryption_key="publish-session-key",
+        feiying_webhook_secret="webhook-secret",
+        im_enabled=True,
+    )
+
+    with pytest.raises(RuntimeError, match="第三阶段合规结论为 No-Go"):
+        validate_runtime_security(settings)
