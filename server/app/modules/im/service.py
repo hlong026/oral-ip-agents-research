@@ -549,12 +549,20 @@ async def _generate_reply(db: AsyncSession, rule: IMAutoReplyRule, incoming_text
     if rule.reply_mode == "template":
         return rule.reply_template
 
-    # LLM 模式：注入 IP 人设上下文
+    # LLM mode is blocked unless the current IpAsset persona is readable.
+    try:
+        persona_ctx = await _get_persona_context(db, conv.user_id)
+    except Exception as error:  # noqa: BLE001
+        logger.warning("persona unavailable: user=%s error=%s", conv.user_id[:8], error.__class__.__name__)
+        return rule.reply_template or ""
+    if not persona_ctx:
+        logger.warning("persona unavailable: user=%s no active persona", conv.user_id[:8])
+        return rule.reply_template or ""
+
     try:
         llm = registry.get("llm")
-        persona_ctx = await _get_persona_context(db, conv.user_id)
         base_prompt = rule.llm_prompt or "请简洁友好地回复用户的私信。"
-        prompt = f"{persona_ctx}\n{base_prompt}" if persona_ctx else base_prompt
+        prompt = f"{persona_ctx}\n{base_prompt}"
         reply = await llm.rewrite(text=incoming_text, intensity="light", prompt=prompt)
         return reply[:500]  # 限制长度
     except Exception as e:  # noqa: BLE001
@@ -562,21 +570,11 @@ async def _generate_reply(db: AsyncSession, rule: IMAutoReplyRule, incoming_text
         return rule.reply_template or ""
 
 
-async def _get_persona_context(db: AsyncSession, user_id: str) -> str:
-    """#5 从 ipasset 模块读取当前激活 IP 人设定义"""
-    try:
-        from app.modules.ipasset import repository as ip_repo
-        from app.modules.ipasset import service as ip_service
+async def _get_persona_context(db: AsyncSession, user_id: str) -> str | None:
+    """Read the current persona through the IpAsset service boundary."""
+    from app.modules.ipasset import service as ip_service
 
-        persona_id = await ip_service.get_active_persona_id(db, user_id)
-        if not persona_id:
-            return ""
-        persona = await ip_repo.get(db, persona_id, user_id)
-        if not persona:
-            return ""
-        return ip_service.persona_prompt_context(persona)
-    except Exception:  # noqa: BLE001
-        return ""
+    return await ip_service.get_active_persona_context(db, user_id)
 
 
 # ============ 辅助 ============

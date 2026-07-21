@@ -23,6 +23,15 @@ async def get_active_persona_id(db: AsyncSession, user_id: str) -> str | None:
     return (active or (items[0] if items else None) or Persona(id="")).id or None
 
 
+async def get_active_persona_context(db: AsyncSession, user_id: str) -> str | None:
+    """Return the current user's prompt context through the IpAsset service boundary."""
+    persona_id = await get_active_persona_id(db, user_id)
+    if persona_id is None:
+        return None
+    persona = await repo.get(db, persona_id, user_id)
+    return persona_prompt_context(persona) if persona is not None else None
+
+
 async def create_default_persona(db: AsyncSession, user_id: str, nickname: str) -> Persona:
     p = await repo.create(
         db,
