@@ -207,9 +207,7 @@ async def list_messages(
     count_res = await db.execute(select(func.count()).select_from(base.subquery()))
     total = count_res.scalar() or 0
     res = await db.execute(
-        base.order_by(IMMessage.created_at.desc(), IMMessage.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+        base.order_by(IMMessage.created_at.desc(), IMMessage.id.desc()).offset((page - 1) * page_size).limit(page_size)
     )
     return list(res.scalars().all()), total
 
@@ -462,9 +460,7 @@ async def list_listener_states(db: AsyncSession, user_id: str) -> list[IMListene
 # ---- 自动发送授权与 Kill Switch ----
 
 
-async def get_automation_consent(
-    db: AsyncSession, account_id: str, user_id: str
-) -> IMAutomationConsent | None:
+async def get_automation_consent(db: AsyncSession, account_id: str, user_id: str) -> IMAutomationConsent | None:
     return (
         await db.execute(
             select(IMAutomationConsent).where(
@@ -605,9 +601,7 @@ async def approve_gray_account(db: AsyncSession, account_id: str, *, approved_by
     account = await db.get(PublishAccount, account_id)
     if account is None:
         return None
-    gray = (
-        await db.execute(select(IMGrayAccount).where(IMGrayAccount.account_id == account_id))
-    ).scalar_one_or_none()
+    gray = (await db.execute(select(IMGrayAccount).where(IMGrayAccount.account_id == account_id))).scalar_one_or_none()
     if gray is None:
         gray = IMGrayAccount(
             account_id=account_id,
@@ -717,15 +711,11 @@ async def gray_and_listener_counts(db: AsyncSession) -> tuple[int, int, int]:
         )
         .where(IMGrayAccount.enabled.is_(True), PublishAccount.status == "active")
     )
-    listeners = int(
-        (await db.execute(select(func.count()).select_from(listener_scope.subquery()))).scalar() or 0
-    )
+    listeners = int((await db.execute(select(func.count()).select_from(listener_scope.subquery()))).scalar() or 0)
     listening = int(
         (
             await db.execute(
-                select(func.count()).select_from(
-                    listener_scope.where(IMListenerState.status == "listening").subquery()
-                )
+                select(func.count()).select_from(listener_scope.where(IMListenerState.status == "listening").subquery())
             )
         ).scalar()
         or 0

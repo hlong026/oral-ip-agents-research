@@ -48,9 +48,7 @@ def test_normalizes_playwright_storage_state_and_access_key(monkeypatch: pytest.
     assert session["sessionid"] == "sid-123"
     assert session["device_id"] == "9876543210123456789"
     assert session["cookie_str"] == "sessionid=sid-123; ttwid=ttwid-456"
-    assert compute_access_key("9876543210123456789") == hashlib.md5(
-        b"9app-key9876543210123456789suffix"
-    ).hexdigest()
+    assert compute_access_key("9876543210123456789") == hashlib.md5(b"9app-key9876543210123456789suffix").hexdigest()
 
 
 def test_access_key_rejects_missing_app_key(monkeypatch: pytest.MonkeyPatch) -> None:

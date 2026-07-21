@@ -26,9 +26,7 @@ async def test_rule_defaults_to_suggestion_without_queueing(
 
     async with SessionLocal() as db:
         await service._try_auto_reply(db, conversation, "你好")
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert rule.delivery_mode == "suggestion"
     assert message.send_status == "suggested"
@@ -49,9 +47,7 @@ async def test_high_risk_auto_reply_is_blocked_before_queue(
 
     async with SessionLocal() as db:
         await service._try_auto_reply(db, conversation, "想了解课程")
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert message.send_status == "blocked"
     assert message.moderation_status == "blocked"

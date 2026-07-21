@@ -32,9 +32,7 @@ async def test_auto_mode_without_consent_remains_a_suggestion(
 
     async with SessionLocal() as db:
         await service._try_auto_reply(db, conversation, "你好")
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert message.send_status == "suggested"
     assert message.send_error == "AutomationNotAuthorized"
@@ -57,9 +55,7 @@ async def test_authorized_account_can_queue_only_when_global_switch_is_open(
         )
         await service.set_global_kill_switch(db, stopped=False)
         await service._try_auto_reply(db, conversation, "你好")
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert message.send_status == "scheduled"
     assert message.queue_message_id == "queue-1"

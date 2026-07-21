@@ -93,9 +93,7 @@ async def test_duplicate_remote_message_is_persisted_and_replied_once(
         message_count = (
             await db.execute(select(func.count()).where(IMMessage.conversation_id == conversation.id))
         ).scalar_one()
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert message_count == 1
     assert message.remote_message_id == "message-100"
@@ -124,7 +122,5 @@ async def test_worker_cannot_persist_message_under_wrong_user(client: AsyncClien
     )
 
     async with SessionLocal() as db:
-        count = (
-            await db.execute(select(func.count()).where(IMConversation.account_id == account_id))
-        ).scalar_one()
+        count = (await db.execute(select(func.count()).where(IMConversation.account_id == account_id))).scalar_one()
     assert count == 0

@@ -90,9 +90,7 @@ async def test_failed_message_can_retry_then_switch_to_manual_takeover(
     async with SessionLocal() as db:
         with pytest.raises(HTTPException):
             await service.send_message(db, user_id, conversation.id, SendMessageIn(content="请重试"))
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
         retried = await service.retry_message(db, user_id, message.id)
 
     assert retried.sendStatus == "sent"
@@ -141,9 +139,7 @@ async def test_auto_reply_failure_is_also_persisted(client: AsyncClient, monkeyp
     await service.run_scheduled_reply(queued.id)
 
     async with SessionLocal() as db:
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
     assert message.auto_replied is True
     assert message.send_status == "failed"
     assert message.send_error

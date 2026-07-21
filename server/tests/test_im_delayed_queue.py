@@ -52,9 +52,7 @@ async def test_auto_reply_is_persisted_before_dramatiq_delay(
 
         await service._try_auto_reply(db, conversation, "你好")
 
-        message = (
-            await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))
-        ).scalar_one()
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
 
     assert message.send_status == "scheduled"
     assert message.queue_message_id == "queue-message-1"

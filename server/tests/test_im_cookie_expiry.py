@@ -58,9 +58,7 @@ async def test_cookie_expiry_stops_listener_queue_and_automation_and_notifies_us
         state = await im_repo.get_listener_state(db, account_id, user_id)
         consent = await im_repo.get_automation_consent(db, account_id, user_id)
         message = await im_repo.get_message_by_id(db, queued.id)
-        notification = (
-            await db.execute(select(Notification).where(Notification.user_id == user_id))
-        ).scalar_one()
+        notification = (await db.execute(select(Notification).where(Notification.user_id == user_id))).scalar_one()
 
     assert account is not None and account.status == "expired"
     assert state is not None and state.status == "error" and state.error_msg == "cookie_expired"

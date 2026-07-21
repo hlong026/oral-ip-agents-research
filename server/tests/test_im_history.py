@@ -123,14 +123,18 @@ async def test_incoming_messages_merge_conversation_and_refresh_remote_metadata(
 
     async with SessionLocal() as db:
         conversations = (
-            await db.execute(
-                select(IMConversation).where(
-                    IMConversation.account_id == account_id,
-                    IMConversation.user_id == user_id,
-                    IMConversation.remote_uid == "remote-merge",
+            (
+                await db.execute(
+                    select(IMConversation).where(
+                        IMConversation.account_id == account_id,
+                        IMConversation.user_id == user_id,
+                        IMConversation.remote_uid == "remote-merge",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         message_count = (
             await db.execute(select(func.count(IMMessage.id)).where(IMMessage.conversation_id == conversations[0].id))
         ).scalar_one()

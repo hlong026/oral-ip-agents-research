@@ -94,9 +94,7 @@ def upgrade() -> None:
                 )
             )
             connection.execute(
-                messages.update()
-                .where(messages.c.conversation_id == duplicate_id)
-                .values(conversation_id=keeper_id)
+                messages.update().where(messages.c.conversation_id == duplicate_id).values(conversation_id=keeper_id)
             )
         connection.execute(
             conversations.update()
