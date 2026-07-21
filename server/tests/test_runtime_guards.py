@@ -53,3 +53,10 @@ def test_production_rejects_im_until_compliance_go() -> None:
 
     with pytest.raises(RuntimeError, match="第三阶段合规结论为 No-Go"):
         validate_runtime_security(settings)
+
+
+def test_enabled_im_requires_real_provider_key_even_in_test() -> None:
+    settings = Settings(app_env="test", im_enabled=True, douyin_im_app_key="")
+
+    with pytest.raises(RuntimeError, match="DOUYIN_IM_APP_KEY"):
+        validate_runtime_security(settings)

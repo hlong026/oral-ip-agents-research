@@ -92,14 +92,17 @@ class Settings(BaseSettings):
     # 仅列出已经用真实账号验收通过的平台；未列出平台只提供完整人工发布包。
     publish_verified_platforms: str = ""
 
-    # 抖音 IM 私信（#11: APP_KEY 移入配置，未配置时自动降级到 MockIMProvider）
+    # 抖音 IM 私信（启用后必须配置真实 APP_KEY；禁止 Mock 结果进入发送状态）
     im_enabled: bool = False
     douyin_im_app_key: str = ""
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
     douyin_im_access_key_suffix: str = "f8a69f1719916z"
     im_history_retention_days: int = 90
+    im_metric_retention_days: int = 14
     im_cleanup_interval_hours: int = 24
+    im_gray_enforced: bool = True
+    im_gray_max_accounts: int = 20
 
 
 @lru_cache
@@ -110,6 +113,8 @@ def get_settings() -> Settings:
 def validate_runtime_security(settings: Settings) -> None:
     if settings.im_enabled and settings.app_env not in {"dev", "test"}:
         raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED")
+    if settings.im_enabled and not settings.douyin_im_app_key:
+        raise RuntimeError("启用私信模块必须配置真实 DOUYIN_IM_APP_KEY，禁止使用 Mock 发送")
     if settings.app_env in {"dev", "test"}:
         return
     missing: list[str] = []

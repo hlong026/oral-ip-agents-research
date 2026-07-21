@@ -10,8 +10,10 @@ from datetime import UTC, datetime, timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import publish as emit
+from app.modules.publish.models import PublishAccount
 from app.providers.registry import registry
 
 from . import repository as repo
@@ -22,10 +24,13 @@ from .schemas import (
     AutomationStatusOut,
     ConversationOut,
     ConversationPageOut,
+    GrayAccountOut,
     ListenerControlIn,
     ListenerStatusOut,
     MessageOut,
     MessagePageOut,
+    MonitoringIncidentIn,
+    MonitoringSummaryOut,
     RuleCreateIn,
     RuleOut,
     RuleUpdateIn,
@@ -42,6 +47,10 @@ AUTOMATION_RISK_VERSION = "im-auto-reply-v1"
 
 class AccountCredentialExpiredError(RuntimeError):
     """The platform session is known to be expired and must not be retried."""
+
+
+class GrayAccountNotApprovedError(RuntimeError):
+    """The account is outside the active rollout allowlist."""
 
 
 # ============ 转换函数 ============
@@ -149,10 +158,12 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+    await _require_gray_account(db, conv.account_id, user_id)
     from app.modules.im.moderation import review_outgoing
 
     moderation = review_outgoing(inp.content)
     if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conv.account_id, user_id=user_id)
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
@@ -192,10 +203,12 @@ async def retry_message(db: AsyncSession, user_id: str, message_id: str) -> Mess
     conversation = await repo.get_conversation(db, message.conversation_id, user_id)
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+    await _require_gray_account(db, conversation.account_id, user_id)
     from app.modules.im.moderation import review_outgoing
 
     moderation = review_outgoing(_message_text(message))
     if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conversation.account_id, user_id=user_id)
         message.send_status = "blocked"
         message.moderation_status = "blocked"
         message.moderation_reason = moderation.reason_text
@@ -205,10 +218,12 @@ async def retry_message(db: AsyncSession, user_id: str, message_id: str) -> Mess
             detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
         )
 
-    message.retry_count += 1
-    message.send_status = "pending"
-    message.send_error = ""
-    await repo.save_message(db, message)
+    if not await repo.claim_failed_message_for_retry(db, message.id, user_id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "MESSAGE_ALREADY_CLAIMED", "message": "消息已被其他任务接管"},
+        )
+    await db.refresh(message)
     try:
         await _send_existing_message(db, conversation, message, _message_text(message))
         return msg_to_out(message)
@@ -260,6 +275,12 @@ async def _send_existing_message(
             message.id[:8],
             message.send_error,
         )
+        await record_metric(
+            "send_failure",
+            account_id=conversation.account_id,
+            user_id=conversation.user_id,
+            detail=message.send_error,
+        )
         raise
 
     message.send_status = "sent"
@@ -267,9 +288,19 @@ async def _send_existing_message(
     await repo.save_message(db, message)
     conversation.last_message_at = datetime.now(UTC)
     await repo.save_conversation(db, conversation)
+    await record_metric("send_success", account_id=conversation.account_id, user_id=conversation.user_id)
 
 
 def _send_failure(message: IMMessage) -> HTTPException:
+    if message.send_error == GrayAccountNotApprovedError.__name__:
+        return HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "IM_GRAY_NOT_APPROVED",
+                "message": "该账号尚未进入私信灰度名单",
+                "messageId": message.id,
+            },
+        )
     if message.send_error == AccountCredentialExpiredError.__name__:
         return HTTPException(
             status.HTTP_409_CONFLICT,
@@ -401,6 +432,7 @@ async def get_listener_status(db: AsyncSession, user_id: str) -> list[ListenerSt
 async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) -> ListenerStatusOut:
     """Persist listener intent; the independent supervisor owns the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
+    await _require_gray_account(db, inp.accountId, user_id)
 
     await repo.upsert_listener_state(
         db, account_id=inp.accountId, user_id=user_id, status="listening", started_at=datetime.now(UTC), error_msg=""
@@ -432,6 +464,7 @@ async def authorize_automation(
     inp: AutomationConsentIn,
 ) -> AutomationStatusOut:
     await _require_owned_account(db, user_id, inp.accountId)
+    await _require_gray_account(db, inp.accountId, user_id)
     if not inp.accepted:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -491,6 +524,114 @@ async def get_global_kill_switch(db: AsyncSession) -> bool:
     return True if control is None else control.stopped
 
 
+async def approve_gray_account(db: AsyncSession, account_id: str, admin_id: str) -> GrayAccountOut:
+    account = await db.get(PublishAccount, account_id)
+    if account is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+        )
+    settings = get_settings()
+    already_enabled = await repo.is_gray_account_enabled(db, account_id, account.user_id)
+    if not already_enabled and await repo.gray_account_count(db) >= max(1, settings.im_gray_max_accounts):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "IM_GRAY_LIMIT_REACHED", "message": "灰度账号数量已达到受控上限"},
+        )
+    gray = await repo.approve_gray_account(db, account_id, approved_by=admin_id)
+    if gray is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+        )
+    return GrayAccountOut(
+        accountId=gray.account_id,
+        userId=gray.user_id,
+        nickname=account.nickname,
+        approvedBy=gray.approved_by,
+        addedAt=gray.created_at.astimezone(UTC).isoformat(),
+    )
+
+
+async def remove_gray_account(db: AsyncSession, account_id: str) -> bool:
+    account = await db.get(PublishAccount, account_id)
+    removed = await repo.remove_gray_account(db, account_id)
+    if removed and account is not None:
+        state = await repo.get_listener_state(db, account_id, account.user_id)
+        if state is not None:
+            state.status = "disconnected"
+            state.error_msg = "gray_approval_removed"
+            await db.commit()
+        await repo.disable_account_automation(db, account_id, account.user_id, reason="GrayApprovalRemoved")
+    return removed
+
+
+async def list_gray_accounts(db: AsyncSession) -> list[GrayAccountOut]:
+    return [
+        GrayAccountOut(
+            accountId=gray.account_id,
+            userId=gray.user_id,
+            nickname=account.nickname,
+            approvedBy=gray.approved_by,
+            addedAt=gray.created_at.astimezone(UTC).isoformat(),
+        )
+        for gray, account in await repo.list_gray_accounts(db)
+    ]
+
+
+async def get_monitoring_summary(db: AsyncSession, *, hours: int) -> MonitoringSummaryOut:
+    now = datetime.now(UTC)
+    since = now - timedelta(hours=hours)
+    counts = await repo.metric_counts_since(db, since)
+    gray, listeners, listening = await repo.gray_and_listener_counts(db)
+    attempts = counts.get("listener_connect_attempt", 0)
+    connected = counts.get("listener_connected", 0)
+    dropouts = counts.get("listener_disconnected", 0) + counts.get("listener_error", 0)
+    sent = counts.get("send_success", 0)
+    failed = counts.get("send_failure", 0)
+    return MonitoringSummaryOut(
+        hours=hours,
+        windowStart=since.isoformat(),
+        windowEnd=now.isoformat(),
+        grayAccounts=gray,
+        listenerAccounts=listeners,
+        listeningAccounts=listening,
+        connectionAttempts=attempts,
+        connectionSuccessRate=round(connected * 100 / attempts, 2) if attempts else 0.0,
+        dropoutRate=round(dropouts * 100 / connected, 2) if connected else 0.0,
+        sendSuccessRate=round(sent * 100 / (sent + failed), 2) if sent + failed else 0.0,
+        sendSuccess=sent,
+        sendFailure=failed,
+        quotaRejected=counts.get("quota_rejected", 0),
+        moderationBlocked=counts.get("moderation_blocked", 0),
+        credentialExpired=counts.get("credential_expired", 0),
+        ownershipRejected=counts.get("ownership_rejected", 0),
+        riskControlIncidents=counts.get("risk_control_incident", 0),
+    )
+
+
+async def record_risk_control_incident(
+    db: AsyncSession,
+    inp: MonitoringIncidentIn,
+) -> None:
+    user_id = ""
+    if inp.accountId:
+        account = await db.get(PublishAccount, inp.accountId)
+        if account is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
+            )
+        user_id = account.user_id
+    await repo.record_metric_event(
+        db,
+        kind="risk_control_incident",
+        account_id=inp.accountId,
+        user_id=user_id,
+        detail=inp.detail,
+    )
+
+
 async def expire_account_credentials(db: AsyncSession, account_id: str, user_id: str) -> bool:
     """Fail closed after a Douyin session expires and notify only on the first transition."""
     from app.core.audit import write_audit
@@ -519,6 +660,8 @@ async def expire_account_credentials(db: AsyncSession, account_id: str, user_id:
         user_id[:8],
         canceled,
     )
+    if newly_expired:
+        await record_metric("credential_expired", account_id=account_id, user_id=user_id)
 
     if newly_expired:
         await write_audit(
@@ -557,14 +700,19 @@ async def cleanup_expired_history() -> tuple[int, int]:
     from app.core.config import get_settings
 
     settings = get_settings()
-    cutoff = datetime.now(UTC) - timedelta(days=max(1, settings.im_history_retention_days))
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(days=max(1, settings.im_history_retention_days))
+    metric_cutoff = now - timedelta(days=max(1, settings.im_metric_retention_days))
     async with SessionLocal() as db:
         deleted = await repo.cleanup_history(db, cutoff=cutoff)
+        deleted_metrics = await repo.cleanup_metric_events(db, cutoff=metric_cutoff)
     logger.info(
-        "IM history cleanup complete: messages=%d conversations=%d cutoff=%s",
+        "IM history cleanup complete: messages=%d conversations=%d metrics=%d cutoff=%s metric_cutoff=%s",
         deleted[0],
         deleted[1],
+        deleted_metrics,
         cutoff.isoformat(),
+        metric_cutoff.isoformat(),
     )
     return deleted
 
@@ -592,6 +740,10 @@ async def handle_incoming_message(
 
         if not await publish_repo.get_account(db, account_id, user_id):
             logger.warning("ignored IM message with stale account ownership: account=%s", account_id[:8])
+            await record_metric("ownership_rejected", account_id=account_id, user_id=user_id)
+            return
+        if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+            logger.warning("ignored IM message outside gray allowlist: account=%s", account_id[:8])
             return
 
         # 1. 查找或创建会话
@@ -674,6 +826,7 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
 
     moderation = review_outgoing(reply_text)
     if not moderation.allowed:
+        await record_metric("moderation_blocked", account_id=conv.account_id, user_id=conv.user_id)
         await repo.create_message(
             db,
             conversation_id=conv.id,
@@ -732,6 +885,7 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
         conversation_limit=MAX_REPLIES_PER_CONVERSATION_PER_DAY,
     ):
         logger.info("IM auto reply quota unavailable or exhausted: account=%s", conv.account_id[:8])
+        await record_metric("quota_rejected", account_id=conv.account_id, user_id=conv.user_id)
         return
 
     # Persist the reply before publishing the delayed Dramatiq message.
@@ -784,8 +938,9 @@ async def run_scheduled_reply(message_id: str) -> None:
             reply_msg.send_error = block_reason
             await repo.save_message(db, reply_msg)
             return
-        reply_msg.send_status = "pending"
-        await repo.save_message(db, reply_msg)
+        if not await repo.claim_scheduled_message(db, reply_msg.id, reply_msg.user_id):
+            return
+        await db.refresh(reply_msg)
         try:
             await _send_existing_message(db, conv, reply_msg, _message_text(reply_msg))
         except Exception:  # noqa: BLE001
@@ -880,6 +1035,8 @@ async def _load_account_session(account_id: str, user_id: str) -> dict:
     from app.modules.publish import repository as pub_repo
 
     async with SessionLocal() as db:
+        if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+            raise GrayAccountNotApprovedError("account is outside the IM gray allowlist")
         acc = await pub_repo.get_account(db, account_id, user_id)
         if acc and acc.status == "active":
             return pub_repo.account_session(acc)
@@ -899,6 +1056,37 @@ async def _require_owned_account(db: AsyncSession, user_id: str, account_id: str
             status.HTTP_404_NOT_FOUND,
             detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
         )
+
+
+async def _require_gray_account(db: AsyncSession, account_id: str, user_id: str) -> None:
+    from app.core.config import get_settings
+
+    if get_settings().im_gray_enforced and not await repo.is_gray_account_enabled(db, account_id, user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "IM_GRAY_NOT_APPROVED", "message": "该账号尚未进入私信灰度名单"},
+        )
+
+
+async def record_metric(
+    kind: str,
+    *,
+    account_id: str = "",
+    user_id: str = "",
+    detail: str = "",
+) -> None:
+    """Persist monitoring without coupling business transactions to telemetry."""
+    try:
+        async with SessionLocal() as metric_db:
+            await repo.record_metric_event(
+                metric_db,
+                kind=kind,
+                account_id=account_id,
+                user_id=user_id,
+                detail=detail,
+            )
+    except Exception:  # noqa: BLE001
+        logger.exception("IM metric write failed: kind=%s account=%s", kind, account_id[:8])
 
 
 @asynccontextmanager

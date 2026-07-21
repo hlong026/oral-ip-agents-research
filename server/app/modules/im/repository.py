@@ -13,8 +13,10 @@ from .models import (
     IMAutoReplyRule,
     IMConversation,
     IMGlobalControl,
+    IMGrayAccount,
     IMListenerState,
     IMMessage,
+    IMMetricEvent,
 )
 
 
@@ -149,6 +151,44 @@ async def save_message(db: AsyncSession, message: IMMessage) -> None:
     await db.refresh(message)
 
 
+async def claim_scheduled_message(db: AsyncSession, message_id: str, user_id: str) -> bool:
+    """Atomically claim one delayed reply before the external provider call."""
+    result = await db.execute(
+        update(IMMessage)
+        .where(
+            IMMessage.id == message_id,
+            IMMessage.user_id == user_id,
+            IMMessage.send_status == "scheduled",
+            IMMessage.manual_takeover.is_(False),
+        )
+        .values(send_status="pending", send_error="")
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
+async def claim_failed_message_for_retry(db: AsyncSession, message_id: str, user_id: str) -> bool:
+    """Atomically reserve one failed message and increment its retry count once."""
+    result = await db.execute(
+        update(IMMessage)
+        .where(
+            IMMessage.id == message_id,
+            IMMessage.user_id == user_id,
+            IMMessage.send_status == "failed",
+            IMMessage.manual_takeover.is_(False),
+        )
+        .values(
+            send_status="pending",
+            send_error="",
+            retry_count=IMMessage.retry_count + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
 async def list_messages(
     db: AsyncSession,
     conversation_id: str,
@@ -220,6 +260,31 @@ async def cleanup_history(
         if batch_count < batch_size:
             break
     return deleted_messages, deleted_conversations
+
+
+async def cleanup_metric_events(
+    db: AsyncSession,
+    *,
+    cutoff: datetime,
+    batch_size: int = 1000,
+    max_batches: int = 10,
+) -> int:
+    """Delete expired rollout metrics in bounded batches."""
+    deleted_events = 0
+    for _ in range(max_batches):
+        event_ids = (
+            select(IMMetricEvent.id)
+            .where(IMMetricEvent.created_at < cutoff)
+            .order_by(IMMetricEvent.created_at.asc(), IMMetricEvent.id.asc())
+            .limit(batch_size)
+        )
+        result = await db.execute(delete(IMMetricEvent).where(IMMetricEvent.id.in_(event_ids)))
+        batch_count = int(getattr(result, "rowcount", 0) or 0)
+        await db.commit()
+        deleted_events += batch_count
+        if batch_count < batch_size:
+            break
+    return deleted_events
 
 
 async def get_message_by_remote_key(
@@ -468,6 +533,10 @@ async def automation_block_reason(db: AsyncSession, account_id: str, user_id: st
     control = await get_global_control(db)
     if control is None or control.stopped:
         return "GlobalKillSwitch"
+    from app.core.config import get_settings
+
+    if get_settings().im_gray_enforced and not await is_gray_account_enabled(db, account_id, user_id):
+        return "GrayApprovalRequired"
     return None
 
 
@@ -516,3 +585,149 @@ async def disable_account_automation(
     )
     await db.commit()
     return int(getattr(result, "rowcount", 0) or 0)
+
+
+# ---- 灰度与监控 ----
+
+
+async def is_gray_account_enabled(db: AsyncSession, account_id: str, user_id: str) -> bool:
+    result = await db.execute(
+        select(IMGrayAccount.id).where(
+            IMGrayAccount.account_id == account_id,
+            IMGrayAccount.user_id == user_id,
+            IMGrayAccount.enabled.is_(True),
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def approve_gray_account(db: AsyncSession, account_id: str, *, approved_by: str) -> IMGrayAccount | None:
+    account = await db.get(PublishAccount, account_id)
+    if account is None:
+        return None
+    gray = (
+        await db.execute(select(IMGrayAccount).where(IMGrayAccount.account_id == account_id))
+    ).scalar_one_or_none()
+    if gray is None:
+        gray = IMGrayAccount(
+            account_id=account_id,
+            user_id=account.user_id,
+            approved_by=approved_by,
+            enabled=True,
+        )
+        db.add(gray)
+    else:
+        gray.user_id = account.user_id
+        gray.approved_by = approved_by
+        gray.enabled = True
+        gray.created_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(gray)
+    return gray
+
+
+async def remove_gray_account(db: AsyncSession, account_id: str) -> bool:
+    result = await db.execute(
+        update(IMGrayAccount)
+        .where(IMGrayAccount.account_id == account_id, IMGrayAccount.enabled.is_(True))
+        .values(enabled=False)
+    )
+    await db.commit()
+    return int(getattr(result, "rowcount", 0) or 0) == 1
+
+
+async def list_gray_accounts(db: AsyncSession) -> list[tuple[IMGrayAccount, PublishAccount]]:
+    result = await db.execute(
+        select(IMGrayAccount, PublishAccount)
+        .join(PublishAccount, PublishAccount.id == IMGrayAccount.account_id)
+        .where(
+            IMGrayAccount.enabled.is_(True),
+            PublishAccount.user_id == IMGrayAccount.user_id,
+        )
+        .order_by(IMGrayAccount.created_at.desc())
+    )
+    return [(row[0], row[1]) for row in result.all()]
+
+
+async def gray_account_count(db: AsyncSession) -> int:
+    result = await db.execute(select(func.count(IMGrayAccount.id)).where(IMGrayAccount.enabled.is_(True)))
+    return int(result.scalar() or 0)
+
+
+async def record_metric_event(
+    db: AsyncSession,
+    *,
+    kind: str,
+    account_id: str = "",
+    user_id: str = "",
+    detail: str = "",
+) -> None:
+    db.add(
+        IMMetricEvent(
+            kind=kind[:48],
+            account_id=account_id[:32],
+            user_id=user_id[:32],
+            detail=detail[:256],
+        )
+    )
+    await db.commit()
+
+
+async def metric_counts_since(db: AsyncSession, since: datetime) -> dict[str, int]:
+    result = await db.execute(
+        select(IMMetricEvent.kind, func.count(IMMetricEvent.id))
+        .where(IMMetricEvent.created_at >= since)
+        .group_by(IMMetricEvent.kind)
+    )
+    return {str(kind): int(count) for kind, count in result.all()}
+
+
+async def gray_and_listener_counts(db: AsyncSession) -> tuple[int, int, int]:
+    gray = int(
+        (
+            await db.execute(
+                select(func.count(IMGrayAccount.id))
+                .join(
+                    PublishAccount,
+                    and_(
+                        PublishAccount.id == IMGrayAccount.account_id,
+                        PublishAccount.user_id == IMGrayAccount.user_id,
+                    ),
+                )
+                .where(IMGrayAccount.enabled.is_(True), PublishAccount.status == "active")
+            )
+        ).scalar()
+        or 0
+    )
+    listener_scope = (
+        select(IMListenerState.id)
+        .join(
+            IMGrayAccount,
+            and_(
+                IMGrayAccount.account_id == IMListenerState.account_id,
+                IMGrayAccount.user_id == IMListenerState.user_id,
+            ),
+        )
+        .join(
+            PublishAccount,
+            and_(
+                PublishAccount.id == IMListenerState.account_id,
+                PublishAccount.user_id == IMListenerState.user_id,
+            ),
+        )
+        .where(IMGrayAccount.enabled.is_(True), PublishAccount.status == "active")
+    )
+    listeners = int(
+        (await db.execute(select(func.count()).select_from(listener_scope.subquery()))).scalar() or 0
+    )
+    listening = int(
+        (
+            await db.execute(
+                select(func.count()).select_from(
+                    listener_scope.where(IMListenerState.status == "listening").subquery()
+                )
+            )
+        ).scalar()
+        or 0
+    )
+    return gray, listeners, listening

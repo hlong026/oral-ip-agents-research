@@ -1,6 +1,6 @@
 """im 模块 Pydantic schemas（出入参）"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ---- 会话 ----
 
@@ -146,3 +146,36 @@ class KillSwitchIn(BaseModel):
 class KillSwitchOut(BaseModel):
     stopped: bool
     canceledMessages: int = 0
+
+
+class GrayAccountOut(BaseModel):
+    accountId: str
+    userId: str
+    nickname: str
+    approvedBy: str
+    addedAt: str
+
+
+class MonitoringSummaryOut(BaseModel):
+    hours: int
+    windowStart: str
+    windowEnd: str
+    grayAccounts: int
+    listenerAccounts: int
+    listeningAccounts: int
+    connectionAttempts: int
+    connectionSuccessRate: float
+    dropoutRate: float
+    sendSuccessRate: float
+    sendSuccess: int
+    sendFailure: int
+    quotaRejected: int
+    moderationBlocked: int
+    credentialExpired: int
+    ownershipRejected: int
+    riskControlIncidents: int
+
+
+class MonitoringIncidentIn(BaseModel):
+    accountId: str = Field("", max_length=32)
+    detail: str = Field(..., min_length=1, max_length=256)

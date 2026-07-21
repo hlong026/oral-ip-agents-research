@@ -27,7 +27,6 @@ from .douyidou import DouyidouParser
 from .hifly import HiFlyAvatar, HiFlyVoice
 from .im.base import IMProvider
 from .im.douyin_im import DouyinIMProvider
-from .im.mock_im import MockIMProvider
 from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPublishDriver, MockVoice
 from .publish.douyin import DouyinPublishDriver
 from .publish.tencent import TencentPublishDriver
@@ -66,11 +65,10 @@ class ProviderRegistry:
                 "xiaohongshu": XiaohongshuPublishDriver(),
                 "shipinhao": TencentPublishDriver(),
             }
-        # #9 IM Provider：未配置 key 时使用 MockIMProvider
-        _has_im_key = get_settings().im_enabled and bool(get_settings().douyin_im_app_key)
-        self.im_drivers: dict[str, IMProvider] = {
-            "douyin": DouyinIMProvider() if _has_im_key else MockIMProvider(),
-        }
+        # IM 不允许 Mock 降级：否则模拟响应会污染真实发送状态和灰度指标。
+        self.im_drivers: dict[str, IMProvider] = {}
+        if get_settings().im_enabled and get_settings().douyin_im_app_key:
+            self.im_drivers["douyin"] = DouyinIMProvider()
 
     async def provider_enabled(self, provider_name: str) -> bool:
         """真实 Provider 必须服从管理端开关；开发环境保留 Mock 降级体验。"""

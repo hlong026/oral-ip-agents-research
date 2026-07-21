@@ -140,3 +140,29 @@ class IMGlobalControl(Base):
     id: Mapped[str] = mapped_column(String(16), primary_key=True, default="global")
     stopped: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class IMGrayAccount(Base):
+    """Admin-approved account allowed to participate in the controlled rollout."""
+
+    __tablename__ = "im_gray_accounts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    approved_by: Mapped[str] = mapped_column(String(32), index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class IMMetricEvent(Base):
+    """Durable low-cardinality events used for gray rollout monitoring."""
+
+    __tablename__ = "im_metric_events"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(48), index=True)
+    account_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    user_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    detail: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True, default=lambda: datetime.now(UTC))

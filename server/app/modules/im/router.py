@@ -12,12 +12,15 @@ from .schemas import (
     AutomationConsentIn,
     AutomationStatusOut,
     ConversationPageOut,
+    GrayAccountOut,
     KillSwitchIn,
     KillSwitchOut,
     ListenerControlIn,
     ListenerStatusOut,
     MessageOut,
     MessagePageOut,
+    MonitoringIncidentIn,
+    MonitoringSummaryOut,
     RuleCreateIn,
     RuleOut,
     RuleUpdateIn,
@@ -194,3 +197,61 @@ async def get_kill_switch(
 ):
     stopped = await service.get_global_kill_switch(db)
     return KillSwitchOut(stopped=stopped)
+
+
+@admin_router.get("/gray/accounts", response_model=list[GrayAccountOut])
+async def list_gray_accounts(
+    db: AsyncSession = Depends(get_db),
+    _admin_id: str = Depends(require_admin),
+):
+    return await service.list_gray_accounts(db)
+
+
+@admin_router.put("/gray/accounts/{account_id}", response_model=GrayAccountOut)
+async def approve_gray_account(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin_id: str = Depends(require_admin),
+):
+    gray = await service.approve_gray_account(db, account_id, admin_id)
+    await write_audit("im_gray_account_approved", user_id=admin_id, detail=f"account_id={account_id}")
+    return gray
+
+
+@admin_router.delete("/gray/accounts/{account_id}")
+async def remove_gray_account(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin_id: str = Depends(require_admin),
+):
+    removed = await service.remove_gray_account(db, account_id)
+    await write_audit(
+        "im_gray_account_removed",
+        user_id=admin_id,
+        detail=f"account_id={account_id},removed={removed}",
+    )
+    return {"ok": removed}
+
+
+@admin_router.get("/monitoring", response_model=MonitoringSummaryOut)
+async def monitoring_summary(
+    hours: int = Query(24, ge=1, le=24 * 30),
+    db: AsyncSession = Depends(get_db),
+    _admin_id: str = Depends(require_admin),
+):
+    return await service.get_monitoring_summary(db, hours=hours)
+
+
+@admin_router.post("/monitoring/incidents", status_code=201)
+async def record_monitoring_incident(
+    inp: MonitoringIncidentIn,
+    db: AsyncSession = Depends(get_db),
+    admin_id: str = Depends(require_admin),
+):
+    await service.record_risk_control_incident(db, inp)
+    await write_audit(
+        "im_risk_control_incident_recorded",
+        user_id=admin_id,
+        detail=f"account_id={inp.accountId},detail={inp.detail}",
+    )
+    return {"ok": True}

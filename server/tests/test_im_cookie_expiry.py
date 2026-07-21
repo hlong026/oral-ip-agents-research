@@ -170,6 +170,7 @@ async def _create_account() -> tuple[str, str]:
             nickname="待重新授权账号",
             session_json='{"cookie_str":"sessionid=expired"}',
         )
+        await im_repo.approve_gray_account(db, account.id, approved_by="admin-test")
     return user_id, account.id
 
 

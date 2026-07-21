@@ -4957,6 +4957,210 @@
           }
         ]
       }
+    },
+    "/api/admin/v1/im/gray/accounts": {
+      "get": {
+        "tags": ["admin-im"],
+        "summary": "List Gray Accounts",
+        "operationId": "list_gray_accounts_api_admin_v1_im_gray_accounts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GrayAccountOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Gray Accounts Api Admin V1 Im Gray Accounts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/v1/im/gray/accounts/{account_id}": {
+      "put": {
+        "tags": ["admin-im"],
+        "summary": "Approve Gray Account",
+        "operationId": "approve_gray_account_api_admin_v1_im_gray_accounts__account_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrayAccountOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["admin-im"],
+        "summary": "Remove Gray Account",
+        "operationId": "remove_gray_account_api_admin_v1_im_gray_accounts__account_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/im/monitoring": {
+      "get": {
+        "tags": ["admin-im"],
+        "summary": "Monitoring Summary",
+        "operationId": "monitoring_summary_api_admin_v1_im_monitoring_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 720,
+              "minimum": 1,
+              "default": 24,
+              "title": "Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitoringSummaryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/im/monitoring/incidents": {
+      "post": {
+        "tags": ["admin-im"],
+        "summary": "Record Monitoring Incident",
+        "operationId": "record_monitoring_incident_api_admin_v1_im_monitoring_incidents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitoringIncidentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -5866,6 +6070,39 @@
         "required": ["id", "type", "text", "createdAt"],
         "title": "FeedEvent"
       },
+      "GrayAccountOut": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "userId": {
+            "type": "string",
+            "title": "Userid"
+          },
+          "nickname": {
+            "type": "string",
+            "title": "Nickname"
+          },
+          "approvedBy": {
+            "type": "string",
+            "title": "Approvedby"
+          },
+          "addedAt": {
+            "type": "string",
+            "title": "Addedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "accountId",
+          "userId",
+          "nickname",
+          "approvedBy",
+          "addedAt"
+        ],
+        "title": "GrayAccountOut"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6370,6 +6607,118 @@
           "publicDescription"
         ],
         "title": "ModulePricePublicOut"
+      },
+      "MonitoringIncidentIn": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Accountid",
+            "default": ""
+          },
+          "detail": {
+            "type": "string",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": ["detail"],
+        "title": "MonitoringIncidentIn"
+      },
+      "MonitoringSummaryOut": {
+        "properties": {
+          "hours": {
+            "type": "integer",
+            "title": "Hours"
+          },
+          "windowStart": {
+            "type": "string",
+            "title": "Windowstart"
+          },
+          "windowEnd": {
+            "type": "string",
+            "title": "Windowend"
+          },
+          "grayAccounts": {
+            "type": "integer",
+            "title": "Grayaccounts"
+          },
+          "listenerAccounts": {
+            "type": "integer",
+            "title": "Listeneraccounts"
+          },
+          "listeningAccounts": {
+            "type": "integer",
+            "title": "Listeningaccounts"
+          },
+          "connectionAttempts": {
+            "type": "integer",
+            "title": "Connectionattempts"
+          },
+          "connectionSuccessRate": {
+            "type": "number",
+            "title": "Connectionsuccessrate"
+          },
+          "dropoutRate": {
+            "type": "number",
+            "title": "Dropoutrate"
+          },
+          "sendSuccessRate": {
+            "type": "number",
+            "title": "Sendsuccessrate"
+          },
+          "sendSuccess": {
+            "type": "integer",
+            "title": "Sendsuccess"
+          },
+          "sendFailure": {
+            "type": "integer",
+            "title": "Sendfailure"
+          },
+          "quotaRejected": {
+            "type": "integer",
+            "title": "Quotarejected"
+          },
+          "moderationBlocked": {
+            "type": "integer",
+            "title": "Moderationblocked"
+          },
+          "credentialExpired": {
+            "type": "integer",
+            "title": "Credentialexpired"
+          },
+          "ownershipRejected": {
+            "type": "integer",
+            "title": "Ownershiprejected"
+          },
+          "riskControlIncidents": {
+            "type": "integer",
+            "title": "Riskcontrolincidents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hours",
+          "windowStart",
+          "windowEnd",
+          "grayAccounts",
+          "listenerAccounts",
+          "listeningAccounts",
+          "connectionAttempts",
+          "connectionSuccessRate",
+          "dropoutRate",
+          "sendSuccessRate",
+          "sendSuccess",
+          "sendFailure",
+          "quotaRejected",
+          "moderationBlocked",
+          "credentialExpired",
+          "ownershipRejected",
+          "riskControlIncidents"
+        ],
+        "title": "MonitoringSummaryOut"
       },
       "NotificationOut": {
         "properties": {

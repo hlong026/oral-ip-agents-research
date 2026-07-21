@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T08:39:22.946Z
+ * API 版本：1.0.0 · 生成时间：2026-07-21T08:53:14.485Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -195,6 +195,14 @@ export interface FeedEvent {
   createdAt: string;
 }
 
+export interface GrayAccountOut {
+  accountId: string;
+  userId: string;
+  nickname: string;
+  approvedBy: string;
+  addedAt: string;
+}
+
 export interface JobOut {
   id: string;
   taskId: string;
@@ -307,6 +315,31 @@ export interface ModulePricePublicOut {
   pointsPerUnit: number;
   minimumPoints: number;
   publicDescription: string;
+}
+
+export interface MonitoringIncidentIn {
+  accountId?: string;
+  detail: string;
+}
+
+export interface MonitoringSummaryOut {
+  hours: number;
+  windowStart: string;
+  windowEnd: string;
+  grayAccounts: number;
+  listenerAccounts: number;
+  listeningAccounts: number;
+  connectionAttempts: number;
+  connectionSuccessRate: number;
+  dropoutRate: number;
+  sendSuccessRate: number;
+  sendSuccess: number;
+  sendFailure: number;
+  quotaRejected: number;
+  moderationBlocked: number;
+  credentialExpired: number;
+  ownershipRejected: number;
+  riskControlIncidents: number;
 }
 
 export interface NotificationOut {

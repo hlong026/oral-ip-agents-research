@@ -190,6 +190,7 @@ async def _create_user_account() -> tuple[str, str]:
             nickname="授权账号",
             session_json='{"cookie_str":"sessionid=test"}',
         )
+        await im_repo.approve_gray_account(db, account.id, approved_by="admin-test")
     return user_id, account.id
 
 

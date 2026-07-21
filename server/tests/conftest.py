@@ -14,6 +14,7 @@ os.environ["LOCAL_STORAGE_DIR"] = os.path.join(_TMP, "storage")
 os.environ["REDIS_URL"] = "redis://127.0.0.1:1/9"  # 不可达 → 降级进程内广播
 os.environ["APP_SECRET"] = "test-secret"
 os.environ["CONFIG_ENCRYPTION_KEY"] = "test-config-encryption-key"
+os.environ["IM_GRAY_MAX_ACCOUNTS"] = "1000"
 # 确保所有 Provider 凭据为空 → 快速降级到 Mock
 os.environ.setdefault("DEEPSEEK_API_KEY", "")
 os.environ.setdefault("DOUYIDOU_APP_ID", "")

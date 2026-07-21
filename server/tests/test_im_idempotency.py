@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from app.core.db import SessionLocal
 from app.core.security import hash_password
 from app.modules.auth.models import User
+from app.modules.im import repository as im_repo
 from app.modules.im import service
 from app.modules.im.models import IMConversation, IMMessage
 from app.modules.publish import repository as publish_repo
@@ -39,6 +40,7 @@ async def _create_account(user_id: str) -> str:
             nickname="幂等账号",
             session_json='{"cookie_str":"sessionid=test"}',
         )
+        await im_repo.approve_gray_account(db, account.id, approved_by="admin-test")
     return account.id
 
 

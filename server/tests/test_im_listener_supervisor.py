@@ -38,6 +38,7 @@ async def _create_account() -> tuple[str, str]:
             nickname="监听账号",
             session_json='{"cookie_str":"sessionid=test","device_id":"1234567890123456789"}',
         )
+        await im_repo.approve_gray_account(db, account.id, approved_by="admin-test")
     return user_id, account.id
 
 
@@ -56,6 +57,7 @@ async def test_api_only_persists_listener_intent(client: AsyncClient, monkeypatc
     assert started.status == "listening"
 
     monkeypatch.setattr(settings, "im_enabled", True)
+    monkeypatch.setattr(settings, "douyin_im_app_key", "contract-test-key")
     monkeypatch.setattr(im_listener, "restore_listeners", unexpected_runtime_call)
     monkeypatch.setattr(im_listener, "shutdown_all", unexpected_runtime_call)
     async with lifespan(app):
@@ -137,6 +139,84 @@ async def test_running_listener_observes_persisted_stop(monkeypatch: pytest.Monk
     assert lease.released is True
 
 
+@pytest.mark.parametrize(
+    ("connection", "expected_terminal_metric"),
+    [
+        pytest.param(None, "listener_connect_failure", id="connect-failure"),
+        pytest.param("listen-failure", "listener_error", id="listen-failure"),
+    ],
+)
+async def test_listener_failure_paths_record_real_metric_kind(
+    monkeypatch: pytest.MonkeyPatch,
+    connection: str | None,
+    expected_terminal_metric: str,
+) -> None:
+    lease = _FakeLease()
+    checks = 0
+    metrics: list[str] = []
+
+    async def intent_active(_account_id: str, _user_id: str) -> bool:
+        nonlocal checks
+        checks += 1
+        return checks == 1
+
+    async def record_metric(kind: str, *_args: str) -> None:
+        metrics.append(kind)
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    class Provider:
+        async def connect(self, _session: dict[str, str]) -> _FailingListenConnection:
+            if connection is None:
+                raise RuntimeError("connect failed")
+            return _FailingListenConnection()
+
+    from app.providers.registry import registry
+
+    monkeypatch.setattr(im_listener, "_load_account_context", _load_test_context)
+    monkeypatch.setattr(im_listener, "_listener_intent_active", intent_active)
+    monkeypatch.setattr(im_listener, "_record_metric", record_metric)
+    monkeypatch.setattr(im_listener.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(registry, "im_driver", lambda _platform: Provider())
+
+    await im_listener._listen_loop("account-metric", "user-metric", lease)
+
+    assert metrics[0] == "listener_connect_attempt"
+    if connection is not None:
+        assert "listener_connected" in metrics
+    assert expected_terminal_metric in metrics
+
+
+async def test_listener_clean_disconnect_records_connection_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    lease = _FakeLease()
+    checks = 0
+    metrics: list[str] = []
+
+    async def intent_active(_account_id: str, _user_id: str) -> bool:
+        nonlocal checks
+        checks += 1
+        return checks == 1
+
+    async def record_metric(kind: str, *_args: str) -> None:
+        metrics.append(kind)
+
+    class Provider:
+        async def connect(self, _session: dict[str, str]) -> _ImmediateConnection:
+            return _ImmediateConnection()
+
+    from app.providers.registry import registry
+
+    monkeypatch.setattr(im_listener, "_load_account_context", _load_test_context)
+    monkeypatch.setattr(im_listener, "_listener_intent_active", intent_active)
+    monkeypatch.setattr(im_listener, "_record_metric", record_metric)
+    monkeypatch.setattr(registry, "im_driver", lambda _platform: Provider())
+
+    await im_listener._listen_loop("account-metric", "user-metric", lease)
+
+    assert metrics == ["listener_connect_attempt", "listener_connected", "listener_disconnected"]
+
+
 class _FakeRedis:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
@@ -181,3 +261,23 @@ class _BlockingConnection:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _ImmediateConnection:
+    async def listen(self, _callback: object) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+class _FailingListenConnection:
+    async def listen(self, _callback: object) -> None:
+        raise RuntimeError("listen failed")
+
+    async def close(self) -> None:
+        return None
+
+
+async def _load_test_context(_account_id: str, _user_id: str) -> tuple[dict[str, str], str]:
+    return {}, "douyin"

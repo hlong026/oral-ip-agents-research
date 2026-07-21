@@ -10,7 +10,7 @@ from sqlalchemy import and_, select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.modules.im.models import IMListenerState
+from app.modules.im.models import IMGrayAccount, IMListenerState
 from app.modules.publish.models import PublishAccount
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ async def reconcile_listeners(lease: RedisListenerLease | None = None) -> None:
     if not get_settings().im_enabled:
         return
     async with SessionLocal() as db:
-        result = await db.execute(
+        query = (
             select(IMListenerState)
             .join(
                 PublishAccount,
@@ -141,11 +141,18 @@ async def reconcile_listeners(lease: RedisListenerLease | None = None) -> None:
                     PublishAccount.user_id == IMListenerState.user_id,
                 ),
             )
-            .where(
-                IMListenerState.status == "listening",
-                PublishAccount.status == "active",
-            )
+            .where(IMListenerState.status == "listening", PublishAccount.status == "active")
         )
+        if get_settings().im_gray_enforced:
+            query = query.join(
+                IMGrayAccount,
+                and_(
+                    IMGrayAccount.account_id == IMListenerState.account_id,
+                    IMGrayAccount.user_id == IMListenerState.user_id,
+                    IMGrayAccount.enabled.is_(True),
+                ),
+            )
+        result = await db.execute(query)
         states = list(result.scalars().all())
 
     for state in states:
@@ -191,7 +198,7 @@ async def run_supervisor() -> None:
 
 async def _listener_intent_active(account_id: str, user_id: str) -> bool:
     async with SessionLocal() as db:
-        result = await db.execute(
+        query = (
             select(IMListenerState.id)
             .join(
                 PublishAccount,
@@ -207,6 +214,16 @@ async def _listener_intent_active(account_id: str, user_id: str) -> bool:
                 PublishAccount.status == "active",
             )
         )
+        if get_settings().im_gray_enforced:
+            query = query.join(
+                IMGrayAccount,
+                and_(
+                    IMGrayAccount.account_id == IMListenerState.account_id,
+                    IMGrayAccount.user_id == IMListenerState.user_id,
+                    IMGrayAccount.enabled.is_(True),
+                ),
+            )
+        result = await db.execute(query)
         return result.scalar_one_or_none() is not None
 
 
@@ -217,7 +234,18 @@ async def _load_account_context(account_id: str, user_id: str) -> tuple[dict[str
         account = await publish_repo.get_account(db, account_id, user_id)
         if not account or account.status != "active":
             return None
+        if get_settings().im_gray_enforced:
+            from app.modules.im import repository as im_repo
+
+            if not await im_repo.is_gray_account_enabled(db, account_id, user_id):
+                return None
         return publish_repo.account_session(account), account.platform
+
+
+async def _record_metric(kind: str, account_id: str, user_id: str, detail: str = "") -> None:
+    from app.modules.im.service import record_metric
+
+    await record_metric(kind, account_id=account_id, user_id=user_id, detail=detail)
 
 
 async def _check_cookie_validity(session: dict[str, Any]) -> bool | None:
@@ -288,7 +316,9 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
 
         while await _listener_intent_active(account_id, user_id):
             try:
+                await _record_metric("listener_connect_attempt", account_id, user_id)
                 connection = await provider.connect(session)
+                await _record_metric("listener_connected", account_id, user_id)
                 _connections[account_id] = connection
 
                 async def on_message(message: dict[str, Any]) -> None:
@@ -314,6 +344,7 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
                     done, _pending = await asyncio.wait({listen_task}, timeout=STATE_POLL_INTERVAL)
                     if done:
                         await listen_task
+                        await _record_metric("listener_disconnected", account_id, user_id)
                         break
                     retry_count = 0
                     if not await _listener_intent_active(account_id, user_id):
@@ -346,6 +377,8 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001
+                metric = "listener_error" if connection is not None else "listener_connect_failure"
+                await _record_metric(metric, account_id, user_id, error.__class__.__name__)
                 retry_count += 1
                 if retry_count > 5:
                     logger.exception("[IMWorker] max retries exceeded for %s", account_id[:8])
