@@ -1,14 +1,12 @@
-import { authApi, HttpError, setTokens } from "@oral/api-client";
+import { HttpError } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-/** 登录/注册（F-601：JWT 双令牌 + 设备绑定） */
+/** 登录页（激活码注册入口） */
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [nickname, setNickname] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const login = useSession((s) => s.login);
@@ -21,14 +19,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      if (mode === "register") {
-        const tokens = await authApi.register(phone, password, nickname || phone.slice(-4));
-        setTokens(tokens);
-        // 注册后直接补登录态
-        await login(phone, password);
-      } else {
-        await login(phone, password);
-      }
+      await login(phone, password);
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof HttpError ? err.body.message : "网络异常，请稍后再试");
@@ -51,21 +42,6 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={submit} className="glass-strong space-y-4 p-6">
-          <div className="mb-2 grid grid-cols-2 gap-1 rounded-xl bg-white/5 p-1">
-            {(["login", "register"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`rounded-lg py-1.5 text-sm transition-colors ${
-                  mode === m ? "bg-brand-grad text-white" : "text-text-3 hover:text-text-1"
-                }`}
-              >
-                {m === "login" ? "登录" : "注册"}
-              </button>
-            ))}
-          </div>
-
           <div>
             <label className="label">手机号</label>
             <input
@@ -76,17 +52,6 @@ export default function LoginPage() {
               required
             />
           </div>
-          {mode === "register" && (
-            <div>
-              <label className="label">昵称</label>
-              <input
-                className="input"
-                value={nickname}
-                onChange={(e) => setNickname(e.target.value)}
-                placeholder="你的 IP 称呼（可后改）"
-              />
-            </div>
-          )}
           <div>
             <label className="label">密码</label>
             <input
@@ -107,11 +72,18 @@ export default function LoginPage() {
           )}
 
           <button type="submit" disabled={loading} className="btn-primary w-full py-2.5">
-            {loading ? "请稍候…" : mode === "login" ? "登录" : "注册并进入"}
+            {loading ? "请稍候…" : "登录"}
           </button>
 
           <p className="text-center text-xs text-text-3">
-            新用户注册即赠 <span className="text-grad font-bold">12,430</span> 算力点数
+            还没有账号？{" "}
+            <button
+              type="button"
+              onClick={() => navigate("/activate")}
+              className="text-grad font-medium hover:underline"
+            >
+              激活码注册
+            </button>
           </p>
         </form>
       </div>

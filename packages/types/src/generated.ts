@@ -282,6 +282,7 @@ export interface PublishIn {
 export interface QrcodePollOut {
   "status": string;
   "account"?: AccountOut | null;
+  "qrcodeUrl"?: string | null;
 }
 
 export interface QrcodeStartOut {

@@ -15,6 +15,9 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   shipinhao: "视频号",
 };
 
+/** 支持账号绑定与发布的平台（快手仅支持链接解析去水印，不可绑定发布） */
+export const PUBLISH_PLATFORMS: Platform[] = ["douyin", "xiaohongshu", "shipinhao"];
+
 /** 算力通道（MVP 恒为 cloud；V1.5+ 本地引擎开放后出现 local） */
 export type ComputeChannel = "cloud" | "local";
 
@@ -69,6 +72,9 @@ export interface User {
   nickname: string;
   avatarChar: string;
   createdAt: string;
+  planType?: string;
+  planExpiresAt?: string | null;
+  activatedAt?: string | null;
 }
 
 export interface AuthTokens {

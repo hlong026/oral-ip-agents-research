@@ -37,6 +37,48 @@ export const authApi = {
   me: () => http.get<User>("/auth/me"),
 };
 
+// ---------- activation（激活码） ----------
+export interface CodeInfo {
+  valid: boolean;
+  planType: string;
+  quotaAmount: number;
+  durationDays: number;
+  message: string;
+}
+
+export interface ActivateResult {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  planType: string;
+  planExpiresAt: string | null;
+  quotaBalance: number;
+}
+
+export interface RedeemResult {
+  planType: string;
+  planExpiresAt: string | null;
+  quotaGranted: number;
+  newBalance: number;
+}
+
+export interface SubscriptionInfo {
+  planType: string;
+  planExpiresAt: string | null;
+  activatedAt: string | null;
+  quotaBalance: number;
+}
+
+export const activationApi = {
+  validateCode: (code: string) =>
+    http.post<CodeInfo>("/activation/validate-code", { code }),
+  activate: (code: string, phone: string, password: string, nickname: string, deviceFingerprint = "web") =>
+    http.post<ActivateResult>("/activation/activate", { code, phone, password, nickname, deviceFingerprint }),
+  redeem: (code: string) =>
+    http.post<RedeemResult>("/activation/redeem", { code }),
+  subscription: () => http.get<SubscriptionInfo>("/activation/subscription"),
+};
+
 // ---------- billing ----------
 export const billingApi = {
   quota: () => http.get<Quota>("/billing/quota"),
@@ -150,12 +192,14 @@ export const publishApi = {
   qrcodeStart: (platform: Platform) =>
     http.post<{ ticket: string; qrcodeUrl: string }>(`/publish/accounts/qrcode?platform=${platform}`),
   qrcodePoll: (ticket: string, platform: Platform) =>
-    http.get<{ status: "waiting" | "success" | "expired"; account?: PublishAccount | null }>(
+    http.get<{ status: "waiting" | "success" | "expired"; account?: PublishAccount | null; qrcodeUrl?: string | null }>(
       `/publish/accounts/qrcode/${ticket}?platform=${platform}`,
     ),
   reauth: (accountId: string) =>
     http.post<{ ticket: string; qrcodeUrl: string }>(`/publish/accounts/${accountId}/reauth`),
   deleteAccount: (accountId: string) => http.delete<void>(`/publish/accounts/${accountId}`),
+  renameAccount: (accountId: string, nickname: string) =>
+    http.patch<PublishAccount>(`/publish/accounts/${accountId}`, { nickname }),
   jobs: (status?: string, page = 1, pageSize = 20) =>
     http.get<Page<PublishJob>>(
       `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,

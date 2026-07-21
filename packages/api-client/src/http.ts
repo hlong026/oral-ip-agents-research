@@ -110,5 +110,7 @@ export const http = {
     rawFetch<T>(path, { method: "POST", body: body instanceof FormData ? body : JSON.stringify(body ?? {}) }),
   put: <T>(path: string, body?: unknown) =>
     rawFetch<T>(path, { method: "PUT", body: JSON.stringify(body ?? {}) }),
+  patch: <T>(path: string, body?: unknown) =>
+    rawFetch<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
   delete: <T>(path: string) => rawFetch<T>(path, { method: "DELETE" }),
 };

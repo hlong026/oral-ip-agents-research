@@ -1,14 +1,23 @@
-import { imApi, type IMConversation, type IMMessage } from "@oral/api-client";
+import { imApi, publishApi, type IMConversation, type IMMessage } from "@oral/api-client";
+import type { PublishAccount } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import PlatformIcon from "../components/PlatformIcon";
 
-/** 私信中心：会话列表 + 对话气泡 */
+/** 私信中心：账号筛选 + 会话列表 + 对话气泡 */
 export default function ImCenterPage() {
   const queryClient = useQueryClient();
   const [activeConv, setActiveConv] = useState<IMConversation | null>(null);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [filterAccountId, setFilterAccountId] = useState<string>("");
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const { data: accounts } = useQuery({
+    queryKey: ["publish-accounts"],
+    queryFn: () => publishApi.accounts(),
+    refetchInterval: 60_000,
+  });
 
   const { data: convData } = useQuery({
     queryKey: ["im-conversations"],
@@ -23,7 +32,19 @@ export default function ImCenterPage() {
     refetchInterval: 5_000,
   });
 
-  const conversations = convData?.items ?? [];
+  const accountList: PublishAccount[] = accounts ?? [];
+  const accountMap = useMemo(() => {
+    const m = new Map<string, PublishAccount>();
+    accountList.forEach((a) => m.set(a.id, a));
+    return m;
+  }, [accountList]);
+
+  const conversations = useMemo(() => {
+    const items = convData?.items ?? [];
+    if (!filterAccountId) return items;
+    return items.filter((c) => c.accountId === filterAccountId);
+  }, [convData, filterAccountId]);
+
   const messages = (msgData?.items ?? []).slice().reverse();
 
   useEffect(() => {
@@ -66,7 +87,20 @@ export default function ImCenterPage() {
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)" }}>
         {/* 会话列表 */}
         <div className="glass flex w-72 shrink-0 flex-col overflow-hidden">
-          <div className="border-b border-stroke px-4 py-3 text-sm font-medium">
+          {/* 账号筛选器 */}
+          <div className="border-b border-stroke px-3 py-2">
+            <select
+              value={filterAccountId}
+              onChange={(e) => { setFilterAccountId(e.target.value); setActiveConv(null); }}
+              className="w-full rounded-lg border border-stroke bg-white/5 px-2.5 py-1.5 text-xs outline-none focus:border-brand-from/50"
+            >
+              <option value="">全部账号</option>
+              {accountList.filter((a) => a.platform === "douyin").map((a) => (
+                <option key={a.id} value={a.id}>{a.nickname}</option>
+              ))}
+            </select>
+          </div>
+          <div className="border-b border-stroke px-4 py-2.5 text-sm font-medium">
             会话（{conversations.length}）
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -84,6 +118,9 @@ export default function ImCenterPage() {
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium">{conv.remoteNickname || "未知用户"}</span>
                   <span className="block truncate text-xs text-text-3">
+                    {accountMap.get(conv.accountId)?.nickname && (
+                      <span className="mr-1 text-brand-from/70">@{accountMap.get(conv.accountId)!.nickname}</span>
+                    )}
                     {new Date(conv.lastMessageAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </span>
                 </span>
@@ -104,9 +141,16 @@ export default function ImCenterPage() {
         <div className="glass flex min-w-0 flex-1 flex-col overflow-hidden">
           {activeConv ? (
             <>
-              <div className="border-b border-stroke px-4 py-3">
+              <div className="flex items-center gap-2 border-b border-stroke px-4 py-3">
+                <PlatformIcon platform="douyin" size={16} />
                 <span className="text-sm font-medium">{activeConv.remoteNickname || "未知用户"}</span>
-                <span className="ml-2 text-xs text-text-3">UID: {activeConv.remoteUid}</span>
+                <span className="text-xs text-text-3">UID: {activeConv.remoteUid}</span>
+                {accountMap.get(activeConv.accountId) && (
+                  <span className="ml-auto chip text-[10px]">
+                    <PlatformIcon platform="douyin" size={12} />
+                    {accountMap.get(activeConv.accountId)!.nickname}
+                  </span>
+                )}
               </div>
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
                 {messages.map((msg) => (
