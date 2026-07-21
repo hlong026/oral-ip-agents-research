@@ -3,6 +3,7 @@ Provider 抽象层（06 文档 §10.3）：七类 Protocol，防供应商锁定�
 - clone() 均强制 consent_token（合规红线）
 - 降级链：主实现异常 → StepRecoverableError → registry 换实现重试，降级事件任务中心可见
 """
+
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -39,7 +40,7 @@ class ParseResult:
     platform: str
     title: str
     video_key: str | None = None  # 去水印视频存储 key
-    degraded: bool = False        # 是否走了降级（手动上传/粘贴）
+    degraded: bool = False  # 是否走了降级（手动上传/粘贴）
 
 
 @dataclass
@@ -85,8 +86,7 @@ class ASRProvider(Protocol):
 class VoiceProvider(Protocol):
     name: str
 
-    async def clone(self, name: str, sample_key: str, consent_token: str,
-                    language: str = "zh") -> str: ...
+    async def clone(self, name: str, sample_key: str, consent_token: str, language: str = "zh") -> str: ...
     async def query_clone_task(self, task_id: str) -> dict[str, Any]: ...
     async def synthesize(self, voice_id: str, text: str, speed: float = 1.0) -> SynthesizeResult: ...
     async def list_voices(self) -> list[dict[str, Any]]: ...
@@ -99,8 +99,9 @@ class AvatarProvider(Protocol):
     async def clone_by_image(self, name: str, image_key: str, model: int = 2) -> str: ...
     async def query_avatar_task(self, task_id: str) -> dict[str, Any]: ...
     async def create_by_audio(self, avatar_id: str, audio_key: str) -> str: ...
-    async def create_by_tts(self, avatar_id: str, voice_id: str, text: str,
-                            subtitle_opts: dict[str, Any] | None = None) -> str: ...
+    async def create_by_tts(
+        self, avatar_id: str, voice_id: str, text: str, subtitle_opts: dict[str, Any] | None = None
+    ) -> str: ...
     async def query_video_task(self, task_id: str) -> dict[str, Any]: ...
     async def poll_video_task(self, task_id: str) -> dict[str, Any]: ...
     async def download_video(self, temp_url: str) -> str: ...
@@ -139,5 +140,13 @@ class PublishDriver(Protocol):
 
     async def qrcode_login(self) -> dict[str, str]: ...  # {qrcodeUrl, ticket}
     async def check_login(self, ticket: str) -> dict[str, Any] | None: ...
-    async def publish(self, account_session: dict[str, Any], video_key: str,
-                      title: str, topics: list[str], cover_key: str | None) -> str: ...
+    async def publish(
+        self,
+        account_session: dict[str, Any],
+        video_key: str,
+        title: str,
+        topics: list[str],
+        cover_key: str | None,
+        scheduled_at: str | None = None,
+        account_id: str = "",
+    ) -> str: ...

@@ -1,4 +1,5 @@
 """voice 出入参（白标：不暴露供应商品牌）"""
+
 from pydantic import BaseModel
 
 
@@ -25,9 +26,9 @@ class CloneStatusOut(BaseModel):
 
 
 class VoiceEditIn(BaseModel):
-    rate: str = "1.0"    # 0.5 ~ 2.0
+    rate: str = "1.0"  # 0.5 ~ 2.0
     volume: str = "1.0"  # 0.1 ~ 2.0
-    pitch: str = "1.0"   # 0.1 ~ 2.0
+    pitch: str = "1.0"  # 0.1 ~ 2.0
 
 
 class SynthesizeIn(BaseModel):

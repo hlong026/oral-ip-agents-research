@@ -30,7 +30,9 @@ export default function TasksPage() {
 
   // WS 推送的实时任务覆盖列表中的同 id 任务
   const items = useMemo(() => {
-    let list: PipelineTask[] = (data?.items ?? []).map((t) => tasksMap[t.id] ?? t);
+    let list: PipelineTask[] = (data?.items ?? []).map(
+      (t) => tasksMap[t.id] ?? t,
+    );
     if (q) list = list.filter((t) => t.title.includes(q));
     return list;
   }, [data, tasksMap, q]);
@@ -40,7 +42,9 @@ export default function TasksPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold">任务中心</h1>
-          <p className="mt-1 text-sm text-text-3">8 步流水线实时进度 · 单步重跑 / 人工覆盖 / 批量队列</p>
+          <p className="mt-1 text-sm text-text-3">
+            8 步流水线实时进度 · 单步重跑 / 人工覆盖 / 批量队列
+          </p>
         </div>
         <Link to="/create" className="btn-primary">
           ⚡ 一键成片
@@ -60,10 +64,16 @@ export default function TasksPage() {
             {f.label}
           </button>
         ))}
-        {q && <span className="chip border-brand-to/40 text-brand-to">搜索：{q}</span>}
+        {q && (
+          <span className="chip border-brand-to/40 text-brand-to">
+            搜索：{q}
+          </span>
+        )}
       </div>
 
-      {isLoading && <div className="py-16 text-center text-text-3">加载中…</div>}
+      {isLoading && (
+        <div className="py-16 text-center text-text-3">加载中…</div>
+      )}
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {items.map((t) => (
@@ -82,7 +92,11 @@ export default function TasksPage() {
 
       {(data?.total ?? 0) > 12 && (
         <div className="flex items-center justify-center gap-3 text-sm">
-          <button className="btn-ghost px-3 py-1" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+          <button
+            className="btn-ghost px-3 py-1"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
             上一页
           </button>
           <span className="text-text-3">

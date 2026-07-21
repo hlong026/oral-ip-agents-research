@@ -1,4 +1,5 @@
 """一次性：对 dev 库（server/oral.db）执行 alembic upgrade head（用后删除）"""
+
 import os
 
 os.chdir(os.path.dirname(os.path.abspath(__file__)))

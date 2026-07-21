@@ -1,4 +1,5 @@
 """对象存储：local（MVP 默认）/ s3（MinIO）；产物落库用相对 key，访问走 /media 路由"""
+
 import uuid
 from pathlib import Path
 

@@ -197,10 +197,21 @@ function Playground({
 export default function VoicesPage() {
   const queryClient = useQueryClient();
   const { current, personas, load } = useIp();
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
 
   const { data: voices, refetch } = useQuery({
     queryKey: ["voices"],
-    queryFn: () => voiceApi.list(),
+    queryFn: async () => {
+      const listed = await voiceApi.list();
+      const updates = await Promise.all(
+        listed
+          .filter((voice) => voice.status === "training")
+          .map((voice) => voiceApi.status(voice.id)),
+      );
+      const byId = new Map(updates.map((voice) => [voice.id, voice]));
+      return listed.map((voice) => ({ ...voice, ...byId.get(voice.id) }));
+    },
     refetchInterval: (q) =>
       (q.state.data ?? []).some((v) => v.status === "training") ? 5000 : false,
   });
@@ -217,6 +228,26 @@ export default function VoicesPage() {
     if (!current) return;
     await personaApi.update(current.id, { voiceId: v.id });
     await load();
+  };
+
+  const finishConfirmation = async (
+    voice: Voice,
+    action: "confirm" | "reject",
+  ) => {
+    setActionId(voice.id);
+    setActionError("");
+    try {
+      const updated = await voiceApi[action](voice.id);
+      queryClient.setQueryData<Voice[]>(["voices"], (currentVoices = []) =>
+        currentVoices.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof HttpError ? error.body.message : "操作失败，请重试",
+      );
+    } finally {
+      setActionId(null);
+    }
   };
 
   // 卡内试听：全局单例 Audio，切换卡片自动停上一段
@@ -326,6 +357,16 @@ export default function VoicesPage() {
                         训练中
                       </span>
                     )}
+                    {v.status === "pending_confirm" && (
+                      <span className="chip border-info/40 text-[11px] text-info">
+                        待试听确认
+                      </span>
+                    )}
+                    {v.status === "rejected" && (
+                      <span className="chip border-stroke text-[11px] text-text-3">
+                        已拒绝
+                      </span>
+                    )}
                     {v.status === "failed" && (
                       <span className="chip border-danger/40 text-[11px] text-danger">
                         失败
@@ -351,6 +392,27 @@ export default function VoicesPage() {
                           }}
                         />
                       ))}
+                    </div>
+                  )}
+                  {v.status === "pending_confirm" && v.demoUrl && (
+                    <div className="mt-3 space-y-2 rounded-xl border border-info/20 bg-info/5 p-3">
+                      <audio className="w-full" controls src={v.demoUrl} />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          className="btn-ghost px-3 py-1 text-xs text-danger"
+                          disabled={actionId === v.id}
+                          onClick={() => void finishConfirmation(v, "reject")}
+                        >
+                          拒绝结果
+                        </button>
+                        <button
+                          className="btn-primary px-3 py-1 text-xs"
+                          disabled={actionId === v.id}
+                          onClick={() => void finishConfirmation(v, "confirm")}
+                        >
+                          确认使用
+                        </button>
+                      </div>
                     </div>
                   )}
                   <div className="mt-3 flex items-center justify-between">
@@ -381,6 +443,11 @@ export default function VoicesPage() {
             {(voices ?? []).length === 0 && (
               <div className="col-span-full py-10 text-center text-text-3">
                 暂无声音，先在右侧克隆一个吧
+              </div>
+            )}
+            {actionError && (
+              <div className="col-span-full text-sm text-danger">
+                {actionError}
               </div>
             )}
           </div>

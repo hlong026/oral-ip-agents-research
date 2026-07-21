@@ -1,4 +1,5 @@
 """dashboard 聚合（工作台数据卡 + 动态流）"""
+
 from datetime import UTC
 
 from fastapi import APIRouter, Depends, Query
@@ -66,7 +67,12 @@ async def feed(
     for t in items:
         type_, label = _STATUS_FEED.get(t.status, ("info", t.status))
         step = f" · {t.current_step}" if t.status == "running" and t.current_step else ""
-        out.append(FeedEvent(
-            id=t.id[:12], type=type_, text=f"「{t.title[:18]}」{label}{step}",
-            createdAt=t.updated_at.astimezone(UTC).isoformat()))
+        out.append(
+            FeedEvent(
+                id=t.id[:12],
+                type=type_,
+                text=f"「{t.title[:18]}」{label}{step}",
+                createdAt=t.updated_at.astimezone(UTC).isoformat(),
+            )
+        )
     return out

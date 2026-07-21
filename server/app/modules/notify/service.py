@@ -1,4 +1,5 @@
 """notify 业务编排（F-734 部分：站内信 + 实时告警）"""
+
 from datetime import UTC
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,5 +35,10 @@ async def mark_all_read(db: AsyncSession, user_id: str) -> None:
 
 def to_out(n: Notification) -> NotificationOut:
     return NotificationOut(
-        id=n.id, level=n.level, title=n.title, body=n.body, read=n.read,
-        createdAt=n.created_at.astimezone(UTC).isoformat())
+        id=n.id,
+        level=n.level,
+        title=n.title,
+        body=n.body,
+        read=n.read,
+        createdAt=n.created_at.astimezone(UTC).isoformat(),
+    )

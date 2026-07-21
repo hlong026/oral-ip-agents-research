@@ -1,4 +1,5 @@
 """首次部署管理员引导；只读取服务端环境变量，不开放注册接口。"""
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings

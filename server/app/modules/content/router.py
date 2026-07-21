@@ -14,6 +14,8 @@ from app.providers.duration_probe import probe_media_bytes
 from .schemas import (
     ParseIn,
     ParseOut,
+    ProbeUrlIn,
+    ProbeUrlOut,
     RewriteIn,
     RewriteOut,
     ScriptCreateIn,
@@ -30,12 +32,22 @@ from .service import (
     parse_by_id,
     parse_upload,
     parse_url,
+    probe_url_duration,
     rewrite,
     similarity,
     topics,
 )
 
 router = APIRouter(prefix="/content", tags=["content"])
+
+
+@router.post("/probe", response_model=ProbeUrlOut)
+async def api_probe_url(
+    body: ProbeUrlIn,
+    _user_id: str = Depends(get_current_user_id),
+) -> ProbeUrlOut:
+    duration = await probe_url_duration(body.url, required=True)
+    return ProbeUrlOut(durationSeconds=duration or 0)
 
 
 @router.post("/parse", response_model=ParseOut)
@@ -78,9 +90,11 @@ async def api_parse(
         # JSON 形式兼容
         return ParseOut(transcript=None, degraded=True, platform=None, title=None)
     unit = await quote_operation_unit(db, user_id, quoteId, "asr")
-    max_duration = 60 if unit in {"per_minute", "per_second"} else None
-    async with metered_operation(db, user_id, quoteId, "asr", {"seconds": 60, "assets": 1}):
-        return await parse_url(db, user_id, target, persona_id, max_duration)
+    time_priced = unit in {"per_minute", "per_second"}
+    duration = await probe_url_duration(target, required=True) if time_priced else None
+    seconds = max(1, math.ceil(duration or 1))
+    async with metered_operation(db, user_id, quoteId, "asr", {"seconds": seconds, "assets": 1}):
+        return await parse_url(db, user_id, target, persona_id, duration)
 
 
 @router.post("/parse/json", response_model=ParseOut)
@@ -92,11 +106,22 @@ async def api_parse_json(
 ):
     # 支持两种输入：url 或 videoId + platform
     unit = await quote_operation_unit(db, user_id, body.quoteId, "asr")
-    max_duration = 60 if unit in {"per_minute", "per_second"} else None
-    async with metered_operation(db, user_id, body.quoteId, "asr", {"seconds": 60, "assets": 1}):
+    time_priced = unit in {"per_minute", "per_second"}
+    if body.videoId and body.platform:
+        if body.platform == "douyin":
+            target = f"https://www.douyin.com/video/{body.videoId}"
+        elif body.platform == "xiaohongshu":
+            target = f"https://www.xiaohongshu.com/explore/{body.videoId}"
+        else:
+            target = body.videoId
+    else:
+        target = body.url or ""
+    duration = await probe_url_duration(target, required=True) if time_priced else None
+    seconds = max(1, math.ceil(duration or 1))
+    async with metered_operation(db, user_id, body.quoteId, "asr", {"seconds": seconds, "assets": 1}):
         if body.videoId and body.platform:
-            return await parse_by_id(db, user_id, body.videoId, body.platform, persona_id, max_duration)
-        return await parse_url(db, user_id, body.url or "", persona_id, max_duration)
+            return await parse_by_id(db, user_id, body.videoId, body.platform, persona_id, duration)
+        return await parse_url(db, user_id, target, persona_id, duration)
 
 
 @router.post("/rewrite", response_model=RewriteOut)

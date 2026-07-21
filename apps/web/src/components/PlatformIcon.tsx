@@ -17,7 +17,13 @@ const SVGS: Record<Platform, string> = {
  * 平台品牌图标：内联官方 SVG，随 size 等比缩放。
  * 抖音图标自带黑色圆角底，深色主题下加细描边区分边界。
  */
-export default function PlatformIcon({ platform, size = 20 }: { platform: Platform; size?: number }) {
+export default function PlatformIcon({
+  platform,
+  size = 20,
+}: {
+  platform: Platform;
+  size?: number;
+}) {
   return (
     <span
       role="img"

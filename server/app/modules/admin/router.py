@@ -1,4 +1,5 @@
 """管理员用户、成本和审计查询。"""
+
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -161,10 +162,7 @@ async def list_audit(
 ):
     total = int((await db.execute(select(func.count(AuditLog.id)))).scalar() or 0)
     rows = await db.execute(
-        select(AuditLog)
-        .order_by(AuditLog.created_at.desc())
-        .offset((page - 1) * pageSize)
-        .limit(pageSize)
+        select(AuditLog).order_by(AuditLog.created_at.desc()).offset((page - 1) * pageSize).limit(pageSize)
     )
     return {
         "items": [

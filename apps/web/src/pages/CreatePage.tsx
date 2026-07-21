@@ -256,11 +256,13 @@ function StepScript({
     const run = async () => {
       try {
         if (wiz.sourceUrl) {
+          const durationSeconds = (await contentApi.probe(wiz.sourceUrl))
+            .durationSeconds;
           const parseQuoteId = await confirmMeteredOperation(
             "asr",
             "链接转写",
             {
-              seconds: 60,
+              seconds: durationSeconds,
               assets: 1,
             },
           );

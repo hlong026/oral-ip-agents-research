@@ -1,56 +1,123 @@
-"""
-Webhook 回调处理（供应商任务完成通知）
-按 type 分发：
-- type=1：创作任务完成 → 更新 pipeline 产物
-- type=2：数字人克隆完成 → 更新 avatar status
-- type=3：声音克隆完成 → 下载 demo 转存 → 更新 voice status
-幂等：task_id 去重，防重复处理
-"""
-import logging
+"""Signed webhook dispatch with durable delivery receipts."""
 
+import hashlib
+import json
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
+from app.core.logging import get_logger
+
+from .models import WebhookEvent
+
+logger = get_logger("oral.webhook")
 
 
-async def handle_callback(db: AsyncSession, payload: dict) -> None:
-    """统一回调分发"""
-    msg_type = payload.get("type", 0)
-    task_id = payload.get("task_id", "")
-    status_code = payload.get("status", 0)
+async def handle_callback(
+    db: AsyncSession,
+    payload: dict,
+    *,
+    event_id: str = "",
+) -> bool:
+    """Claim a delivery once, then record whether dispatch succeeded."""
+    msg_type = int(payload.get("type", 0) or 0)
+    task_id = str(payload.get("task_id", "") or "")
+    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    payload_hash = hashlib.sha256(payload_json.encode()).hexdigest()
+    event_id = str(event_id or payload.get("event_id") or payload.get("eventId") or "")
+    if not event_id:
+        event_id = f"task:{msg_type}:{task_id}:{payload_hash[:16]}"
 
-    if not task_id:
-        logger.warning(f"webhook: missing task_id, payload={payload}")
-        return
+    receipt = WebhookEvent(
+        provider="hifly",
+        event_id=event_id[:128],
+        msg_type=msg_type,
+        provider_task_id=task_id[:64],
+        payload_hash=payload_hash,
+    )
+    db.add(receipt)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.info(
+            "webhook_duplicate_ignored",
+            provider="hifly",
+            event_id=event_id[:128],
+            task_id=task_id[:64],
+            msg_type=msg_type,
+        )
+        return False
+
+    try:
+        if not task_id:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "TASK_ID_REQUIRED", "message": "回调缺少 task_id"},
+            )
+        await _dispatch_callback(db, payload)
+    except Exception as exc:
+        await db.rollback()
+        current_receipt = await db.get(WebhookEvent, receipt.id)
+        if current_receipt:
+            current_receipt.status = "failed"
+            current_receipt.error_context = (
+                f"type={msg_type},task={task_id[:64]},error={type(exc).__name__}:{str(exc)[:300]}"
+            )
+            current_receipt.processed_at = datetime.now(UTC)
+            await db.commit()
+        logger.exception(
+            "webhook_dispatch_failed",
+            provider="hifly",
+            event_id=event_id[:128],
+            task_id=task_id[:64],
+            msg_type=msg_type,
+        )
+        raise
+
+    current_receipt = await db.get(WebhookEvent, receipt.id)
+    if current_receipt:
+        current_receipt.status = "succeeded"
+        current_receipt.processed_at = datetime.now(UTC)
+        await db.commit()
+    return True
+
+
+async def _dispatch_callback(db: AsyncSession, payload: dict) -> None:
+    msg_type = int(payload.get("type", 0) or 0)
+    task_id = str(payload.get("task_id", "") or "")
+    status_code = int(payload.get("status", 0) or 0)
 
     if msg_type == 3:
-        # 声音克隆完成
         from app.modules.voice.service import handle_voice_callback
 
-        voice_id = payload.get("voice", "")
-        demo_url = payload.get("demo_url", "")
-        await handle_voice_callback(db, task_id, status_code, voice_id, demo_url)
-        logger.info(f"webhook: voice clone callback processed, task_id={task_id}, status={status_code}")
-
+        await handle_voice_callback(
+            db,
+            task_id,
+            status_code,
+            str(payload.get("voice", "") or ""),
+            str(payload.get("demo_url", "") or ""),
+        )
     elif msg_type == 2:
-        # 数字人克隆完成
         from app.modules.avatar.service import handle_avatar_callback
 
-        avatar_id = payload.get("avatar", "")
-        await handle_avatar_callback(db, task_id, status_code, avatar_id)
-        logger.info(f"webhook: avatar clone callback processed, task_id={task_id}, status={status_code}")
-
-    elif msg_type == 1:
-        # 创作任务完成（视频生成）
-        video_url = payload.get("video_Url", "")
-        duration = payload.get("duration", 0)
-        title = payload.get("title", "")
-        logger.info(
-            f"webhook: video creation callback, task_id={task_id}, "
-            f"status={status_code}, duration={duration}, title={title}"
+        await handle_avatar_callback(
+            db,
+            task_id,
+            status_code,
+            str(payload.get("avatar", "") or ""),
         )
-        # 视频创作回调目前由 pipeline 轮询处理，此处仅记录日志
-        # 后续可扩展为主动更新 pipeline task 产物
-
+    elif msg_type == 1:
+        logger.info(
+            "webhook_video_callback_received",
+            task_id=task_id,
+            provider_status=status_code,
+            duration=payload.get("duration", 0),
+        )
     else:
-        logger.warning(f"webhook: unknown type={msg_type}, task_id={task_id}")
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "UNSUPPORTED_WEBHOOK", "message": "不支持的回调类型"},
+        )

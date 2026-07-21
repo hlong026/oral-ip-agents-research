@@ -10,9 +10,20 @@ import type { FeedEvent } from "@oral/types";
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
   | { kind: "publish_updated"; jobId: string; userId?: string; status: string }
-  | { kind: "provider_fallback"; provider_kind?: string; to?: string; taskId?: string; message?: string }
+  | {
+      kind: "provider_fallback";
+      provider_kind?: string;
+      to?: string;
+      taskId?: string;
+      message?: string;
+    }
   | { kind: "feed"; event: FeedEvent; userId?: string }
-  | { kind: "alert"; level: "info" | "warn" | "error"; message: string; body?: string }
+  | {
+      kind: "alert";
+      level: "info" | "warn" | "error";
+      message: string;
+      body?: string;
+    }
   | { kind: "ping" };
 
 type Listener = (ev: TaskEvent) => void;
@@ -23,10 +34,12 @@ export class TaskSocket {
   private retries = 0;
   private closedByUser = false;
   private url: string;
+  private token: string;
 
   constructor(token: string) {
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.url = `${proto}://${location.host}/ws/tasks?token=${encodeURIComponent(token)}`;
+    this.url = `${proto}://${location.host}/ws/tasks`;
+    this.token = token;
   }
 
   connect() {
@@ -36,7 +49,7 @@ export class TaskSocket {
 
   private open() {
     try {
-      this.ws = new WebSocket(this.url);
+      this.ws = new WebSocket(this.url, ["access-token", this.token]);
     } catch {
       this.scheduleReconnect();
       return;

@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_secret: str = "dev-secret-change-me"
     config_encryption_key: str = ""  # Provider 密钥专用；生产环境必须与 JWT APP_SECRET 分离
+    publish_session_encryption_key: str = ""  # 发布 Cookie 专用 Fernet 密钥
     bootstrap_admin_phone: str = ""
     bootstrap_admin_password: str = ""
     api_prefix: str = "/api/v1"
@@ -36,6 +37,9 @@ class Settings(BaseSettings):
 
     # 激活码
     activation_secret: str = ""  # 激活码 HMAC 签名密钥（空则回退 app_secret）
+    activation_failure_limit: int = 5
+    activation_rate_window_seconds: int = 600
+    activation_lock_seconds: int = 900
 
     # LLM
     deepseek_api_key: str = ""
@@ -86,6 +90,7 @@ class Settings(BaseSettings):
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
 
     # 抖音 IM 私信（#11: APP_KEY 移入配置，未配置时自动降级到 MockIMProvider）
+    im_enabled: bool = False
     douyin_im_app_key: str = ""
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
@@ -97,7 +102,7 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings) -> None:
-    if settings.app_env == "dev":
+    if settings.app_env in {"dev", "test"}:
         return
     missing: list[str] = []
     if settings.app_secret == "dev-secret-change-me":
@@ -106,5 +111,9 @@ def validate_runtime_security(settings: Settings) -> None:
         missing.append("CONFIG_ENCRYPTION_KEY")
     if not settings.activation_secret:
         missing.append("ACTIVATION_SECRET")
+    if not settings.publish_session_encryption_key:
+        missing.append("PUBLISH_SESSION_ENCRYPTION_KEY")
+    if not settings.feiying_webhook_secret:
+        missing.append("FEIYING_WEBHOOK_SECRET")
     if missing:
         raise RuntimeError("生产环境缺少安全配置：" + ", ".join(missing))

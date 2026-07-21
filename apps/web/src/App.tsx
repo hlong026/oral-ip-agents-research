@@ -10,6 +10,7 @@ import AvatarsPage from "./pages/AvatarsPage";
 import CreatePage from "./pages/CreatePage";
 import DashboardPage from "./pages/DashboardPage";
 import EditorPage from "./pages/EditorPage";
+import { IM_ENABLED } from "./config/features";
 import ImCenterPage from "./pages/ImCenterPage";
 import ImRulesPage from "./pages/ImRulesPage";
 import LoginPage from "./pages/LoginPage";
@@ -71,8 +72,8 @@ export default function App() {
         <Route path="/publish/jobs" element={<PublishJobsPage />} />
         <Route path="/publish/logs" element={<PublishJobsPage showLogs />} />
         <Route path="/publish/accounts" element={<PublishAccountsPage />} />
-        <Route path="/im" element={<ImCenterPage />} />
-        <Route path="/im/rules" element={<ImRulesPage />} />
+        {IM_ENABLED && <Route path="/im" element={<ImCenterPage />} />}
+        {IM_ENABLED && <Route path="/im/rules" element={<ImRulesPage />} />}
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/account" element={<AccountPage />} />

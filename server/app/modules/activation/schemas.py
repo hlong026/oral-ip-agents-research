@@ -25,6 +25,7 @@ class ValidateCodeIn(BaseModel):
     """预校验码有效性"""
 
     code: str = Field(min_length=10, max_length=40)
+    deviceFingerprint: str = Field(default="", max_length=64)
 
 
 class CodeInfoOut(BaseModel):

@@ -4,8 +4,11 @@
 - trace_id / user_id / task_id 全链路贯通
 - dev 环境彩色可读，prod 环境 JSON 输出
 """
+
 import logging
+from collections.abc import MutableMapping
 from contextvars import ContextVar
+from typing import Any
 
 import structlog
 
@@ -15,13 +18,24 @@ user_id_var: ContextVar[str] = ContextVar("user_id", default="")
 task_id_var: ContextVar[str] = ContextVar("task_id", default="")
 
 # ---- 敏感字段脱敏规则（§10.6.5）----
-_SENSITIVE_KEYS = {"password", "password_hash", "consent_token", "consenttoken",
-                   "access_token", "accesstoken", "refresh_token", "refreshtoken",
-                   "session_json", "api_key", "apikey", "authorization"}
+_SENSITIVE_KEYS = {
+    "password",
+    "password_hash",
+    "consent_token",
+    "consenttoken",
+    "access_token",
+    "accesstoken",
+    "refresh_token",
+    "refreshtoken",
+    "session_json",
+    "api_key",
+    "apikey",
+    "authorization",
+}
 _TRUNCATE_KEYS = {"source_url": 80, "script": 100, "text": 100, "original_text": 100}
 
 
-def _inject_context(logger: logging.Logger, method_name: str, event_dict: dict) -> dict:
+def _inject_context(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     """注入 contextvars 中的 trace_id / user_id / task_id"""
     tid = trace_id_var.get()
     uid = user_id_var.get()
@@ -35,7 +49,7 @@ def _inject_context(logger: logging.Logger, method_name: str, event_dict: dict) 
     return event_dict
 
 
-def _sanitize(logger: logging.Logger, method_name: str, event_dict: dict) -> dict:
+def _sanitize(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
     """敏感信息脱敏（§10.6.5）"""
     for key in list(event_dict.keys()):
         lower_key = key.lower().replace("-", "_")
@@ -61,6 +75,7 @@ def setup_logging(app_env: str = "dev") -> None:
     - prod: JSON 格式（Docker json-file driver 采集）
     """
     # 渲染器选择
+    renderer: Any
     if app_env == "dev":
         renderer = structlog.dev.ConsoleRenderer(colors=True)
     else:

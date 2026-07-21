@@ -1,4 +1,5 @@
 """套餐 SKU 与模块积分价格出入参。"""
+
 from datetime import datetime
 from typing import Literal
 

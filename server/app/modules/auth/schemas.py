@@ -1,4 +1,5 @@
 """auth 模块 Pydantic 出入参"""
+
 from pydantic import BaseModel, Field
 
 

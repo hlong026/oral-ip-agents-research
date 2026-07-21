@@ -109,7 +109,7 @@ export default function ActivationPage() {
       <section className="glass p-5">
         <h2 className="text-xl font-semibold">一次性激活码</h2>
         <p className="mt-1 text-sm text-text-3">
-          后端不应在列表接口再次返回完整明文码，请立即复制保存。
+          明文码固定为 ORAL 加五组四位字符；CSV 仅在生成后提供一次，请立即保存。
         </p>
         {generate.data ? (
           <div className="mt-4">

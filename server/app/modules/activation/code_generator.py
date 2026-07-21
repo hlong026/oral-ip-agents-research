@@ -1,6 +1,6 @@
 """激活码生成算法（HMAC-SHA256 签名，防伪造）
 
-格式：ORAL-XXXX-XXXX-XXXX-XXXX（20 位有效字符）
+格式：ORAL-XXXX-XXXX-XXXX-XXXX-XXXX（20 位有效字符）
 - 16 字符 base32 随机载荷
 - 4 字符 HMAC 校验位（取前 4 位）
 """
@@ -30,7 +30,7 @@ def _checksum(payload: str) -> str:
 
 
 def generate_code() -> str:
-    """生成单个激活码：ORAL-XXXX-XXXX-XXXX-XXXX"""
+    """生成单个激活码：ORAL-XXXX-XXXX-XXXX-XXXX-XXXX"""
     # 16 字符随机载荷
     raw = "".join(secrets.choice(_ALPHABET) for _ in range(16))
     check = _checksum(raw)
@@ -42,7 +42,7 @@ def verify_code_format(code: str) -> bool:
     """校验激活码格式 + HMAC 签名"""
     # 去除空格、统一大写
     code = code.strip().upper().replace(" ", "")
-    # 格式：ORAL-XXXX-XXXX-XXXX-XXXX
+    # 格式：ORAL-XXXX-XXXX-XXXX-XXXX-XXXX
     parts = code.split("-")
     if len(parts) != 6 or parts[0] != _PREFIX:
         return False

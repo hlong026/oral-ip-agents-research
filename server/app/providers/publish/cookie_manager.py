@@ -4,7 +4,9 @@ Cookie 管理器
 - SAU 的 Playwright storage_state 需要文件路径，我们的 PublishAccount 存 DB
 - 发布时：DB → 临时文件 → SAU 使用 → 发布后回写 DB（Cookie 可能刷新）
 """
+
 import json
+import os
 import tempfile
 from pathlib import Path
 
@@ -14,7 +16,19 @@ logger = get_logger("oral.publish.cookie")
 
 # 临时 Cookie 文件目录（进程生命周期内复用）
 _COOKIE_DIR = Path(tempfile.gettempdir()) / "oral_publish_cookies"
-_COOKIE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _ensure_cookie_dir() -> None:
+    _COOKIE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    _COOKIE_DIR.chmod(0o700)
+
+
+def _write_private(filepath: Path, content: str) -> None:
+    _ensure_cookie_dir()
+    descriptor = os.open(filepath, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    filepath.chmod(0o600)
 
 
 def session_to_file(session_json: str, account_id: str, platform: str) -> str:
@@ -23,9 +37,9 @@ def session_to_file(session_json: str, account_id: str, platform: str) -> str:
     filepath = _COOKIE_DIR / filename
     try:
         data = json.loads(session_json) if session_json else {}
-        filepath.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        _write_private(filepath, json.dumps(data, ensure_ascii=False))
     except (json.JSONDecodeError, TypeError):
-        filepath.write_text("{}", encoding="utf-8")
+        _write_private(filepath, "{}")
     return str(filepath)
 
 
@@ -49,9 +63,23 @@ def cleanup_cookie_file(account_id: str, platform: str) -> None:
         if filepath.exists():
             filepath.unlink()
     except OSError:
-        pass
+        logger.warning("cookie_temp_cleanup_failed", platform=platform, account_id=account_id)
+
+
+def create_private_cookie_path(filename: str) -> str:
+    filepath = _COOKIE_DIR / filename
+    _write_private(filepath, "{}")
+    return str(filepath)
+
+
+def cleanup_cookie_path(filepath: str) -> None:
+    try:
+        Path(filepath).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("cookie_temp_cleanup_failed", path=Path(filepath).name)
 
 
 def get_cookie_dir() -> Path:
     """获取 Cookie 临时目录（供登录流程使用）"""
+    _ensure_cookie_dir()
     return _COOKIE_DIR

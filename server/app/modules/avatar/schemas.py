@@ -1,4 +1,5 @@
 """avatar 出入参（白标：不暴露供应商品牌，无公共形象）"""
+
 from pydantic import BaseModel
 
 

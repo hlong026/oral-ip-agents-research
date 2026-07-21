@@ -176,6 +176,23 @@ async def retry_step(db: AsyncSession, task_id: str, step: str, user_id: str) ->
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"}
         )
+    if t.status in {"done", "canceled"}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "TASK_TERMINAL", "message": "已结束任务不可重试"},
+        )
+    if t.reservation_id:
+        from app.modules.billing.models import CreditReservation
+
+        reservation = await db.get(CreditReservation, t.reservation_id)
+        if reservation is None or reservation.status != "reserved":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RETRY_REQUIRES_NEW_QUOTE",
+                    "message": "原积分冻结已结束，请重新报价并创建任务",
+                },
+            )
     t.status = "pending"
     t.error = ""
     await repo.save(db, t)

@@ -71,6 +71,6 @@ async def get_current_active_persona_id(
 
 
 def verify_ws_token(token: str) -> str | None:
-    """WS 网关 token 校验（/ws/tasks?token=）"""
+    """校验 WebSocket 子协议携带的用户 access token。"""
     payload = decode_token(token, "access")
     return str(payload["sub"]) if payload and payload.get("aud") == "user" else None

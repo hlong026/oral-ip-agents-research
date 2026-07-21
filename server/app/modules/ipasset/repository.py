@@ -1,4 +1,5 @@
 """ipasset 数据访问"""
+
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 

@@ -3,6 +3,7 @@ import { useIp, useQuota } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { IM_ENABLED } from "../config/features";
 
 interface NavItem {
   to: string;
@@ -57,7 +58,7 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
           badge: publishFailed,
           badgeTone: "danger",
         },
-        { to: "/im", label: "私信中心", icon: "✉" },
+        ...(IM_ENABLED ? [{ to: "/im", label: "私信中心", icon: "✉" }] : []),
         { to: "/analytics", label: "数据看板", icon: "▲" },
       ],
     },

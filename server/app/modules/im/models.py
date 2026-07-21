@@ -1,4 +1,5 @@
 """im 模块 ORM（抖音私信自动回复：会话、消息、规则、监听状态）"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -27,12 +28,10 @@ class IMConversation(Base):
     dy_conversation_id: Mapped[str] = mapped_column(String(64), default="")
     dy_conversation_short_id: Mapped[str] = mapped_column(String(64), default="")
     dy_ticket: Mapped[str] = mapped_column(String(128), default="")
-    last_message_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    last_message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     unread_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active | archived
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class IMMessage(Base):
@@ -49,8 +48,7 @@ class IMMessage(Base):
     auto_replied: Mapped[bool] = mapped_column(Boolean, default=False)
     rule_id: Mapped[str] = mapped_column(String(32), default="", index=True)  # 触发的规则 ID
     reply_content: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class IMAutoReplyRule(Base):
@@ -72,8 +70,7 @@ class IMAutoReplyRule(Base):
     delay_min: Mapped[int] = mapped_column(Integer, default=3)
     delay_max: Mapped[int] = mapped_column(Integer, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class IMListenerState(Base):

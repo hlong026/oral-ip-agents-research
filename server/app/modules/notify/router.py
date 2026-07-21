@@ -1,4 +1,5 @@
 """notify 路由（/notifications 站内信）"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 

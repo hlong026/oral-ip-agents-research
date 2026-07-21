@@ -1,4 +1,5 @@
 """套餐与价格目录数据访问。"""
+
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, or_, select, update
@@ -18,9 +19,7 @@ async def get_plan_version(db: AsyncSession, version_id: str) -> PlanSkuVersion 
 async def latest_plan_version(db: AsyncSession, sku_id: str) -> PlanSkuVersion | None:
     return (
         await db.execute(
-            select(PlanSkuVersion)
-            .where(PlanSkuVersion.sku_id == sku_id)
-            .order_by(PlanSkuVersion.version.desc())
+            select(PlanSkuVersion).where(PlanSkuVersion.sku_id == sku_id).order_by(PlanSkuVersion.version.desc())
         )
     ).scalar_one_or_none()
 

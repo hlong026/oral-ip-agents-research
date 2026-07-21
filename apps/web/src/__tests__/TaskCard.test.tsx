@@ -59,7 +59,13 @@ describe("TaskCard 统一 PipelineTask 模型渲染", () => {
   });
 
   it("manual 待确认：提示等待确认", () => {
-    renderCard(makeTask({ mode: "manual", status: "waiting_confirm", currentStep: "rewrite" }));
+    renderCard(
+      makeTask({
+        mode: "manual",
+        status: "waiting_confirm",
+        currentStep: "rewrite",
+      }),
+    );
     expect(screen.getByText("待确认")).toBeInTheDocument();
     expect(screen.getByText(/等待确认/)).toBeInTheDocument();
     expect(screen.getByText(/手动/)).toBeInTheDocument();

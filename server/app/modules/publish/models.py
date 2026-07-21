@@ -1,4 +1,5 @@
 """publish 模块 ORM（F-501~F-504：扫码授权、发布任务、失败降级）"""
+
 import uuid
 from datetime import UTC, datetime
 
@@ -16,7 +17,7 @@ def new_id() -> str:
 
 
 class PublishAccount(Base):
-    """平台账号：扫码授权后会话落库（生产环境 cookies 须 Fernet/KMS 加密，MVP 存 session JSON）"""
+    """平台账号：扫码授权后的浏览器会话以 Fernet 密文落库。"""
 
     __tablename__ = "publish_accounts"
 
@@ -51,4 +52,5 @@ class PublishJob(Base):
     retry_count: Mapped[str] = mapped_column(String(8), default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )

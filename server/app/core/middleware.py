@@ -4,6 +4,7 @@ TraceMiddleware（06 文档 §10.6.3）
 - 注入 contextvars 实现全链路贯通
 - 响应头回传 trace_id 供前端关联
 """
+
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint

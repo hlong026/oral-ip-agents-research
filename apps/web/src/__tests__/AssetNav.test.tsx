@@ -19,8 +19,12 @@ describe("AssetNav 资产二级导航", () => {
       expect(screen.getByText(label, { exact: false })).toBeInTheDocument();
     }
     // V1.1 未上架页签不出现
-    expect(screen.queryByText("模板", { exact: false })).not.toBeInTheDocument();
-    expect(screen.queryByText("素材库", { exact: false })).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("模板", { exact: false }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("素材库", { exact: false }),
+    ).not.toBeInTheDocument();
   });
 
   it("当前路由对应页签高亮", () => {

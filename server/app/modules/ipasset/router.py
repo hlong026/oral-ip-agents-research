@@ -1,4 +1,5 @@
 """ipasset HTTP 层：/personas（IP 档案 CRUD + 激活切换）"""
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,8 +23,12 @@ async def api_create(body: PersonaIn, user_id: str = Depends(get_current_user_id
 
 
 @router.put("/{persona_id}", response_model=PersonaOut)
-async def api_update(persona_id: str, body: PersonaUpdate,
-                     user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
+async def api_update(
+    persona_id: str,
+    body: PersonaUpdate,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
     return await update_persona(db, user_id, persona_id, body)
 
 

@@ -4,10 +4,12 @@ voice 业务编排（异步克隆 + 试听确认 + TTS 合成）
 白标：所有面向用户的响应不暴露供应商品牌
 日志：声音克隆/TTS 合成（§10.6.8-B #4）
 """
+
 import time
 from datetime import UTC
 
 from fastapi import HTTPException, status
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -27,8 +29,15 @@ async def list_voices(db: AsyncSession, user_id: str) -> list[VoiceOut]:
     return [to_out(v) for v in items]
 
 
-async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: str | None,
-                      sample_key: str, language: str = "zh", reservation_id: str = "") -> VoiceOut:
+async def clone_voice(
+    db: AsyncSession,
+    user_id: str,
+    name: str,
+    consent_token: str | None,
+    sample_key: str,
+    language: str = "zh",
+    reservation_id: str = "",
+) -> VoiceOut:
     """
     声音克隆（异步）：
     1. consent_token 强制校验
@@ -37,8 +46,10 @@ async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: 
     4. 前端通过 /voices/{id}/status 轮询 或等待 Webhook 回调
     """
     if not consent_token or len(consent_token.strip()) < 4:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"})
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"},
+        )
 
     # 声音克隆提交：记录 INFO（§10.6.8-B #4）
     logger.info("voice_clone_start", user_id=user_id, voice_name=name)
@@ -46,15 +57,26 @@ async def clone_voice(db: AsyncSession, user_id: str, name: str, consent_token: 
     # 调用 provider 提交克隆（返回 task_id）
     try:
         task_id, provider_name = await registry.run_with_fallback(
-            "voice", registry.voice_chain, "clone", name, sample_key, consent_token, language)
+            "voice", registry.voice_chain, "clone", name, sample_key, consent_token, language
+        )
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            detail={"code": "CLONE_FAILED", "message": e.user_message}) from e
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"code": "CLONE_FAILED", "message": e.user_message}
+        ) from e
 
-    v = await repo.create(db, user_id=user_id, name=name, source="clone", provider=provider_name,
-                          provider_voice_id="", provider_task_id=task_id,
-                          reservation_id=reservation_id, sample_key=sample_key,
-                          language=language, status="training")
+    v = await repo.create(
+        db,
+        user_id=user_id,
+        name=name,
+        source="clone",
+        provider=provider_name,
+        provider_voice_id="",
+        provider_task_id=task_id,
+        reservation_id=reservation_id,
+        sample_key=sample_key,
+        language=language,
+        status="training",
+    )
     return to_out(v)
 
 
@@ -79,6 +101,33 @@ async def _finalize_clone_billing(db: AsyncSession, voice: Voice, succeeded: boo
             raise RuntimeError("voice clone billing reservation missing")
 
 
+async def _transition_clone(
+    db: AsyncSession,
+    voice: Voice,
+    *,
+    succeeded: bool,
+    provider_voice_id: str = "",
+    demo_key: str | None = None,
+) -> bool:
+    """Atomically claim the provider result before billing it."""
+    values: dict[str, object] = {"status": "pending_confirm" if succeeded else "failed"}
+    if succeeded:
+        values.update(provider_voice_id=provider_voice_id, demo_key=demo_key)
+    result = await db.execute(update(Voice).where(Voice.id == voice.id, Voice.status == "training").values(**values))
+    if int(getattr(result, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        await db.refresh(voice)
+        return False
+    try:
+        await _finalize_clone_billing(db, voice, succeeded)
+    except Exception:
+        await db.rollback()
+        await db.refresh(voice)
+        raise
+    await db.refresh(voice)
+    return True
+
+
 async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> CloneStatusOut:
     """
     查询克隆进度：
@@ -93,7 +142,8 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
         # 主动查询一次任务状态
         try:
             result, _ = await registry.run_with_fallback(
-                "voice", registry.voice_chain, "query_clone_task", v.provider_task_id)
+                "voice", registry.voice_chain, "query_clone_task", v.provider_task_id
+            )
             task_status = result.get("status", 1)
 
             if task_status == 3:
@@ -107,15 +157,17 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
                 elif demo_url:
                     demo_key = demo_url  # mock 模式已经是本地路径
 
-                v.provider_voice_id = voice_id_remote
-                v.demo_key = demo_key
-                v.status = "pending_confirm"
-                await _finalize_clone_billing(db, v, True)
-                logger.info("voice_clone_done", user_id=user_id, voice_id=v.id,
-                            provider_voice_id=voice_id_remote)
+                transitioned = await _transition_clone(
+                    db,
+                    v,
+                    succeeded=True,
+                    provider_voice_id=voice_id_remote,
+                    demo_key=demo_key,
+                )
+                if transitioned:
+                    logger.info("voice_clone_done", user_id=user_id, voice_id=v.id, provider_voice_id=voice_id_remote)
             elif task_status == 4:
-                v.status = "failed"
-                await _finalize_clone_billing(db, v, False)
+                await _transition_clone(db, v, succeeded=False)
         except Exception as e:
             await db.rollback()
             await db.refresh(v)
@@ -134,8 +186,9 @@ async def confirm_voice(db: AsyncSession, user_id: str, voice_id: str) -> VoiceO
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
     if v.status != "pending_confirm":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            detail={"code": "INVALID_STATUS", "message": "当前状态不可确认"})
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail={"code": "INVALID_STATUS", "message": "当前状态不可确认"}
+        )
     v.status = "ready"
     await db.commit()
     return to_out(v)
@@ -147,34 +200,38 @@ async def reject_voice(db: AsyncSession, user_id: str, voice_id: str) -> VoiceOu
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
     if v.status != "pending_confirm":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            detail={"code": "INVALID_STATUS", "message": "当前状态不可拒绝"})
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail={"code": "INVALID_STATUS", "message": "当前状态不可拒绝"}
+        )
     v.status = "rejected"
     await db.commit()
     return to_out(v)
 
 
-async def edit_voice_params(db: AsyncSession, user_id: str, voice_id: str,
-                            rate: str, volume: str, pitch: str) -> None:
+async def edit_voice_params(db: AsyncSession, user_id: str, voice_id: str, rate: str, volume: str, pitch: str) -> None:
     """修改声音参数（语速/音量/语调）"""
     v = await repo.get(db, voice_id, user_id)
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
     if not v.provider_voice_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            detail={"code": "NOT_READY", "message": "声音尚未就绪"})
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "NOT_READY", "message": "声音尚未就绪"})
 
     try:
         client = get_client()
-        await client.request("POST", "/api/v2/hifly/voice/edit", json={
-            "voice": v.provider_voice_id,
-            "rate": rate,
-            "volume": volume,
-            "pitch": pitch,
-        })
+        await client.request(
+            "POST",
+            "/api/v2/hifly/voice/edit",
+            json={
+                "voice": v.provider_voice_id,
+                "rate": rate,
+                "volume": volume,
+                "pitch": pitch,
+            },
+        )
     except HiFlyAPIError as e:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT,
-                            detail={"code": "EDIT_FAILED", "message": e.user_message}) from e
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"code": "EDIT_FAILED", "message": e.user_message}
+        ) from e
 
     v.rate = rate
     v.volume = volume
@@ -188,13 +245,15 @@ async def synthesize(db: AsyncSession, user_id: str, voice_id: str, text: str, s
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
     if v.status != "ready":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            detail={"code": "NOT_READY", "message": "声音尚未就绪，请先完成克隆确认"})
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail={"code": "NOT_READY", "message": "声音尚未就绪，请先完成克隆确认"}
+        )
     provider_voice_id = v.provider_voice_id or voice_id
 
     start_time = time.perf_counter()
     result, _ = await registry.run_with_fallback(
-        "voice", registry.voice_chain, "synthesize", provider_voice_id, text, speed)
+        "voice", registry.voice_chain, "synthesize", provider_voice_id, text, speed
+    )
     # TTS 合成完成：记录 INFO（§10.6.8-B #4）
     duration_ms = int((time.perf_counter() - start_time) * 1000)
     logger.info(
@@ -210,8 +269,9 @@ async def synthesize(db: AsyncSession, user_id: str, voice_id: str, text: str, s
     )
 
 
-async def handle_voice_callback(db: AsyncSession, task_id: str, status_code: int,
-                                voice_id_remote: str, demo_url: str) -> None:
+async def handle_voice_callback(
+    db: AsyncSession, task_id: str, status_code: int, voice_id_remote: str, demo_url: str
+) -> None:
     """Webhook 回调处理（type=3 声音克隆完成）"""
     from sqlalchemy import select
 
@@ -231,23 +291,32 @@ async def handle_voice_callback(db: AsyncSession, task_id: str, status_code: int
         if demo_url and demo_url.startswith("http"):
             client = get_client()
             demo_key = await client.download_to_storage(demo_url, "voice-demos", "demo.mp3")
-        v.provider_voice_id = voice_id_remote
-        v.demo_key = demo_key
-        v.status = "pending_confirm"
-        logger.info("voice_clone_done", user_id=v.user_id, voice_id=v.id,
-                    provider_voice_id=voice_id_remote)
-        await _finalize_clone_billing(db, v, True)
+        transitioned = await _transition_clone(
+            db,
+            v,
+            succeeded=True,
+            provider_voice_id=voice_id_remote,
+            demo_key=demo_key,
+        )
+        if transitioned:
+            logger.info("voice_clone_done", user_id=v.user_id, voice_id=v.id, provider_voice_id=voice_id_remote)
     else:
-        v.status = "failed"
-        await _finalize_clone_billing(db, v, False)
+        await _transition_clone(db, v, succeeded=False)
 
 
 def to_out(v: Voice) -> VoiceOut:
     return VoiceOut(
-        id=v.id, name=v.name, source=v.source, gender=v.gender,
-        emotion=v.emotion, language=v.language,
+        id=v.id,
+        name=v.name,
+        source=v.source,
+        gender=v.gender,
+        emotion=v.emotion,
+        language=v.language,
         sampleUrl=f"/media/{v.sample_key}" if v.sample_key else None,
         demoUrl=f"/media/{v.demo_key}" if v.demo_key else None,
-        rate=v.rate, volume=v.volume, pitch=v.pitch,
-        status=v.status, createdAt=v.created_at.astimezone(UTC).isoformat(),
+        rate=v.rate,
+        volume=v.volume,
+        pitch=v.pitch,
+        status=v.status,
+        createdAt=v.created_at.astimezone(UTC).isoformat(),
     )

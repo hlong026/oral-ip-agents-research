@@ -380,16 +380,93 @@ async def test_async_voice_clone_settles_only_after_provider_success(
 
     monkeypatch.setattr(voice_service.registry, "run_with_fallback", fake_status)
 
-    completed = await client.get(
-        f"/api/v1/voices/{submitted.json()['id']}/status",
-        headers=headers,
+    async def deliver_webhook() -> None:
+        async with SessionLocal() as callback_db:
+            await voice_service.handle_voice_callback(callback_db, "mock-task", 3, "mock-voice", "")
+
+    completed, _ = await asyncio.gather(
+        client.get(
+            f"/api/v1/voices/{submitted.json()['id']}/status",
+            headers=headers,
+        ),
+        deliver_webhook(),
     )
     assert completed.status_code == 200, completed.text
     assert completed.json()["status"] == "pending_confirm"
 
+    await deliver_webhook()
+
     usage = await client.get("/api/v1/billing/usage", headers=headers)
+    assert len(usage.json()["items"]) == 1
     assert usage.json()["items"][0]["step"] == "voice_clone"
     assert usage.json()["items"][0]["points"] == 5
+
+
+async def test_duplicate_avatar_callbacks_settle_reservation_once(
+    client: AsyncClient,
+) -> None:
+    headers = await _login(client, role="user")
+    token = headers["Authorization"].removeprefix("Bearer ")
+    user_id = str(decode_token(token)["sub"])
+
+    from sqlalchemy import func, select
+
+    from app.modules.avatar.models import Avatar
+    from app.modules.avatar.service import handle_avatar_callback
+    from app.modules.billing.models import CreditLedger, PriceQuote
+    from app.modules.billing.service import grant_points, reserve_metered_operation
+
+    quote_id = f"quote_{uuid.uuid4().hex}"
+    provider_task_id = f"avatar-task-{uuid.uuid4().hex}"
+    async with SessionLocal() as db:
+        await grant_points(
+            db,
+            user_id,
+            20,
+            source_type="manual",
+            source_id=f"test-{uuid.uuid4().hex}",
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+        db.add(
+            PriceQuote(
+                id=quote_id,
+                user_id=user_id,
+                catalog_version_id="test-catalog",
+                price_version="test-v1",
+                items_json='[{"module":"digital_human","unit":"per_asset","quantity":1,"points":5}]',
+                estimated_points=5,
+                expires_at=datetime.now(UTC) + timedelta(minutes=10),
+            )
+        )
+        await db.commit()
+        reservation_id = await reserve_metered_operation(db, user_id, quote_id, "digital_human", {"assets": 1})
+        db.add(
+            Avatar(
+                user_id=user_id,
+                name="测试数字人",
+                provider="mock",
+                provider_task_id=provider_task_id,
+                reservation_id=reservation_id,
+                status="training",
+            )
+        )
+        await db.commit()
+
+    async def deliver() -> None:
+        async with SessionLocal() as callback_db:
+            await handle_avatar_callback(callback_db, provider_task_id, 3, "mock-avatar")
+
+    await asyncio.gather(deliver(), deliver())
+    await deliver()
+
+    async with SessionLocal() as db:
+        settlement_count = await db.scalar(
+            select(func.count(CreditLedger.id)).where(
+                CreditLedger.reference_id == reservation_id,
+                CreditLedger.event_type == "settle",
+            )
+        )
+    assert settlement_count == 1
 
 
 async def test_user_cannot_access_admin_control_plane(client: AsyncClient):
@@ -1166,12 +1243,12 @@ async def test_time_priced_url_asr_rejects_missing_exact_duration(monkeypatch: p
             video_url="https://example.com/media.mp4",
         )
 
-    async def forbidden_estimate(*_args, **_kwargs):
-        raise AssertionError("按时长计费不得使用码率估算值")
+    async def duration_unavailable(*_args, **_kwargs):
+        return None
 
     monkeypatch.setattr(registry, "provider_enabled", provider_enabled)
     monkeypatch.setattr(DouyidouParser, "parse_url_full", parsed_without_duration)
-    monkeypatch.setattr(content_service, "probe_duration", forbidden_estimate)
+    monkeypatch.setattr(content_service, "probe_duration", duration_unavailable)
 
     with pytest.raises(HTTPException) as exc:
         await content_service.parse_url(
@@ -1179,7 +1256,8 @@ async def test_time_priced_url_asr_rejects_missing_exact_duration(monkeypatch: p
             "user-test",
             "https://www.douyin.com/video/123",
             None,
-            max_duration_seconds=60,
+            verified_duration_seconds=None,
+            require_verified_duration=True,
         )
 
     assert exc.value.detail["code"] == "MEDIA_DURATION_UNVERIFIED"

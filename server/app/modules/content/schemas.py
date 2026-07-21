@@ -1,12 +1,21 @@
 """content 出入参（F-101~F-106）"""
+
 from pydantic import BaseModel, Field
 
 
 class ParseIn(BaseModel):
     url: str | None = None
-    videoId: str | None = None      # 视频ID（与 platform 配合使用）
-    platform: str | None = None     # douyin | xiaohongshu（videoId 时必填）
+    videoId: str | None = None  # 视频ID（与 platform 配合使用）
+    platform: str | None = None  # douyin | xiaohongshu（videoId 时必填）
     quoteId: str | None = None
+
+
+class ProbeUrlIn(BaseModel):
+    url: str = Field(min_length=1, max_length=2_000)
+
+
+class ProbeUrlOut(BaseModel):
+    durationSeconds: float
 
 
 class WordTsOut(BaseModel):
@@ -28,8 +37,8 @@ class ParseOut(BaseModel):
     platform: str | None = None
     title: str | None = None
     scriptId: str | None = None
-    cover: str | None = None        # 封面URL
-    author: dict | None = None      # 作者信息（platform=1时有效）
+    cover: str | None = None  # 封面URL
+    author: dict | None = None  # 作者信息（platform=1时有效）
 
 
 class RewriteIn(BaseModel):
@@ -42,10 +51,10 @@ class RewriteIn(BaseModel):
 
 class RewriteOut(BaseModel):
     text: str
-    structure: dict | None = None       # Stage 1 拆解结果（light模式不返回）
-    outline: str | None = None          # Stage 2 大纲（light模式不返回）
-    similarity: float | None = None     # 去重分
-    validationPassed: bool = True       # 校验是否通过
+    structure: dict | None = None  # Stage 1 拆解结果（light模式不返回）
+    outline: str | None = None  # Stage 2 大纲（light模式不返回）
+    similarity: float | None = None  # 去重分
+    validationPassed: bool = True  # 校验是否通过
 
 
 class SimilarityIn(BaseModel):

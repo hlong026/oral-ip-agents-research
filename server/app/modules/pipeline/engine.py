@@ -548,12 +548,37 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         await _feed(task.user_id, "info", f"「{task.title}」{step_name} 步完成，等待确认")
                         return
 
+                if task.reservation_id:
+                    from app.modules.billing.service import (
+                        recover_reservation_after_failure,
+                        settle_reservation,
+                    )
+
+                    try:
+                        settled = await settle_reservation(db, task.reservation_id, task.id)
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "task_billing_settlement_failed",
+                            task_id=task.id,
+                            user_id=task.user_id,
+                            reservation_id=task.reservation_id,
+                        )
+                        settled = 0
+                    if settled <= 0:
+                        recovered = await recover_reservation_after_failure(db, task.reservation_id, task.user_id)
+                        if recovered is not None and recovered.status == "settled":
+                            settled = recovered.actualPoints
+                        else:
+                            await db.refresh(task)
+                            task.status = "failed"
+                            task.error = "billing: settlement failed"
+                            await repo_save(db, task)
+                            await _emit(task)
+                            await _feed(task.user_id, "err", f"「{task.title}」积分结算失败")
+                            return
+                    task.quota_cost = float(settled)
                 task.status = "done"
                 task.current_step = ""
-                if task.reservation_id:
-                    from app.modules.billing.service import settle_reservation
-
-                    task.quota_cost = float(await settle_reservation(db, task.reservation_id, task.id))
                 await repo_save(db, task)
                 await _emit(task)
                 await _feed(task.user_id, "ok", f"「{task.title}」全流程完成")
