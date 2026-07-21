@@ -5,8 +5,6 @@ import json
 import logging
 import random
 import re
-import time
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
@@ -35,9 +33,9 @@ from .schemas import (
 
 logger = logging.getLogger(__name__)
 
-# #13 每分钟频率限制：account_id → 最近 60s 内发送时间戳
-_rate_window: dict[str, deque] = defaultdict(lambda: deque(maxlen=10))
 MAX_REPLIES_PER_MINUTE = 3
+MAX_REPLIES_PER_CONVERSATION_PER_DAY = 10
+_reply_limiter = None
 
 
 # ============ 转换函数 ============
@@ -448,15 +446,17 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
     if matched_rule is None:
         return
 
-    # #6 检查每日限额（按 rule_id 过滤）
-    today_count = await repo.count_today_replies(db, conv.user_id, matched_rule.id)
-    if today_count >= matched_rule.daily_limit:
-        logger.info(f"rule {matched_rule.id} daily limit reached ({today_count})")
-        return
-
-    # #13 每分钟频率限制
-    if _is_rate_limited(conv.account_id):
-        logger.info(f"account {conv.account_id[:8]} rate limited (>{MAX_REPLIES_PER_MINUTE}/min)")
+    limiter = _get_reply_limiter()
+    if not await limiter.reserve(
+        account_id=conv.account_id,
+        user_id=conv.user_id,
+        rule_id=matched_rule.id,
+        conversation_id=conv.id,
+        minute_limit=MAX_REPLIES_PER_MINUTE,
+        daily_limit=matched_rule.daily_limit,
+        conversation_limit=MAX_REPLIES_PER_CONVERSATION_PER_DAY,
+    ):
+        logger.info("IM auto reply quota unavailable or exhausted: account=%s", conv.account_id[:8])
         return
 
     # 生成回复内容
@@ -468,7 +468,6 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
     delay = random.uniform(max(0, matched_rule.delay_min), max(matched_rule.delay_min, matched_rule.delay_max))
     asyncio.create_task(
         _delayed_reply(
-            account_id=conv.account_id,
             user_id=conv.user_id,
             conversation_id=conv.id,
             reply_text=reply_text,
@@ -480,7 +479,6 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
 
 async def _delayed_reply(
     *,
-    account_id: str,
     user_id: str,
     conversation_id: str,
     reply_text: str,
@@ -509,8 +507,6 @@ async def _delayed_reply(
             await _send_existing_message(db, conv, reply_msg, reply_text)
         except Exception:  # noqa: BLE001
             return
-
-    _rate_window[account_id].append(time.time())
 
     # 推送前端
     await emit(
@@ -580,14 +576,14 @@ async def _get_persona_context(db: AsyncSession, user_id: str) -> str | None:
 # ============ 辅助 ============
 
 
-def _is_rate_limited(account_id: str) -> bool:
-    """#13 滑动窗口限流：每分钟最多 MAX_REPLIES_PER_MINUTE 条"""
-    now = time.time()
-    window = _rate_window[account_id]
-    # 清除 60s 前的记录
-    while window and window[0] < now - 60:
-        window.popleft()
-    return len(window) >= MAX_REPLIES_PER_MINUTE
+def _get_reply_limiter():
+    global _reply_limiter
+    if _reply_limiter is None:
+        from app.core.config import get_settings
+        from app.modules.im.rate_limit import RedisReplyLimiter
+
+        _reply_limiter = RedisReplyLimiter.from_url(get_settings().redis_url)
+    return _reply_limiter
 
 
 async def _load_account_session(account_id: str, user_id: str) -> dict:

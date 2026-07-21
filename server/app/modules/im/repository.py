@@ -1,7 +1,5 @@
 """im 模块数据访问层"""
 
-from datetime import UTC, datetime
-
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -172,21 +170,6 @@ async def create_remote_message(
         if existing is None:
             raise
         return existing, False
-
-
-async def count_today_replies(db: AsyncSession, user_id: str, rule_id: str) -> int:
-    """统计某规则今日已自动回复数（#6: 按 rule_id 过滤）"""
-    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    res = await db.execute(
-        select(func.count()).where(
-            IMMessage.user_id == user_id,
-            IMMessage.direction == "out",
-            IMMessage.auto_replied == True,  # noqa: E712
-            IMMessage.rule_id == rule_id,
-            IMMessage.created_at >= today_start,
-        )
-    )
-    return res.scalar() or 0
 
 
 # ---- 自动回复规则 ----

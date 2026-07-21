@@ -121,7 +121,6 @@ async def test_auto_reply_failure_is_also_persisted(client: AsyncClient, monkeyp
     monkeypatch.setattr(service, "_load_account_session", _fake_session)
 
     await service._delayed_reply(
-        account_id=conversation.account_id,
         user_id=user_id,
         conversation_id=conversation.id,
         reply_text="自动回复失败",
