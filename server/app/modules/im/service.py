@@ -68,6 +68,8 @@ def msg_to_out(m: IMMessage) -> MessageOut:
         sendError=m.send_error,
         retryCount=m.retry_count,
         manualTakeover=m.manual_takeover,
+        moderationStatus=m.moderation_status,
+        moderationReason=m.moderation_reason,
         createdAt=m.created_at.astimezone(UTC).isoformat(),
     )
 
@@ -86,6 +88,7 @@ def rule_to_out(r: IMAutoReplyRule) -> RuleOut:
         dailyLimit=r.daily_limit,
         delayMin=r.delay_min,
         delayMax=r.delay_max,
+        deliveryMode=r.delivery_mode,
         enabled=r.enabled,
         createdAt=r.created_at.astimezone(UTC).isoformat(),
     )
@@ -113,6 +116,14 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
     conv = await repo.get_conversation(db, conversation_id, user_id)
     if not conv:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+    from app.modules.im.moderation import review_outgoing
+
+    moderation = review_outgoing(inp.content)
+    if not moderation.allowed:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
+        )
     content_json = json.dumps({"text": inp.content}, ensure_ascii=False)
     msg = await repo.create_message(
         db,
@@ -122,6 +133,7 @@ async def send_message(db: AsyncSession, user_id: str, conversation_id: str, inp
         msg_type=inp.msgType,
         content=content_json,
         send_status="pending",
+        moderation_status="approved",
     )
     try:
         await _send_existing_message(db, conv, msg, inp.content)
@@ -147,6 +159,18 @@ async def retry_message(db: AsyncSession, user_id: str, message_id: str) -> Mess
     conversation = await repo.get_conversation(db, message.conversation_id, user_id)
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "会话不存在"})
+    from app.modules.im.moderation import review_outgoing
+
+    moderation = review_outgoing(_message_text(message))
+    if not moderation.allowed:
+        message.send_status = "blocked"
+        message.moderation_status = "blocked"
+        message.moderation_reason = moderation.reason_text
+        await repo.save_message(db, message)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "IM_CONTENT_BLOCKED", "message": moderation.reason_text},
+        )
 
     message.retry_count += 1
     message.send_status = "pending"
@@ -264,6 +288,7 @@ async def create_rule(db: AsyncSession, user_id: str, inp: RuleCreateIn) -> Rule
         daily_limit=inp.dailyLimit,
         delay_min=inp.delayMin,
         delay_max=inp.delayMax,
+        delivery_mode=inp.deliveryMode,
         enabled=inp.enabled,
     )
     return rule_to_out(rule)
@@ -285,6 +310,7 @@ async def update_rule(db: AsyncSession, user_id: str, rule_id: str, inp: RuleUpd
         "dailyLimit": "daily_limit",
         "delayMin": "delay_min",
         "delayMax": "delay_max",
+        "deliveryMode": "delivery_mode",
         "enabled": "enabled",
     }
     for k, v in updates.items():
@@ -445,6 +471,45 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
     if matched_rule is None:
         return
 
+    # 生成回复内容
+    reply_text = await _generate_reply(db, matched_rule, text, conv)
+    if not reply_text:
+        return
+
+    from app.modules.im.moderation import review_outgoing
+
+    moderation = review_outgoing(reply_text)
+    if not moderation.allowed:
+        await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
+            direction="out",
+            msg_type=7,
+            content=json.dumps({"text": reply_text}, ensure_ascii=False),
+            auto_replied=True,
+            rule_id=matched_rule.id,
+            send_status="blocked",
+            moderation_status="blocked",
+            moderation_reason=moderation.reason_text,
+        )
+        return
+
+    if matched_rule.delivery_mode != "auto":
+        await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
+            direction="out",
+            msg_type=7,
+            content=json.dumps({"text": reply_text}, ensure_ascii=False),
+            auto_replied=True,
+            rule_id=matched_rule.id,
+            send_status="suggested",
+            moderation_status="approved",
+        )
+        return
+
     limiter = _get_reply_limiter()
     if not await limiter.reserve(
         account_id=conv.account_id,
@@ -456,11 +521,6 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
         conversation_limit=MAX_REPLIES_PER_CONVERSATION_PER_DAY,
     ):
         logger.info("IM auto reply quota unavailable or exhausted: account=%s", conv.account_id[:8])
-        return
-
-    # 生成回复内容
-    reply_text = await _generate_reply(db, matched_rule, text, conv)
-    if not reply_text:
         return
 
     # Persist the reply before publishing the delayed Dramatiq message.
@@ -475,6 +535,7 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
         auto_replied=True,
         rule_id=matched_rule.id,
         send_status="scheduled",
+        moderation_status="approved",
         scheduled_at=datetime.now(UTC) + timedelta(seconds=delay),
     )
     try:
@@ -549,6 +610,12 @@ async def _generate_reply(db: AsyncSession, rule: IMAutoReplyRule, incoming_text
     """根据规则模式生成回复（#5: 注入 IP 人设）"""
     if rule.reply_mode == "template":
         return rule.reply_template
+
+    from app.modules.im.moderation import contains_prompt_injection
+
+    if contains_prompt_injection(incoming_text):
+        logger.warning("prompt injection blocked for IM conversation=%s", (conv.id or "")[:8])
+        return rule.reply_template or ""
 
     # LLM mode is blocked unless the current IpAsset persona is readable.
     try:

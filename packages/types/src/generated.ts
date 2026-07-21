@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T08:00:48.991Z
+ * API 版本：1.0.0 · 生成时间：2026-07-21T08:15:00.862Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -240,6 +240,8 @@ export interface MessageOut {
   sendError: string;
   retryCount: number;
   manualTakeover: boolean;
+  moderationStatus: string;
+  moderationReason: string;
   createdAt: string;
 }
 
@@ -558,6 +560,7 @@ export interface RuleCreateIn {
   dailyLimit?: number;
   delayMin?: number;
   delayMax?: number;
+  deliveryMode?: string;
   enabled?: boolean;
 }
 
@@ -574,6 +577,7 @@ export interface RuleOut {
   dailyLimit: number;
   delayMin: number;
   delayMax: number;
+  deliveryMode: string;
   enabled: boolean;
   createdAt: string;
 }
@@ -589,6 +593,7 @@ export interface RuleUpdateIn {
   dailyLimit?: number | null;
   delayMin?: number | null;
   delayMax?: number | null;
+  deliveryMode?: string | null;
   enabled?: boolean | null;
 }
 

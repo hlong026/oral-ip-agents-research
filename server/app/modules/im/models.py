@@ -65,6 +65,8 @@ class IMMessage(Base):
     manual_takeover: Mapped[bool] = mapped_column(Boolean, default=False)
     queue_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    moderation_status: Mapped[str] = mapped_column(String(16), default="approved")
+    moderation_reason: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
@@ -86,6 +88,7 @@ class IMAutoReplyRule(Base):
     daily_limit: Mapped[int] = mapped_column(Integer, default=50)
     delay_min: Mapped[int] = mapped_column(Integer, default=3)
     delay_max: Mapped[int] = mapped_column(Integer, default=30)
+    delivery_mode: Mapped[str] = mapped_column(String(16), default="suggestion")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 

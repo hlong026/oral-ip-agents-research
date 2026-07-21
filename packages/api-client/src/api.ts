@@ -335,10 +335,20 @@ export interface IMMessage {
   content: string;
   autoReplied: boolean;
   replyContent: string;
-  sendStatus: "received" | "pending" | "sent" | "failed" | "manual";
+  sendStatus:
+    | "received"
+    | "suggested"
+    | "blocked"
+    | "scheduled"
+    | "pending"
+    | "sent"
+    | "failed"
+    | "manual";
   sendError: string;
   retryCount: number;
   manualTakeover: boolean;
+  moderationStatus: "approved" | "blocked";
+  moderationReason: string;
   createdAt: string;
 }
 
@@ -355,6 +365,7 @@ export interface IMAutoReplyRule {
   dailyLimit: number;
   delayMin: number;
   delayMax: number;
+  deliveryMode: "suggestion" | "auto";
   enabled: boolean;
   createdAt: string;
 }

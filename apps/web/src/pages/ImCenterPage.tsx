@@ -108,6 +108,18 @@ export default function ImCenterPage() {
     await refreshMessages();
   };
 
+  const handleSendSuggestion = async (message: IMMessage) => {
+    if (!activeConv) return;
+    setSendError("");
+    try {
+      await imApi.send(activeConv.id, parseContent(message.content));
+    } catch {
+      setSendError("建议回复未能得到平台成功确认，失败记录已保留。");
+    } finally {
+      await refreshMessages();
+    }
+  };
+
   const parseContent = (content: string): string => {
     try {
       const obj = JSON.parse(content);
@@ -226,6 +238,7 @@ export default function ImCenterPage() {
                     parseContent={parseContent}
                     onRetry={handleRetry}
                     onTakeover={handleTakeover}
+                    onSendSuggestion={handleSendSuggestion}
                   />
                 ))}
                 <div ref={bottomRef} />
@@ -270,11 +283,13 @@ function MessageBubble({
   parseContent,
   onRetry,
   onTakeover,
+  onSendSuggestion,
 }: {
   msg: IMMessage;
   parseContent: (c: string) => string;
   onRetry: (messageId: string) => Promise<void>;
   onTakeover: (messageId: string) => Promise<void>;
+  onSendSuggestion: (message: IMMessage) => Promise<void>;
 }) {
   const isOut = msg.direction === "out";
   const text = parseContent(msg.content);
@@ -304,6 +319,14 @@ function MessageBubble({
           {isOut && msg.sendStatus === "manual" && (
             <span className="text-warning">已转人工</span>
           )}
+          {isOut && msg.sendStatus === "suggested" && (
+            <span className="text-brand-to">建议回复 · 未发送</span>
+          )}
+          {isOut && msg.sendStatus === "blocked" && (
+            <span className="text-danger">
+              已拦截 · {msg.moderationReason || "内容审核未通过"}
+            </span>
+          )}
         </div>
         {isOut && msg.sendStatus === "failed" && (
           <div className="mt-2 flex justify-end gap-2 text-[11px]">
@@ -318,6 +341,16 @@ function MessageBubble({
               onClick={() => void onTakeover(msg.id)}
             >
               转人工
+            </button>
+          </div>
+        )}
+        {isOut && msg.sendStatus === "suggested" && (
+          <div className="mt-2 flex justify-end text-[11px]">
+            <button
+              className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
+              onClick={() => void onSendSuggestion(msg)}
+            >
+              人工确认并发送
             </button>
           </div>
         )}

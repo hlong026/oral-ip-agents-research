@@ -27,6 +27,7 @@ async def test_auto_reply_is_persisted_before_dramatiq_delay(
         reply_template="排队回复",
         delay_min=3,
         delay_max=3,
+        delivery_mode="auto",
         enabled=True,
     )
     async with SessionLocal() as db:

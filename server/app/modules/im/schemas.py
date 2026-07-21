@@ -40,6 +40,8 @@ class MessageOut(BaseModel):
     sendError: str
     retryCount: int
     manualTakeover: bool
+    moderationStatus: str
+    moderationReason: str
     createdAt: str
 
 
@@ -70,6 +72,7 @@ class RuleCreateIn(BaseModel):
     dailyLimit: int = 50
     delayMin: int = 3
     delayMax: int = 30
+    deliveryMode: str = "suggestion"
     enabled: bool = True
 
 
@@ -84,6 +87,7 @@ class RuleUpdateIn(BaseModel):
     dailyLimit: int | None = None
     delayMin: int | None = None
     delayMax: int | None = None
+    deliveryMode: str | None = None
     enabled: bool | None = None
 
 
@@ -100,6 +104,7 @@ class RuleOut(BaseModel):
     dailyLimit: int
     delayMin: int
     delayMax: int
+    deliveryMode: str
     enabled: bool
     createdAt: str
 

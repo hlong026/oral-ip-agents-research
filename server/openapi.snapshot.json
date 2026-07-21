@@ -5880,6 +5880,14 @@
             "type": "boolean",
             "title": "Manualtakeover"
           },
+          "moderationStatus": {
+            "type": "string",
+            "title": "Moderationstatus"
+          },
+          "moderationReason": {
+            "type": "string",
+            "title": "Moderationreason"
+          },
           "createdAt": {
             "type": "string",
             "title": "Createdat"
@@ -5898,6 +5906,8 @@
           "sendError",
           "retryCount",
           "manualTakeover",
+          "moderationStatus",
+          "moderationReason",
           "createdAt"
         ],
         "title": "MessageOut"
@@ -7505,6 +7515,11 @@
             "title": "Delaymax",
             "default": 30
           },
+          "deliveryMode": {
+            "type": "string",
+            "title": "Deliverymode",
+            "default": "suggestion"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
@@ -7565,6 +7580,10 @@
             "type": "integer",
             "title": "Delaymax"
           },
+          "deliveryMode": {
+            "type": "string",
+            "title": "Deliverymode"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled"
@@ -7588,6 +7607,7 @@
           "dailyLimit",
           "delayMin",
           "delayMax",
+          "deliveryMode",
           "enabled",
           "createdAt"
         ],
@@ -7704,6 +7724,17 @@
               }
             ],
             "title": "Delaymax"
+          },
+          "deliveryMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverymode"
           },
           "enabled": {
             "anyOf": [
