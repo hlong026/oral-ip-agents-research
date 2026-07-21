@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,14 +47,29 @@ async def handle_callback(
             await db.execute(
                 select(WebhookEvent).where(
                     WebhookEvent.provider == "hifly",
-                    or_(
-                        WebhookEvent.event_id == event_id[:128],
-                        (WebhookEvent.msg_type == msg_type)
-                        & (WebhookEvent.provider_task_id == task_id[:64]),
-                    ),
+                    WebhookEvent.event_id == event_id[:128],
                 )
             )
         ).scalar_one_or_none()
+        if existing is not None and (existing.msg_type != msg_type or existing.provider_task_id != task_id[:64]):
+            logger.warning(
+                "webhook_identity_collision_ignored",
+                provider="hifly",
+                event_id=event_id[:128],
+                task_id=task_id[:64],
+                msg_type=msg_type,
+            )
+            return False
+        if existing is None:
+            existing = (
+                await db.execute(
+                    select(WebhookEvent).where(
+                        WebhookEvent.provider == "hifly",
+                        WebhookEvent.msg_type == msg_type,
+                        WebhookEvent.provider_task_id == task_id[:64],
+                    )
+                )
+            ).scalar_one_or_none()
         if existing is None or existing.status != "failed":
             logger.info(
                 "webhook_duplicate_ignored",

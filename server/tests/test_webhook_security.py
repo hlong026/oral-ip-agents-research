@@ -111,3 +111,31 @@ async def test_failed_webhook_delivery_can_be_retried(client: AsyncClient, monke
         event = (await db.execute(select(WebhookEvent).where(WebhookEvent.event_id == "event-retry"))).scalar_one()
     assert event.status == "succeeded"
     assert event.error_context == ""
+
+
+async def test_webhook_identity_collision_is_not_retried(client: AsyncClient, monkeypatch) -> None:
+    from app.modules.webhook import service as webhook_service
+
+    calls = 0
+
+    async def fail_dispatch(_db, _payload: dict) -> None:
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("temporary failure")
+
+    monkeypatch.setattr(webhook_service, "_dispatch_callback", fail_dispatch)
+    first = {"event_id": "event-a", "type": 3, "task_id": "task-a", "status": 3}
+    second = {"event_id": "event-b", "type": 3, "task_id": "task-b", "status": 3}
+    async with SessionLocal() as db:
+        with pytest.raises(RuntimeError, match="temporary failure"):
+            await webhook_service.handle_callback(db, first)
+        with pytest.raises(RuntimeError, match="temporary failure"):
+            await webhook_service.handle_callback(db, second)
+
+        processed = await webhook_service.handle_callback(
+            db,
+            {"event_id": "event-a", "type": 3, "task_id": "task-b", "status": 3},
+        )
+
+    assert processed is False
+    assert calls == 2

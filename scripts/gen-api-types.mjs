@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { format } from "prettier";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_FILE = resolve(ROOT, "packages/types/src/generated.ts");
@@ -149,7 +150,7 @@ ${blocks.join("\n\n")}
 }
 
 const spec = await loadSpec();
-const output = generate(spec);
+const output = await format(generate(spec), { parser: "typescript" });
 
 if (CHECK) {
   if (loadedFromRemote) {
@@ -174,7 +175,10 @@ if (CHECK) {
   }
   console.log("[gen-api] 契约零漂移 ✓");
 } else {
-  writeFileSync(SNAPSHOT, `${JSON.stringify(spec, null, 2)}\n`);
+  writeFileSync(
+    SNAPSHOT,
+    await format(JSON.stringify(spec, null, 2), { parser: "json" }),
+  );
   writeFileSync(OUT_FILE, output);
   console.log(
     `[gen-api] 已更新 ${SNAPSHOT} 和 ${OUT_FILE}（${Object.keys(spec.components?.schemas ?? {}).length} 个 schema）`,
