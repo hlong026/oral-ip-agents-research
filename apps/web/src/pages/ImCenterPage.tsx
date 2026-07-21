@@ -327,6 +327,9 @@ function MessageBubble({
               已拦截 · {msg.moderationReason || "内容审核未通过"}
             </span>
           )}
+          {isOut && msg.sendStatus === "canceled" && (
+            <span className="text-warning">已由安全开关取消</span>
+          )}
         </div>
         {isOut && msg.sendStatus === "failed" && (
           <div className="mt-2 flex justify-end gap-2 text-[11px]">

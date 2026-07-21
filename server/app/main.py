@@ -126,6 +126,7 @@ from app.modules.catalog.router import admin_router as catalog_admin_router  # n
 from app.modules.catalog.router import router as catalog_router  # noqa: E402
 from app.modules.content.router import router as content_router  # noqa: E402
 from app.modules.dashboard.router import router as dashboard_router  # noqa: E402
+from app.modules.im.router import admin_router as im_admin_router  # noqa: E402
 from app.modules.im.router import router as im_router  # noqa: E402
 from app.modules.ipasset.router import router as ipasset_router  # noqa: E402
 from app.modules.notify.router import router as notify_router  # noqa: E402
@@ -156,7 +157,15 @@ for r in user_routers:
     app.include_router(r, prefix=settings.api_prefix)
 if settings.im_enabled:
     app.include_router(im_router, prefix=settings.api_prefix)
-for r in (auth_admin_router, activation_admin_router, catalog_admin_router, provider_router, admin_router):
+admin_routers = (
+    auth_admin_router,
+    activation_admin_router,
+    catalog_admin_router,
+    provider_router,
+    admin_router,
+    im_admin_router,
+)
+for r in admin_routers:
     app.include_router(r, prefix="/api/admin/v1")
 app.include_router(ws_router)
 

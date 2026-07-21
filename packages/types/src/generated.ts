@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T08:15:00.862Z
+ * API 版本：1.0.0 · 生成时间：2026-07-21T08:23:16.065Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -33,6 +33,19 @@ export interface ActivateOut {
   planSkuCode?: string;
   planExpiresAt?: string | null;
   quotaBalance?: number;
+}
+
+export interface AutomationConsentIn {
+  accountId: string;
+  accepted: boolean;
+  riskVersion: string;
+}
+
+export interface AutomationStatusOut {
+  accountId: string;
+  authorized: boolean;
+  riskVersion?: string;
+  acceptedAt?: string | null;
 }
 
 export interface AvatarOut {
@@ -206,6 +219,15 @@ export interface JobPageOut {
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface KillSwitchIn {
+  stopped: boolean;
+}
+
+export interface KillSwitchOut {
+  stopped: boolean;
+  canceledMessages?: number;
 }
 
 export interface ListenerControlIn {

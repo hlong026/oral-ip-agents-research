@@ -3633,6 +3633,123 @@
         ]
       }
     },
+    "/api/v1/im/automation/status": {
+      "get": {
+        "tags": ["im"],
+        "summary": "Automation Status",
+        "operationId": "automation_status_api_v1_im_automation_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AutomationStatusOut"
+                  },
+                  "type": "array",
+                  "title": "Response Automation Status Api V1 Im Automation Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/automation/authorize": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Authorize Automation",
+        "operationId": "authorize_automation_api_v1_im_automation_authorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationConsentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/automation/{account_id}/disable": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Disable Automation",
+        "operationId": "disable_automation_api_v1_im_automation__account_id__disable_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/auth/login": {
       "post": {
         "tags": ["admin-auth"],
@@ -4741,6 +4858,72 @@
           }
         }
       }
+    },
+    "/api/admin/v1/im/kill-switch": {
+      "get": {
+        "tags": ["admin-im"],
+        "summary": "Get Kill Switch",
+        "operationId": "get_kill_switch_api_admin_v1_im_kill_switch_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": ["admin-im"],
+        "summary": "Set Kill Switch",
+        "operationId": "set_kill_switch_api_admin_v1_im_kill_switch_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -4876,6 +5059,56 @@
         "required": ["accessToken", "refreshToken", "expiresIn", "planType"],
         "title": "ActivateOut",
         "description": "激活注册返回"
+      },
+      "AutomationConsentIn": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "riskVersion": {
+            "type": "string",
+            "title": "Riskversion"
+          }
+        },
+        "type": "object",
+        "required": ["accountId", "accepted", "riskVersion"],
+        "title": "AutomationConsentIn"
+      },
+      "AutomationStatusOut": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "authorized": {
+            "type": "boolean",
+            "title": "Authorized"
+          },
+          "riskVersion": {
+            "type": "string",
+            "title": "Riskversion",
+            "default": ""
+          },
+          "acceptedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptedat"
+          }
+        },
+        "type": "object",
+        "required": ["accountId", "authorized"],
+        "title": "AutomationStatusOut"
       },
       "AvatarOut": {
         "properties": {
@@ -5744,6 +5977,33 @@
         "type": "object",
         "required": ["items", "total", "page", "pageSize"],
         "title": "JobPageOut"
+      },
+      "KillSwitchIn": {
+        "properties": {
+          "stopped": {
+            "type": "boolean",
+            "title": "Stopped"
+          }
+        },
+        "type": "object",
+        "required": ["stopped"],
+        "title": "KillSwitchIn"
+      },
+      "KillSwitchOut": {
+        "properties": {
+          "stopped": {
+            "type": "boolean",
+            "title": "Stopped"
+          },
+          "canceledMessages": {
+            "type": "integer",
+            "title": "Canceledmessages",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": ["stopped"],
+        "title": "KillSwitchOut"
       },
       "ListenerControlIn": {
         "properties": {

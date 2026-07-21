@@ -1,12 +1,21 @@
 """im 模块数据访问层"""
 
-from sqlalchemy import and_, func, or_, select
+from datetime import UTC, datetime
+
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.publish.models import PublishAccount
 
-from .models import IMAutoReplyRule, IMConversation, IMListenerState, IMMessage
+from .models import (
+    IMAutomationConsent,
+    IMAutoReplyRule,
+    IMConversation,
+    IMGlobalControl,
+    IMListenerState,
+    IMMessage,
+)
 
 
 class ListenerOwnershipConflict(RuntimeError):
@@ -275,3 +284,121 @@ async def list_listener_states(db: AsyncSession, user_id: str) -> list[IMListene
         .where(IMListenerState.user_id == user_id)
     )
     return list(res.scalars().all())
+
+
+# ---- 自动发送授权与 Kill Switch ----
+
+
+async def get_automation_consent(
+    db: AsyncSession, account_id: str, user_id: str
+) -> IMAutomationConsent | None:
+    return (
+        await db.execute(
+            select(IMAutomationConsent).where(
+                IMAutomationConsent.account_id == account_id,
+                IMAutomationConsent.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def list_automation_consents(db: AsyncSession, user_id: str) -> list[IMAutomationConsent]:
+    result = await db.execute(
+        select(IMAutomationConsent)
+        .join(
+            PublishAccount,
+            and_(
+                PublishAccount.id == IMAutomationConsent.account_id,
+                PublishAccount.user_id == IMAutomationConsent.user_id,
+            ),
+        )
+        .where(IMAutomationConsent.user_id == user_id)
+    )
+    return list(result.scalars().all())
+
+
+async def upsert_automation_consent(
+    db: AsyncSession,
+    account_id: str,
+    user_id: str,
+    risk_version: str,
+    *,
+    enabled: bool,
+) -> IMAutomationConsent:
+    consent = await get_automation_consent(db, account_id, user_id)
+    if consent is None:
+        existing = (
+            await db.execute(select(IMAutomationConsent).where(IMAutomationConsent.account_id == account_id))
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise ListenerOwnershipConflict(f"automation consent for account {account_id} belongs to another user")
+        consent = IMAutomationConsent(
+            account_id=account_id,
+            user_id=user_id,
+            risk_version=risk_version,
+            auto_reply_enabled=enabled,
+            accepted_at=datetime.now(UTC),
+        )
+        db.add(consent)
+    else:
+        consent.risk_version = risk_version
+        consent.auto_reply_enabled = enabled
+        consent.accepted_at = datetime.now(UTC)
+    await db.commit()
+    await db.refresh(consent)
+    return consent
+
+
+async def get_global_control(db: AsyncSession) -> IMGlobalControl | None:
+    return await db.get(IMGlobalControl, "global")
+
+
+async def automation_block_reason(db: AsyncSession, account_id: str, user_id: str) -> str | None:
+    consent = await get_automation_consent(db, account_id, user_id)
+    if consent is None or not consent.auto_reply_enabled:
+        return "AutomationNotAuthorized"
+    control = await get_global_control(db)
+    if control is None or control.stopped:
+        return "GlobalKillSwitch"
+    return None
+
+
+async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
+    control = await get_global_control(db)
+    if control is None:
+        control = IMGlobalControl(id="global", stopped=stopped, updated_at=datetime.now(UTC))
+        db.add(control)
+    else:
+        control.stopped = stopped
+        control.updated_at = datetime.now(UTC)
+
+    canceled = 0
+    if stopped:
+        result = await db.execute(
+            update(IMMessage)
+            .where(IMMessage.send_status == "scheduled")
+            .values(send_status="canceled", send_error="GlobalKillSwitch")
+        )
+        canceled = int(getattr(result, "rowcount", 0) or 0)
+    await db.commit()
+    return canceled
+
+
+async def disable_account_automation(db: AsyncSession, account_id: str, user_id: str) -> int:
+    consent = await get_automation_consent(db, account_id, user_id)
+    if consent is not None:
+        consent.auto_reply_enabled = False
+    conversation_ids = select(IMConversation.id).where(
+        IMConversation.account_id == account_id,
+        IMConversation.user_id == user_id,
+    )
+    result = await db.execute(
+        update(IMMessage)
+        .where(
+            IMMessage.conversation_id.in_(conversation_ids),
+            IMMessage.send_status == "scheduled",
+        )
+        .values(send_status="canceled", send_error="AccountKillSwitch")
+    )
+    await db.commit()
+    return int(getattr(result, "rowcount", 0) or 0)

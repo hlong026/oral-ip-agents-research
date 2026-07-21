@@ -340,6 +340,7 @@ export interface IMMessage {
     | "suggested"
     | "blocked"
     | "scheduled"
+    | "canceled"
     | "pending"
     | "sent"
     | "failed"
@@ -378,6 +379,13 @@ export interface IMListenerStatus {
   lastHeartbeat?: string | null;
   errorMsg: string;
   startedAt?: string | null;
+}
+
+export interface IMAutomationStatus {
+  accountId: string;
+  authorized: boolean;
+  riskVersion: string;
+  acceptedAt?: string | null;
 }
 
 export const imApi = {
@@ -421,6 +429,16 @@ export const imApi = {
     http.post<IMListenerStatus>("/im/listener/start", { accountId }),
   stopListener: (accountId: string) =>
     http.post<IMListenerStatus>("/im/listener/stop", { accountId }),
+  automationStatus: () =>
+    http.get<IMAutomationStatus[]>("/im/automation/status"),
+  authorizeAutomation: (accountId: string) =>
+    http.post<IMAutomationStatus>("/im/automation/authorize", {
+      accountId,
+      accepted: true,
+      riskVersion: "im-auto-reply-v1",
+    }),
+  disableAutomation: (accountId: string) =>
+    http.post<IMAutomationStatus>(`/im/automation/${accountId}/disable`),
 };
 
 // ---------- dashboard ----------

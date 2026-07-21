@@ -36,6 +36,7 @@ describe("admin app routing", () => {
     expect(
       screen.getByRole("link", { name: "成本与审计" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "私信安全" })).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "运营总览" }),
     ).toBeInTheDocument();

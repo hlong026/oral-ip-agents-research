@@ -3,12 +3,17 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit import write_audit
 from app.core.db import get_db
-from app.core.deps import get_current_user_id
+from app.core.deps import get_current_user_id, require_admin
 
 from . import service
 from .schemas import (
+    AutomationConsentIn,
+    AutomationStatusOut,
     ConversationPageOut,
+    KillSwitchIn,
+    KillSwitchOut,
     ListenerControlIn,
     ListenerStatusOut,
     MessageOut,
@@ -20,6 +25,7 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/im", tags=["im"])
+admin_router = APIRouter(prefix="/im", tags=["admin-im"])
 
 
 # ---- 会话 ----
@@ -135,3 +141,53 @@ async def stop_listener(
     inp: ListenerControlIn, db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user_id)
 ):
     return await service.stop_listener(db, user_id, inp)
+
+
+# ---- 自动发送授权与 Kill Switch ----
+
+
+@router.get("/automation/status", response_model=list[AutomationStatusOut])
+async def automation_status(db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+    return await service.list_automation_status(db, user_id)
+
+
+@router.post("/automation/authorize", response_model=AutomationStatusOut)
+async def authorize_automation(
+    inp: AutomationConsentIn,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    return await service.authorize_automation(db, user_id, inp)
+
+
+@router.post("/automation/{account_id}/disable", response_model=AutomationStatusOut)
+async def disable_automation(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+):
+    return await service.disable_automation(db, user_id, account_id)
+
+
+@admin_router.put("/kill-switch", response_model=KillSwitchOut)
+async def set_kill_switch(
+    inp: KillSwitchIn,
+    db: AsyncSession = Depends(get_db),
+    admin_id: str = Depends(require_admin),
+):
+    canceled = await service.set_global_kill_switch(db, stopped=inp.stopped)
+    await write_audit(
+        "im_global_kill_switch_updated",
+        user_id=admin_id,
+        detail=f"stopped={inp.stopped},canceled={canceled}",
+    )
+    return KillSwitchOut(stopped=inp.stopped, canceledMessages=canceled)
+
+
+@admin_router.get("/kill-switch", response_model=KillSwitchOut)
+async def get_kill_switch(
+    db: AsyncSession = Depends(get_db),
+    _admin_id: str = Depends(require_admin),
+):
+    stopped = await service.get_global_kill_switch(db)
+    return KillSwitchOut(stopped=stopped)

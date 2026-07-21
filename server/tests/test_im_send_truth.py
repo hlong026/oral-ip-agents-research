@@ -1,6 +1,7 @@
 """S3-06 truthful IM send state, retry, and manual takeover."""
 
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -119,6 +120,7 @@ async def test_auto_reply_failure_is_also_persisted(client: AsyncClient, monkeyp
     user_id, conversation = await _create_conversation()
     monkeypatch.setattr(service.registry, "im_driver", lambda _platform: _Provider([False]))
     monkeypatch.setattr(service, "_load_account_session", _fake_session)
+    monkeypatch.setattr(service.repo, "automation_block_reason", AsyncMock(return_value=None))
 
     async with SessionLocal() as db:
         queued = await service.repo.create_message(

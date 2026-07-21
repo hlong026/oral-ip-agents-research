@@ -106,3 +106,26 @@ class IMListenerState(Base):
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_msg: Mapped[str] = mapped_column(String(256), default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class IMAutomationConsent(Base):
+    """Per-account risk consent required before automatic IM sends."""
+
+    __tablename__ = "im_automation_consents"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    risk_version: Mapped[str] = mapped_column(String(64))
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    auto_reply_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class IMGlobalControl(Base):
+    """Singleton emergency stop controlled by the admin plane."""
+
+    __tablename__ = "im_global_controls"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="global")
+    stopped: Mapped[bool] = mapped_column(Boolean, default=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

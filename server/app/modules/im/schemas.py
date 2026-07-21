@@ -124,3 +124,25 @@ class ListenerStatusOut(BaseModel):
 
 class ListenerControlIn(BaseModel):
     accountId: str
+
+
+class AutomationConsentIn(BaseModel):
+    accountId: str
+    accepted: bool
+    riskVersion: str
+
+
+class AutomationStatusOut(BaseModel):
+    accountId: str
+    authorized: bool
+    riskVersion: str = ""
+    acceptedAt: str | None = None
+
+
+class KillSwitchIn(BaseModel):
+    stopped: bool
+
+
+class KillSwitchOut(BaseModel):
+    stopped: bool
+    canceledMessages: int = 0

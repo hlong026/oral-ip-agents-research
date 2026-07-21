@@ -105,6 +105,11 @@ export interface AuditItem {
   createdAt: string;
 }
 
+export interface ImKillSwitchStatus {
+  stopped: boolean;
+  canceledMessages: number;
+}
+
 interface ProviderSettingsResponse {
   settings: Record<string, string>;
 }
@@ -286,6 +291,12 @@ export const adminApi = {
       "/cost-analysis",
     ),
   audit: () => adminFetch<{ items: AuditItem[]; total: number }>("/audit"),
+  imKillSwitch: () => adminFetch<ImKillSwitchStatus>("/im/kill-switch"),
+  setImKillSwitch: (stopped: boolean) =>
+    adminFetch<ImKillSwitchStatus>("/im/kill-switch", {
+      method: "PUT",
+      body: JSON.stringify({ stopped }),
+    }),
 
   async listProviders(): Promise<ProviderConfig[]> {
     const response = await adminFetch<ProviderSettingsResponse>("/providers");

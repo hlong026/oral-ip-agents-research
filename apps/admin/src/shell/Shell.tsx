@@ -9,6 +9,7 @@ const navItems = [
   { to: "/providers", label: "Provider 配置" },
   { to: "/users", label: "用户管理" },
   { to: "/cost-audit", label: "成本与审计" },
+  { to: "/im-safety", label: "私信安全" },
 ];
 
 export default function Shell() {

@@ -2,6 +2,7 @@
 
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
@@ -36,6 +37,7 @@ async def test_auto_reply_is_persisted_before_dramatiq_delay(
         await db.refresh(conversation)
 
         monkeypatch.setattr(service, "_get_reply_limiter", lambda: _AllowLimiter())
+        monkeypatch.setattr(service.repo, "automation_block_reason", AsyncMock(return_value=None))
         scheduled: list[tuple[str, int]] = []
 
         def capture_schedule(message_id: str, delay_ms: int) -> str:
@@ -90,6 +92,7 @@ async def test_scheduled_reply_can_resume_from_message_id_after_restart(
         )
 
     monkeypatch.setattr(service.registry, "im_driver", lambda _platform: _Provider())
+    monkeypatch.setattr(service.repo, "automation_block_reason", AsyncMock(return_value=None))
     monkeypatch.setattr(service, "_load_account_session", _fake_session)
     monkeypatch.setattr(service, "emit", _ignore_emit)
 

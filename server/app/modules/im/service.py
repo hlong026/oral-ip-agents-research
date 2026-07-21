@@ -18,6 +18,8 @@ from . import repository as repo
 from .events import CHANNEL_IM, EV_AUTO_REPLIED, EV_LISTENER_STATUS, EV_NEW_MESSAGE
 from .models import IMAutoReplyRule, IMConversation, IMMessage
 from .schemas import (
+    AutomationConsentIn,
+    AutomationStatusOut,
     ConversationOut,
     ConversationPageOut,
     ListenerControlIn,
@@ -35,6 +37,7 @@ logger = logging.getLogger(__name__)
 MAX_REPLIES_PER_MINUTE = 3
 MAX_REPLIES_PER_CONVERSATION_PER_DAY = 10
 _reply_limiter = None
+AUTOMATION_RISK_VERSION = "im-auto-reply-v1"
 
 
 # ============ 转换函数 ============
@@ -381,6 +384,74 @@ async def stop_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) 
     return ListenerStatusOut(accountId=inp.accountId, status="disconnected")
 
 
+# ============ 自动发送授权与 Kill Switch ============
+
+
+async def authorize_automation(
+    db: AsyncSession,
+    user_id: str,
+    inp: AutomationConsentIn,
+) -> AutomationStatusOut:
+    await _require_owned_account(db, user_id, inp.accountId)
+    if not inp.accepted:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "RISK_CONSENT_REQUIRED", "message": "必须明确同意自动回复风险协议"},
+        )
+    if inp.riskVersion != AUTOMATION_RISK_VERSION:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RISK_VERSION_MISMATCH", "message": "风险协议版本已更新，请重新确认"},
+        )
+    consent = await repo.upsert_automation_consent(
+        db,
+        inp.accountId,
+        user_id,
+        inp.riskVersion,
+        enabled=True,
+    )
+    return AutomationStatusOut(
+        accountId=consent.account_id,
+        authorized=consent.auto_reply_enabled,
+        riskVersion=consent.risk_version,
+        acceptedAt=consent.accepted_at.astimezone(UTC).isoformat(),
+    )
+
+
+async def disable_automation(db: AsyncSession, user_id: str, account_id: str) -> AutomationStatusOut:
+    await _require_owned_account(db, user_id, account_id)
+    await repo.disable_account_automation(db, account_id, user_id)
+    consent = await repo.get_automation_consent(db, account_id, user_id)
+    return AutomationStatusOut(
+        accountId=account_id,
+        authorized=False,
+        riskVersion=consent.risk_version if consent else "",
+        acceptedAt=consent.accepted_at.astimezone(UTC).isoformat() if consent else None,
+    )
+
+
+async def list_automation_status(db: AsyncSession, user_id: str) -> list[AutomationStatusOut]:
+    consents = await repo.list_automation_consents(db, user_id)
+    return [
+        AutomationStatusOut(
+            accountId=consent.account_id,
+            authorized=consent.auto_reply_enabled,
+            riskVersion=consent.risk_version,
+            acceptedAt=consent.accepted_at.astimezone(UTC).isoformat(),
+        )
+        for consent in consents
+    ]
+
+
+async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
+    return await repo.set_global_kill_switch(db, stopped=stopped)
+
+
+async def get_global_kill_switch(db: AsyncSession) -> bool:
+    control = await repo.get_global_control(db)
+    return True if control is None else control.stopped
+
+
 # ============ 消息接收处理（供 Worker 调用） ============
 
 
@@ -510,6 +581,23 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
         )
         return
 
+    block_reason = await repo.automation_block_reason(db, conv.account_id, conv.user_id)
+    if block_reason:
+        await repo.create_message(
+            db,
+            conversation_id=conv.id,
+            user_id=conv.user_id,
+            direction="out",
+            msg_type=7,
+            content=json.dumps({"text": reply_text}, ensure_ascii=False),
+            auto_replied=True,
+            rule_id=matched_rule.id,
+            send_status="suggested",
+            send_error=block_reason,
+            moderation_status="approved",
+        )
+        return
+
     limiter = _get_reply_limiter()
     if not await limiter.reserve(
         account_id=conv.account_id,
@@ -565,6 +653,12 @@ async def run_scheduled_reply(message_id: str) -> None:
         if conv is None:
             reply_msg.send_status = "failed"
             reply_msg.send_error = "ConversationNotFound"
+            await repo.save_message(db, reply_msg)
+            return
+        block_reason = await repo.automation_block_reason(db, conv.account_id, conv.user_id)
+        if block_reason:
+            reply_msg.send_status = "canceled"
+            reply_msg.send_error = block_reason
             await repo.save_message(db, reply_msg)
             return
         reply_msg.send_status = "pending"

@@ -3,6 +3,7 @@ import { getAdminToken } from "./lib/adminHttp";
 import ActivationPage from "./pages/ActivationPage";
 import CostAuditPage from "./pages/CostAuditPage";
 import LoginPage from "./pages/LoginPage";
+import ImSafetyPage from "./pages/ImSafetyPage";
 import OverviewPage from "./pages/OverviewPage";
 import PlansPage from "./pages/PlansPage";
 import PriceVersionsPage from "./pages/PriceVersionsPage";
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/providers" element={<ProvidersPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/cost-audit" element={<CostAuditPage />} />
+        <Route path="/im-safety" element={<ImSafetyPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
