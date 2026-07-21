@@ -115,3 +115,12 @@ async def get_config_int(key: str, default: int = 0) -> int:
         return int(val)
     except (ValueError, TypeError):
         return default
+
+
+async def get_config_float(key: str, default: float = 0.0) -> float:
+    """获取浮点配置。"""
+    val = await get_config(key, str(default))
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default

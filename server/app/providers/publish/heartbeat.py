@@ -9,8 +9,6 @@ import asyncio
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.core.events import CHANNEL_ALERT
-from app.core.events import publish as emit
 from app.core.logging import get_logger
 from app.providers.registry import registry
 
@@ -50,27 +48,23 @@ async def check_all_accounts() -> None:
 
             if not valid:
                 expired_count += 1
-                # 更新状态
+                platform_names = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
                 async with SessionLocal() as db:
+                    from app.modules.notify.service import notify_user
                     from app.modules.publish.repository import get_account, save_account
 
                     acc = await get_account(db, account.id, account.user_id)
                     if acc and acc.status == "active":
                         acc.status = "expired"
                         await save_account(db, acc)
-
-                # 推送告警
-                platform_names = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
-                await emit(
-                    CHANNEL_ALERT,
-                    {
-                        "level": "warning",
-                        "userId": account.user_id,
-                        "message": f"{platform_names.get(account.platform, account.platform)}"
-                        f"账号「{account.nickname}」登录态已失效，请重新授权",
-                        "accountId": account.id,
-                    },
-                )
+                        await notify_user(
+                            db,
+                            account.user_id,
+                            "warn",
+                            f"{platform_names.get(account.platform, account.platform)}"
+                            f"账号「{account.nickname}」登录态已失效，请重新授权",
+                            "相关自动发布任务已暂停，请重新扫码授权后继续。",
+                        )
                 logger.warning(
                     "account_expired",
                     account_id=account.id,

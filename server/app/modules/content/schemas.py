@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 class ParseIn(BaseModel):
     url: str | None = None
+    body: str | None = Field(default=None, min_length=1, max_length=50_000)
     videoId: str | None = None  # 视频ID（与 platform 配合使用）
     platform: str | None = None  # douyin | xiaohongshu（videoId 时必填）
     quoteId: str | None = None
@@ -34,6 +35,8 @@ class TranscriptOut(BaseModel):
 class ParseOut(BaseModel):
     transcript: TranscriptOut | None
     degraded: bool
+    inputType: str | None = None
+    sourceStatus: str = "ready"
     platform: str | None = None
     title: str | None = None
     scriptId: str | None = None
@@ -99,5 +102,23 @@ class ScriptOut(BaseModel):
     originalText: str
     rewrittenText: str
     similarityScore: float
+    currentVersion: int
+    modelName: str
+    promptVersion: str
     status: str
+    createdAt: str
+
+
+class ScriptUpdateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=50_000)
+
+
+class ScriptVersionOut(BaseModel):
+    id: str
+    version: int
+    kind: str
+    text: str
+    modelName: str
+    promptVersion: str
     createdAt: str

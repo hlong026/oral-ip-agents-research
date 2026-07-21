@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import PipelineTask
@@ -28,6 +28,36 @@ async def save(db: AsyncSession, task: PipelineTask) -> PipelineTask:
     await db.commit()
     await db.refresh(task)
     return task
+
+
+async def claim_for_run(db: AsyncSession, task_id: str) -> PipelineTask | None:
+    """原子抢占待执行任务；重复消息只有一个消费者能进入流水线。"""
+    result = await db.execute(
+        update(PipelineTask)
+        .where(PipelineTask.id == task_id, PipelineTask.status == "pending")
+        .values(status="running", queue_message_id="")
+        .execution_options(synchronize_session=False)
+    )
+    if int(getattr(result, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        return None
+    await db.commit()
+    return await get(db, task_id)
+
+
+async def record_queue_message(db: AsyncSession, task_id: str, message_id: str) -> None:
+    """仅在任务尚未被 Worker 抢占时记录消息号，避免回写过期队列状态。"""
+    await db.execute(
+        update(PipelineTask)
+        .where(
+            PipelineTask.id == task_id,
+            PipelineTask.status == "pending",
+            PipelineTask.queue_message_id == "",
+        )
+        .values(queue_message_id=message_id)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
 
 
 async def list_by_user(
@@ -91,3 +121,13 @@ async def active_count(db: AsyncSession, user_id: str) -> int:
         )
         or 0
     )
+
+
+async def list_recoverable(db: AsyncSession) -> list[PipelineTask]:
+    result = await db.execute(
+        select(PipelineTask).where(
+            (PipelineTask.status == "running")
+            | ((PipelineTask.status == "pending") & (PipelineTask.queue_message_id == ""))
+        )
+    )
+    return list(result.scalars().all())

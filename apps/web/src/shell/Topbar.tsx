@@ -1,10 +1,11 @@
 import { notifyApi } from "@oral/api-client";
 import { useSession } from "@oral/stores";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 function NotificationBell() {
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { data: unread } = useQuery({
@@ -45,7 +46,15 @@ function NotificationBell() {
             <span className="text-sm font-medium">站内通知</span>
             <button
               className="text-xs text-brand-to hover:underline"
-              onClick={() => void notifyApi.markAllRead()}
+              onClick={async () => {
+                await notifyApi.markAllRead();
+                await queryClient.invalidateQueries({
+                  queryKey: ["notif-unread"],
+                });
+                await queryClient.invalidateQueries({
+                  queryKey: ["notif-list"],
+                });
+              }}
             >
               全部已读
             </button>
@@ -59,7 +68,15 @@ function NotificationBell() {
             {(list ?? []).map((n) => (
               <button
                 key={n.id}
-                onClick={() => void notifyApi.markRead(n.id)}
+                onClick={async () => {
+                  await notifyApi.markRead(n.id);
+                  await queryClient.invalidateQueries({
+                    queryKey: ["notif-unread"],
+                  });
+                  await queryClient.invalidateQueries({
+                    queryKey: ["notif-list"],
+                  });
+                }}
                 className={`block w-full border-b border-stroke/50 px-4 py-3 text-left hover:bg-white/5 ${n.read ? "opacity-60" : ""}`}
               >
                 <div className="flex items-center gap-2">

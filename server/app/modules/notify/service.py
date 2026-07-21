@@ -14,7 +14,10 @@ from .schemas import NotificationOut, UnreadOut
 async def notify_user(db: AsyncSession, user_id: str, level: str, title: str, body: str = "") -> None:
     """站内信落库 + 实时告警推送（供其他模块经 service 调用）"""
     await repo.create(db, user_id=user_id, level=level, title=title, body=body)
-    await publish(CHANNEL_ALERT, {"level": level, "userId": user_id, "message": title, "body": body})
+    await publish(
+        CHANNEL_ALERT,
+        {"kind": "alert", "level": level, "userId": user_id, "message": title, "body": body},
+    )
 
 
 async def list_notifications(db: AsyncSession, user_id: str) -> list[NotificationOut]:

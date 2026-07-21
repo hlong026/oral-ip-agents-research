@@ -36,6 +36,7 @@ def _default_steps() -> list[dict]:
             "artifacts": {},
             "startedAt": None,
             "finishedAt": None,
+            "durationMs": None,
         }
         for s in STEP_ORDER
     ]
@@ -145,7 +146,9 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         await db.rollback()
         raise
     for task in tasks:
-        schedule_run(task.id)
+        message_id = schedule_run(task.id)
+        await repo.record_queue_message(db, task.id, message_id)
+        await db.refresh(task)
     # 任务创建：记录 INFO（§10.6.8-B #1）
     logger.info(
         "task_created",
@@ -168,7 +171,46 @@ async def get_task(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     return to_out(t)
 
 
-async def retry_step(db: AsyncSession, task_id: str, step: str, user_id: str) -> TaskOut:
+async def create_retry_quote(db: AsyncSession, task_id: str, user_id: str) -> dict:
+    """基于服务端保存的原任务参数重建报价，避免前端漏报计费模块。"""
+    from app.modules.billing.service import get_quota, pipeline_quote_quantities, save_quote
+    from app.modules.catalog import repository as catalog_repo
+    from app.modules.catalog.service import build_quote
+
+    task = await _must_get(db, task_id, user_id)
+    version = await catalog_repo.active_price_version(db)
+    if version is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "NO_PRICE_VERSION", "message": "未发布价格版本"},
+        )
+    prices = await catalog_repo.module_prices(db, version.id)
+    quantities = pipeline_quote_quantities(
+        await _task_for_quote(db, task),
+        {price.module: price.billing_unit for price in prices},
+    )
+    if not quantities:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PRICE_NOT_FOUND", "message": "流水线价格配置不完整，暂时无法重试"},
+        )
+    quote = await build_quote(
+        db,
+        [{"module": module, "quantity": quantity} for module, quantity in quantities.items()],
+    )
+    catalog_version_id = str(quote.pop("_catalogVersionId"))
+    await save_quote(db, user_id, quote, catalog_version_id)
+    quote["availablePoints"] = (await get_quota(db, user_id)).balance
+    return quote
+
+
+async def retry_step(
+    db: AsyncSession,
+    task_id: str,
+    step: str,
+    user_id: str,
+    quote_id: str | None = None,
+) -> TaskOut:
     """单步重跑：重置该步及后续步骤，从断点续跑（F-405）"""
     _check_step(step)
     t = await _must_get(db, task_id, user_id)
@@ -181,22 +223,43 @@ async def retry_step(db: AsyncSession, task_id: str, step: str, user_id: str) ->
             status.HTTP_409_CONFLICT,
             detail={"code": "TASK_TERMINAL", "message": "已结束任务不可重试"},
         )
+    needs_reservation = False
     if t.reservation_id:
         from app.modules.billing.models import CreditReservation
 
         reservation = await db.get(CreditReservation, t.reservation_id)
         if reservation is None or reservation.status != "reserved":
+            needs_reservation = True
+    elif settings.app_env != "dev":
+        needs_reservation = True
+    if needs_reservation:
+        if not quote_id:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
                 detail={
                     "code": "RETRY_REQUIRES_NEW_QUOTE",
-                    "message": "原积分冻结已结束，请重新报价并创建任务",
+                    "message": "原积分冻结已结束，请重新报价后重试",
                 },
             )
+        from app.modules.billing.service import attach_reservation, reserve_quote
+
+        batch = await reserve_quote(
+            db,
+            user_id,
+            quote_id,
+            task=await _task_for_quote(db, t),
+            commit=False,
+        )
+        t.reservation_id = batch.items[0].id
+        await attach_reservation(db, t.reservation_id, user_id, t.id)
+    _clear_artifacts_from(t, step)
     t.status = "pending"
     t.error = ""
+    t.queue_message_id = ""
     await repo.save(db, t)
-    schedule_run(t.id, from_step=step)
+    message_id = schedule_run(t.id, from_step=step)
+    await repo.record_queue_message(db, t.id, message_id)
+    await db.refresh(t)
     # 单步重跑：记录 INFO（§10.6.8-B #1）
     logger.info("task_retry", task_id=task_id, step=step, user_id=user_id)
     return to_out(t)
@@ -228,9 +291,12 @@ async def override_step(db: AsyncSession, task_id: str, step: str, user_id: str,
     t.artifacts_json = json.dumps(ctx, ensure_ascii=False)
     t.status = "pending"
     t.error = ""
+    t.queue_message_id = ""
     await repo.save(db, t)
     if idx + 1 < len(STEP_ORDER):
-        schedule_run(t.id, from_step=STEP_ORDER[idx + 1])
+        message_id = schedule_run(t.id, from_step=STEP_ORDER[idx + 1])
+        await repo.record_queue_message(db, t.id, message_id)
+        await db.refresh(t)
     return to_out(t)
 
 
@@ -240,8 +306,11 @@ async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     if t.status != "waiting_confirm":
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "NOT_WAITING", "message": "任务不在待确认状态"})
     t.status = "pending"
+    t.queue_message_id = ""
     await repo.save(db, t)
-    schedule_run(t.id)  # 不传 from_step：自动跳过已 done 步骤
+    message_id = schedule_run(t.id)
+    await repo.record_queue_message(db, t.id, message_id)
+    await db.refresh(t)
     # manual 确认：记录 INFO（§10.6.8-B #1）
     logger.info("task_confirmed", task_id=task_id, user_id=user_id)
     return to_out(t)
@@ -264,6 +333,90 @@ async def cancel(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
 
 async def stats(db: AsyncSession, user_id: str) -> StatsOut:
     return StatsOut(**await repo.stats(db, user_id))
+
+
+async def recover_incomplete_tasks(db: AsyncSession) -> int:
+    """API 重启时补投安全步骤；结果未知的非幂等步骤禁止自动重放。"""
+    tasks = await repo.list_recoverable(db)
+    recoverable: list[tuple[PipelineTask, str | None]] = []
+    for task in tasks:
+        from_step = task.current_step or None if task.status == "running" else None
+        artifacts = json.loads(task.artifacts_json or "{}")
+        provider_result_unknown = task.status == "running" and (
+            from_step == "voice" or (from_step == "avatar" and not artifacts.get("avatar_render_task_id"))
+        )
+        if provider_result_unknown:
+            step_name = "语音" if from_step == "voice" else "数字人"
+            task.status = "failed"
+            task.queue_message_id = ""
+            task.error = f"{from_step}: 供应商结果未知，为避免重复调用已停止自动恢复，请重新报价后重试"
+            if task.reservation_id:
+                from app.modules.billing.service import release_reservation
+
+                await release_reservation(db, task.reservation_id, task.user_id)
+            logger.error(
+                "pipeline_recovery_requires_reconciliation",
+                task_id=task.id,
+                user_id=task.user_id,
+                step=from_step,
+            )
+            from app.modules.notify.service import notify_user
+
+            await notify_user(
+                db,
+                task.user_id,
+                "error",
+                f"任务需要人工确认：{task.title}",
+                f"{step_name}供应商结果未知，为避免重复调用已停止自动恢复；请重新报价后从该步骤重试。",
+            )
+            continue
+        task.status = "pending"
+        task.queue_message_id = ""
+        recoverable.append((task, from_step))
+    if tasks:
+        await db.commit()
+    for task, from_step in recoverable:
+        message_id = schedule_run(task.id, from_step)
+        await repo.record_queue_message(db, task.id, message_id)
+    if recoverable:
+        logger.warning("pipeline_tasks_recovered", count=len(recoverable))
+    return len(recoverable)
+
+
+async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
+    from app.modules.ipasset import repository as ipasset_repo
+
+    persona = await ipasset_repo.get(db, task.ip_id, task.user_id)
+    return {
+        "ipId": task.ip_id,
+        "sourceUrl": task.source_url,
+        "topic": task.topic,
+        "scriptText": task.script_text,
+        "voiceId": task.voice_id,
+        "avatarId": task.avatar_id,
+        "platforms": json.loads(task.platforms_json or "[]"),
+        "_targetDurationSeconds": max(1, persona.video_duration if persona else 60),
+    }
+
+
+def _clear_artifacts_from(task: PipelineTask, step: str) -> None:
+    """显式重试会清除该步及后续产物；重启恢复则保留供应商任务号。"""
+    outputs = {
+        "parse": {"video_key", "title", "platform"},
+        "asr": {"transcript", "words"},
+        "rewrite": {"script", "similarity", "topic_candidates"},
+        "voice": {"audio_key", "tts_words", "duration"},
+        "avatar": {"avatar_render_task_id", "avatar_provider", "avatar_video_key", "duration"},
+        "compose": {"final_video_key", "cover_key", "quality", "duration"},
+        "edit": {"edited"},
+        "publish": {"publish_job_ids"},
+    }
+    artifacts = json.loads(task.artifacts_json or "{}")
+    start = STEP_ORDER.index(step)
+    for name in STEP_ORDER[start:]:
+        for key in outputs[name]:
+            artifacts.pop(key, None)
+    task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
 
 
 def _check_step(step: str) -> None:
@@ -296,6 +449,8 @@ def to_out(t: PipelineTask) -> TaskOut:
         currentStep=t.current_step or None,
         compute=t.compute,
         quotaCost=t.quota_cost,
+        error=t.error,
+        artifacts=ctx,
         batchId=t.batch_id,
         createdAt=t.created_at.astimezone(UTC).isoformat(),
         updatedAt=t.updated_at.astimezone(UTC).isoformat(),

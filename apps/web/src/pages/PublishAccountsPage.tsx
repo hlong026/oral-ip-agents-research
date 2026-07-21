@@ -109,6 +109,10 @@ export default function PublishAccountsPage() {
     queryFn: () => publishApi.accounts(),
     refetchInterval: 30_000,
   });
+  const { data: capabilities } = useQuery({
+    queryKey: ["publish-capabilities"],
+    queryFn: () => publishApi.capabilities(),
+  });
 
   const list = accounts ?? [];
   const expired = list.filter((a) => a.status === "expired");
@@ -196,7 +200,7 @@ export default function PublishAccountsPage() {
             平台账号绑定 · 登录态巡检 · 授权续期（F-501/502）
           </p>
         </div>
-        <span className="chip text-[11px]">每日 06:00 自动巡检登录态</span>
+        <span className="chip text-[11px]">按系统配置自动巡检登录态</span>
       </div>
 
       {/* 登录态失效红色告警 */}
@@ -299,7 +303,12 @@ export default function PublishAccountsPage() {
                     )}
                   </td>
                   <td className="py-2.5 pr-3">
-                    {a.status === "active" ? (
+                    {!capabilities?.find((item) => item.platform === a.platform)
+                      ?.automaticEnabled ? (
+                      <span className="chip border-warning/40 text-[11px] text-warning">
+                        仅导出
+                      </span>
+                    ) : a.status === "active" ? (
                       <span className="chip border-success/40 text-[11px] text-success">
                         正常
                       </span>
@@ -314,7 +323,9 @@ export default function PublishAccountsPage() {
                   </td>
                   <td className="py-2.5">
                     <div className="flex gap-1.5">
-                      {a.status === "expired" ? (
+                      {!capabilities?.find(
+                        (item) => item.platform === a.platform,
+                      )?.automaticEnabled ? null : a.status === "expired" ? (
                         <button
                           className="btn-primary px-2.5 py-0.5 text-xs"
                           disabled={busyId === a.id}
@@ -359,36 +370,45 @@ export default function PublishAccountsPage() {
         <div className="glass p-5">
           <h2 className="mb-4 font-medium">绑定新账号</h2>
           <div className="grid grid-cols-3 gap-2.5">
-            {PUBLISH_PLATFORMS.map((p) => (
-              <button
-                key={p}
-                className="btn-ghost justify-center"
-                onClick={() => void startBind(p)}
-              >
-                <PlatformIcon platform={p} size={16} /> {PLATFORM_NAMES[p]}
-              </button>
-            ))}
+            {PUBLISH_PLATFORMS.map((p) => {
+              const capability = capabilities?.find(
+                (item) => item.platform === p,
+              );
+              return (
+                <button
+                  key={p}
+                  className="btn-ghost justify-center"
+                  disabled={!capability?.automaticEnabled}
+                  title={capability?.reason}
+                  onClick={() => void startBind(p)}
+                >
+                  <PlatformIcon platform={p} size={16} /> {PLATFORM_NAMES[p]}
+                  {!capability?.automaticEnabled && " · 仅导出"}
+                </button>
+              );
+            })}
           </div>
           <div className="mt-4 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-            ℹ 绑定时使用手机扫码，Cookie
-            仅保存在您的账户中并加密存储，可随时解绑清除。
+            ℹ
+            只有真实账号验收通过的平台开放扫码绑定；未验收平台仅生成完整人工发布包。
+            Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。
           </div>
         </div>
 
         {/* 巡检设置 */}
         <div className="glass p-5">
-          <h2 className="mb-4 font-medium">登录态巡检与提醒</h2>
+          <h2 className="mb-4 font-medium">登录态巡检</h2>
           <div className="space-y-2.5 text-sm">
             <div className="flex items-center justify-between">
-              <span>每日自动巡检</span>
+              <span>自动巡检频率</span>
               <span className="chip border-success/40 text-[11px] text-success">
-                已开启 · 06:00
+                按系统配置
               </span>
             </div>
             <div className="flex items-center justify-between">
-              <span>到期前提醒</span>
+              <span>失效后提醒</span>
               <span className="chip border-success/40 text-[11px] text-success">
-                提前 3 天 · 站内信
+                站内信 + 实时通知
               </span>
             </div>
             <div className="flex items-center justify-between">

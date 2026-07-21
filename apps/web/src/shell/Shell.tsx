@@ -58,6 +58,8 @@ export default function Shell() {
       } else if (ev.kind === "alert") {
         const id = ++toastId.current;
         setToasts((t) => [...t, { id, level: ev.level, text: ev.message }]);
+        void queryClient.invalidateQueries({ queryKey: ["notif-unread"] });
+        void queryClient.invalidateQueries({ queryKey: ["notif-list"] });
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
       } else if (ev.kind === "publish_updated") {
         void queryClient.invalidateQueries({ queryKey: ["publish-jobs"] });

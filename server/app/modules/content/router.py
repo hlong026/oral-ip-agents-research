@@ -20,6 +20,8 @@ from .schemas import (
     RewriteOut,
     ScriptCreateIn,
     ScriptOut,
+    ScriptUpdateIn,
+    ScriptVersionOut,
     SimilarityIn,
     SimilarityOut,
     TopicsIn,
@@ -28,14 +30,17 @@ from .schemas import (
 from .service import (
     create_script,
     get_script,
+    list_script_versions,
     list_scripts,
     parse_by_id,
+    parse_text,
     parse_upload,
     parse_url,
     probe_url_duration,
     rewrite,
     similarity,
     topics,
+    update_script,
 )
 
 router = APIRouter(prefix="/content", tags=["content"])
@@ -85,10 +90,14 @@ async def api_parse(
                 persona_id,
                 duration,
             )
-    target = url or body
+    if body:
+        return await parse_text(db, user_id, body, persona_id)
+    target = url
     if not target:
-        # JSON 形式兼容
-        return ParseOut(transcript=None, degraded=True, platform=None, title=None)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INPUT_REQUIRED", "message": "请提供链接、正文或上传文件"},
+        )
     unit = await quote_operation_unit(db, user_id, quoteId, "asr")
     time_priced = unit in {"per_minute", "per_second"}
     duration = await probe_url_duration(target, required=True) if time_priced else None
@@ -104,7 +113,14 @@ async def api_parse_json(
     persona_id: str | None = Depends(get_current_active_persona_id),
     db: AsyncSession = Depends(get_db),
 ):
-    # 支持两种输入：url 或 videoId + platform
+    if body.body:
+        return await parse_text(db, user_id, body.body, persona_id)
+    if not (body.url or body.videoId):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INPUT_REQUIRED", "message": "请提供链接、正文或视频 ID"},
+        )
+    # 支持链接或 videoId + platform
     unit = await quote_operation_unit(db, user_id, body.quoteId, "asr")
     time_priced = unit in {"per_minute", "per_second"}
     if body.videoId and body.platform:
@@ -190,3 +206,22 @@ async def api_scripts(user_id: str = Depends(get_current_user_id), db: AsyncSess
 @router.get("/scripts/{script_id}", response_model=ScriptOut)
 async def api_script(script_id: str, user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     return await get_script(db, user_id, script_id)
+
+
+@router.put("/scripts/{script_id}", response_model=ScriptOut)
+async def api_update_script(
+    script_id: str,
+    body: ScriptUpdateIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_script(db, user_id, script_id, title=body.title, text=body.text)
+
+
+@router.get("/scripts/{script_id}/versions", response_model=list[ScriptVersionOut])
+async def api_script_versions(
+    script_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await list_script_versions(db, user_id, script_id)

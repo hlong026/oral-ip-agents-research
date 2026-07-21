@@ -30,6 +30,11 @@ class StepStateOut(BaseModel):
     artifacts: dict[str, str] = {}
     startedAt: str | None = None
     finishedAt: str | None = None
+    durationMs: int | None = None
+
+
+class RetryStepIn(BaseModel):
+    quoteId: str | None = None
 
 
 class TaskOut(BaseModel):
@@ -44,6 +49,8 @@ class TaskOut(BaseModel):
     currentStep: str | None = None
     compute: str
     quotaCost: float
+    error: str = ""
+    artifacts: dict[str, object] = {}
     batchId: str | None = None
     createdAt: str
     updatedAt: str

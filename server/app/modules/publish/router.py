@@ -13,12 +13,21 @@ from .schemas import (
     ExportOut,
     JobOut,
     JobPageOut,
+    PublishCapabilityOut,
     PublishIn,
     QrcodePollOut,
     QrcodeStartOut,
 )
 
 router = APIRouter(prefix="/publish", tags=["publish"])
+
+
+@router.get("/capabilities", response_model=list[PublishCapabilityOut])
+async def capabilities(
+    user_id: str = Depends(get_current_user_id),
+) -> list[PublishCapabilityOut]:
+    """返回真实验收口径；未验收平台只展示人工发布包。"""
+    return service.publish_capabilities()
 
 
 # ---- 账号授权 ----
@@ -131,5 +140,5 @@ async def export_job(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> ExportOut:
-    """失败降级：仅导出 MP4（F-504）"""
+    """失败降级：导出视频、封面和元数据完整发布包（F-504）"""
     return await service.export_job(db, user_id, job_id)

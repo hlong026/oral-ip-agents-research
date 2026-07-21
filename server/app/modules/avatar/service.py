@@ -2,13 +2,14 @@
 日志：数字人克隆（§10.6.8-B #4）
 """
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.security import consent_fingerprint
 from app.providers.hifly import HiFlyAPIError
 from app.providers.registry import registry
 
@@ -72,6 +73,8 @@ async def clone_avatar_by_video(
         scene=scene,
         cover_key=cover_key,
         preview_key=video_key,
+        consent_hash=consent_fingerprint(user_id, "avatar", consent_token),
+        consented_at=datetime.now(UTC),
         status="training",
     )
     return to_out(a)
@@ -123,6 +126,8 @@ async def clone_avatar_by_image(
         scene=scene,
         cover_key=image_key,
         preview_key=image_key,
+        consent_hash=consent_fingerprint(user_id, "avatar", consent_token),
+        consented_at=datetime.now(UTC),
         status="training",
     )
     return to_out(a)

@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from app.core.dynamic_config import get_config, get_config_int
+from app.core.dynamic_config import get_config, get_config_float, get_config_int
 
 from .base import StepRecoverableError, TranscriptResult, WordTs
 
@@ -33,6 +33,8 @@ class AliyunASR:
         asr_model = await get_config("asr_model", "fun-asr")
         flash_model = await get_config("asr_flash_model", "fun-asr-flash-2026-06-15")
         threshold = await get_config_int("asr_flash_threshold_sec", 300)
+        poll_interval = await get_config_float("asr_poll_interval", 2.0)
+        poll_max_attempts = await get_config_int("asr_poll_max_attempts", 90)
         # 有业务空间ID走专属端点，否则走 DashScope 公共端点
         if workspace_id:
             base_url = f"https://{workspace_id}.{region}.maas.aliyuncs.com"
@@ -44,6 +46,8 @@ class AliyunASR:
             "asr_model": asr_model,
             "flash_model": flash_model,
             "threshold": threshold,
+            "poll_interval": max(0.1, poll_interval),
+            "poll_max_attempts": max(1, poll_max_attempts),
         }
 
     async def transcribe(self, video_key: str, duration_sec: float | None = None) -> TranscriptResult:
@@ -180,8 +184,8 @@ class AliyunASR:
         """轮询任务状态直到终态（SUCCEEDED/FAILED）"""
         url = f"{cfg['base_url']}/api/v1/tasks/{task_id}"
         headers = {"Authorization": f"Bearer {cfg['api_key']}"}
-        interval = 2.0
-        max_attempts = 90
+        interval = float(cfg["poll_interval"])
+        max_attempts = int(cfg["poll_max_attempts"])
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             for attempt in range(max_attempts):

@@ -61,7 +61,7 @@ class LLMProvider(Protocol):
 
     async def rewrite(self, text: str, intensity: str, prompt: str | None = None) -> str: ...
     async def generate_topics(self, keyword: str, count: int = 5) -> list[str]: ...
-    async def check_similarity(self, text: str) -> SimilarityResult: ...
+    async def check_similarity(self, text: str, reference_text: str | None = None) -> SimilarityResult: ...
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]: ...
     # ---- 三阶段仿写引擎 ----
     async def analyze_structure(self, text: str, mode: str = "full") -> dict: ...
@@ -117,6 +117,7 @@ class ComposeInput:
     bgm_key: str | None
     bgm_mode: str  # auto | custom | off
     cover_text: str
+    logo_key: str | None = None
     ratio: str = "9:16"
     randomize: bool = False  # 差异化参数随机化（变速/镜像/抽帧，C5）
 
@@ -126,6 +127,7 @@ class ComposeResult:
     video_key: str
     cover_key: str
     duration: float
+    quality: dict[str, Any] = field(default_factory=dict)
 
 
 class ComposeEngine(Protocol):

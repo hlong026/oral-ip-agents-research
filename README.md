@@ -23,6 +23,8 @@ cd server
 cp .env.example .env
 alembic upgrade head
 uvicorn app.main:app --reload
+# 另开终端启动持久任务 Worker
+uv run dramatiq app.workers.tasks --processes 1 --threads 4
 ```
 
 本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的

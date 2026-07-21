@@ -17,10 +17,12 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
 from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
+from app.modules.notify.service import notify_user
 from app.providers.base import ComposeInput
 from app.providers.registry import registry
 
 from .models import STEP_ORDER, PipelineTask
+from .repository import claim_for_run
 from .repository import get as repo_get
 from .repository import save as repo_save
 
@@ -52,6 +54,7 @@ def _load_steps(task: PipelineTask) -> list[dict]:
                 "artifacts": {},
                 "startedAt": None,
                 "finishedAt": None,
+                "durationMs": None,
             }
             for s in STEP_ORDER
         ]
@@ -68,6 +71,18 @@ def _load_artifacts(task: PipelineTask) -> dict:
 
 def _dump_artifacts(task: PipelineTask, artifacts: dict) -> None:
     task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
+
+
+async def _persist_intermediate_artifacts(task_id: str, values: dict) -> None:
+    """在非幂等供应商提交后立即落库，Worker 重启时只恢复轮询。"""
+    async with SessionLocal() as db:
+        task = await repo_get(db, task_id)
+        if task is None:
+            raise RuntimeError("任务不存在，无法保存供应商任务号")
+        artifacts = _load_artifacts(task)
+        artifacts.update(values)
+        _dump_artifacts(task, artifacts)
+        await repo_save(db, task)
 
 
 async def _emit(task: PipelineTask) -> None:
@@ -169,7 +184,21 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
         text, provider = await registry.run_with_fallback(
             "llm", registry.llm_chain, "polish_light", text_source, persona_ctx, trace_id=task.trace_id, task_id=task.id
         )
-        return {"script": text, "similarity": 0, "provider": provider, "_validation_passed": True}
+        sim, _ = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "check_similarity",
+            text,
+            text_source or None,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
+        return {
+            "script": text,
+            "similarity": sim.score,
+            "provider": provider,
+            "_validation_passed": sim.score <= 60,
+        }
 
     if not text_source and ctx.get("topic"):
         # 选题模式：无原文，使用 theme 模式从主题创作
@@ -258,7 +287,13 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
             if found_avoid:
                 issues.append(f"涉及回避话题：{'、'.join(found_avoid)}")
         sim, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", text, trace_id=task.trace_id, task_id=task.id
+            "llm",
+            registry.llm_chain,
+            "check_similarity",
+            text,
+            text_source or None,
+            trace_id=task.trace_id,
+            task_id=task.id,
         )
         if sim.score > 60:
             issues.append(f"相似度偏高（{sim.score:.0f}分）")
@@ -278,7 +313,13 @@ async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
     else:
         # 循环耗尽（文本被重写过），重新检测最终相似度
         sim, _ = await registry.run_with_fallback(
-            "llm", registry.llm_chain, "check_similarity", text, trace_id=task.trace_id, task_id=task.id
+            "llm",
+            registry.llm_chain,
+            "check_similarity",
+            text,
+            text_source or None,
+            trace_id=task.trace_id,
+            task_id=task.id,
         )
         validation_passed = sim.score <= 60
 
@@ -318,15 +359,21 @@ async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
 
     # 音频驱动视频生成：上传音频 → 创建任务 → 轮询 → 下载转存
     audio_key = ctx.get("audio_key", "")
-    render_task_id, provider = await registry.run_with_fallback(
-        "avatar",
-        registry.avatar_chain,
-        "create_by_audio",
-        avatar_id,
-        audio_key,
-        trace_id=task.trace_id,
-        task_id=task.id,
-    )
+    render_task_id = str(ctx.get("avatar_render_task_id") or "")
+    provider = str(ctx.get("avatar_provider") or "")
+    if not render_task_id:
+        render_task_id, provider = await registry.run_with_fallback(
+            "avatar",
+            registry.avatar_chain,
+            "create_by_audio",
+            avatar_id,
+            audio_key,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
+        durable = {"avatar_render_task_id": render_task_id, "avatar_provider": provider}
+        await _persist_intermediate_artifacts(task.id, durable)
+        ctx.update(durable)
 
     # 轮询视频生成任务直到完成
     result, _ = await registry.run_with_fallback(
@@ -368,6 +415,7 @@ async def step_compose(task: PipelineTask, ctx: dict) -> dict:
         "final_video_key": result.video_key,
         "cover_key": result.cover_key,
         "duration": result.duration,
+        "quality": result.quality,
         "provider": provider,
     }
 
@@ -383,6 +431,9 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
     platforms = json.loads(task.platforms_json or "[]")
     if not platforms:
         return {"skipped": True, "note": "未选择发布平台，成片已就绪"}
+    quality = ctx.get("quality") or {}
+    if not quality.get("passed"):
+        raise RuntimeError("成片未通过质量检查，禁止发布")
     from app.modules.publish.service import publish_task_video
 
     async with SessionLocal() as db:
@@ -424,8 +475,8 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
     try:
         async with _gate:
             async with SessionLocal() as db:
-                task = await repo_get(db, task_id)
-                if task is None or task.status in ("done", "failed", "canceled"):
+                task = await claim_for_run(db, task_id)
+                if task is None:
                     return
                 if settings.app_env != "dev" and not task.reservation_id:
                     task.status = "failed"
@@ -436,14 +487,19 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         task_id=task_id,
                         user_id=task.user_id,
                     )
+                    await notify_user(
+                        db,
+                        task.user_id,
+                        "error",
+                        f"任务失败：{task.title}",
+                        "缺少有效积分冻结，请重新报价后重试。",
+                    )
                     return
                 # 设置 trace_id 和 user_id 上下文
                 trace_id_var.set(task.trace_id or "")
                 user_id_var.set(task.user_id or "")
                 steps = _load_steps(task)
                 ctx = _load_artifacts(task)
-                task.status = "running"
-                await repo_save(db, task)
                 await _emit(task)
 
                 start_idx = STEP_ORDER.index(from_step) if from_step in STEP_ORDER else 0
@@ -491,6 +547,7 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                                 "quotaCost": cost,
                                 "message": result.get("note", ""),
                                 "artifacts": {k: str(v)[:200] for k, v in result.items()},
+                                "durationMs": step_ms,
                                 "finishedAt": _now(),
                             }
                         )
@@ -518,13 +575,31 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             from app.modules.billing.service import release_reservation
 
                             await release_reservation(db, task.reservation_id, task.user_id)
-                        st.update({"status": "failed", "message": str(e)[:300], "finishedAt": _now()})
+                        step_ms = int((time.perf_counter() - step_start) * 1000)
+                        st.update(
+                            {
+                                "status": "failed",
+                                "message": str(e)[:300],
+                                "durationMs": step_ms,
+                                "finishedAt": _now(),
+                            }
+                        )
                         task.status = "failed"
                         task.error = f"{step_name}: {e}"[:500]
                         _dump_steps(task, steps)
                         await repo_save(db, task)
                         await _emit(task)
                         await _feed(task.user_id, "err", f"「{task.title}」{step_name} 步失败：{str(e)[:60]}")
+                        await notify_user(
+                            db,
+                            task.user_id,
+                            "error",
+                            f"任务失败：{task.title}",
+                            (
+                                f"步骤={step_name}；供应商={st.get('provider') or '未确定'}；"
+                                f"耗时={step_ms}ms；错误={str(e)[:160]}；可重新报价后从该步骤重试。"
+                            ),
+                        )
                         # 任务最终失败：记录 ERROR
                         logger.error(
                             "task_failed",
@@ -575,6 +650,13 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             await repo_save(db, task)
                             await _emit(task)
                             await _feed(task.user_id, "err", f"「{task.title}」积分结算失败")
+                            await notify_user(
+                                db,
+                                task.user_id,
+                                "error",
+                                f"任务结算失败：{task.title}",
+                                "成片流程已执行，但积分结算未确认；冻结积分已进入恢复流程，请勿重复创建任务。",
+                            )
                             return
                     task.quota_cost = float(settled)
                 task.status = "done"
@@ -582,12 +664,24 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                 await repo_save(db, task)
                 await _emit(task)
                 await _feed(task.user_id, "ok", f"「{task.title}」全流程完成")
+                await notify_user(
+                    db,
+                    task.user_id,
+                    "info",
+                    f"全流程完成：{task.title}",
+                    (
+                        f"积分={task.quota_cost:g}；成片={ctx.get('final_video_key') or '未生成'}；"
+                        f"发布任务={','.join(ctx.get('publish_job_ids') or []) or '无'}。"
+                    ),
+                )
                 logger.info("task_done", task_id=task_id, user_id=task.user_id, quota_cost=task.quota_cost)
     finally:
         _running.discard(task_id)
 
 
-def schedule_run(task_id: str, from_step: str | None = None) -> None:
-    """异步调度（单体进程内；生产环境由 Dramatiq Worker 消费同一入口）"""
-    loop = asyncio.get_running_loop()
-    loop.create_task(run_task(task_id, from_step))
+def schedule_run(task_id: str, from_step: str | None = None) -> str:
+    """把流水线投递到 Redis/Dramatiq 持久队列。"""
+    from app.workers.tasks import run_pipeline_task
+
+    message = run_pipeline_task.send(task_id, from_step)
+    return message.message_id

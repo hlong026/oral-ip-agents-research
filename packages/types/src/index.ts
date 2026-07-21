@@ -309,6 +309,7 @@ export interface StepState {
   artifacts?: Record<string, string>;
   startedAt?: string | null;
   finishedAt?: string | null;
+  durationMs?: number | null;
 }
 
 /** 统一任务模型（任务卡 / 详情 / 推送共用） */
@@ -324,6 +325,8 @@ export interface PipelineTask {
   currentStep?: PipelineStep | null;
   compute: ComputeChannel;
   quotaCost: number;
+  error?: string;
+  artifacts?: Record<string, unknown>;
   batchId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -340,7 +343,18 @@ export interface TaskStats {
 
 // ============ 发布 ============
 
-export type PublishStatus = "queued" | "publishing" | "success" | "failed";
+export type PublishStatus =
+  "queued" | "publishing" | "success" | "failed" | "export_ready";
+
+export interface PublishCapability {
+  platform: Platform;
+  platformName: string;
+  mode: "automatic" | "semi_automatic" | "export_only" | "development_mock";
+  verificationStatus: "verified" | "unverified" | "development_mock";
+  automaticEnabled: boolean;
+  fallback: "manual_package";
+  reason: string;
+}
 
 export interface PublishAccount {
   id: string;
@@ -364,6 +378,7 @@ export interface PublishJob {
   error: string;
   postId: string;
   videoUrl?: string | null;
+  packageUrl?: string | null;
   retryCount: number;
   createdAt: string;
   updatedAt: string;

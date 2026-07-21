@@ -74,9 +74,9 @@ class MockLLM:
         await asyncio.sleep(0.8)
         return [f"{keyword}：新手最容易忽略的第 {i + 1} 件事" for i in range(count)]
 
-    async def check_similarity(self, text: str) -> SimilarityResult:
+    async def check_similarity(self, text: str, reference_text: str | None = None) -> SimilarityResult:
         await asyncio.sleep(0.6)
-        score = float(30 + len(text) % 55)  # 稳定伪随机 30-84
+        score = 100.0 if reference_text and text.strip() == reference_text.strip() else float(30 + len(text) % 55)
         spans = []
         if score > 60 and len(text) > 20:
             spans = [{"text": text[:20], "start": 0, "end": 20}]

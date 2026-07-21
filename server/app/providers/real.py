@@ -6,13 +6,18 @@
 - 凭据从前端设置页动态读取（dynamic_config），保存即时生效无需重启
 """
 
+import asyncio
 import json as _json
+import tempfile
+from collections import Counter
+from pathlib import Path
 
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config
+from app.core.storage import exists, local_path, read_bytes, save_bytes
 
 from .base import (
     ComposeInput,
@@ -21,7 +26,7 @@ from .base import (
     SimilarityResult,
     StepRecoverableError,
 )
-from .mock import MockCompose, MockLLM, MockParser
+from .media_quality import inspect_media
 
 settings = get_settings()
 TIMEOUT = httpx.Timeout(30.0)
@@ -33,7 +38,6 @@ class DeepSeekLLM:
     name = "deepseek-v3"
 
     def __init__(self) -> None:
-        self._mock = MockLLM()
         self._client: httpx.AsyncClient | None = None
         self._client_key: str = ""  # 用于检测凭据变更时重建 client
 
@@ -93,9 +97,24 @@ class DeepSeekLLM:
         raw = await self._chat("你是短视频选题策划", f"围绕「{keyword}」生成 {count} 个爆款口播选题，每行一个")
         return [line.strip(" 0123456789.、") for line in raw.splitlines() if line.strip()][:count]
 
-    async def check_similarity(self, text: str) -> SimilarityResult:
-        # Embedding（BGE-M3）+ n-gram 双指标在 content 模块本地计算；LLM 不直接承担
-        return await self._mock.check_similarity(text)
+    async def check_similarity(self, text: str, reference_text: str | None = None) -> SimilarityResult:
+        """计算输出相对原文的 4-gram 重复率；无原文时检测文本内部重复。"""
+        normalized = "".join(text.split())
+        if len(normalized) < 8:
+            return SimilarityResult(score=0.0)
+        grams = [normalized[index : index + 4] for index in range(len(normalized) - 3)]
+        if reference_text:
+            reference = "".join(reference_text.split())
+            reference_grams = {reference[index : index + 4] for index in range(max(0, len(reference) - 3))}
+            repeated = set(grams) & reference_grams
+        else:
+            repeated = {gram for gram, count in Counter(grams).items() if count > 1}
+        score = min(100.0, len(repeated) / max(len(set(grams)), 1) * 100)
+        spans = []
+        for gram in sorted(repeated)[:5]:
+            start = normalized.find(gram)
+            spans.append({"text": gram, "start": start, "end": start + len(gram)})
+        return SimilarityResult(score=round(score, 2), duplicated_spans=spans)
 
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]:
         raw = await self._chat(
@@ -199,19 +218,57 @@ def _parse_json(raw: str) -> dict:
 class FFmpegCompose:
     """
     FFmpeg 子进程编排（架构借鉴 MoneyPrinterTurbo，MIT）
-    合成能力：concat / overlay / subtitles(ASS) / sidechaincompress / scale+pad
-    未安装 FFmpeg 时回落 Mock 产物。
+    合成能力：音视频标准化、ASS 字幕、Logo/BGM、H.264/AAC 编码和封面提取。
     """
 
     name = "ffmpeg-local"
 
-    def __init__(self) -> None:
-        self._mock = MockCompose()
-
     async def compose(self, inp: ComposeInput) -> ComposeResult:
-        # MVP：输入素材多为 mock 占位文本，直接走 mock 产物；
-        # 真实视频输入时走 ffmpeg 子进程（subtitles + sidechaincompress 命令组装在此扩展）
-        return await self._mock.compose(inp)
+        if not inp.video_key:
+            raise StepRecoverableError("缺少数字人或原始视频素材")
+        width, height = _target_size(inp.ratio)
+        with tempfile.TemporaryDirectory(prefix="oral-compose-") as directory:
+            workdir = Path(directory)
+            video_path = await _materialize(inp.video_key, workdir, "video")
+            audio_path = await _materialize(inp.audio_key, workdir, "audio") if inp.audio_key else None
+            bgm_path = await _materialize(inp.bgm_key, workdir, "bgm") if inp.bgm_key else None
+            logo_path = await _materialize(inp.logo_key, workdir, "logo") if inp.logo_key else None
+            subtitle_path = workdir / "subtitles.ass"
+            if inp.subtitle_words:
+                subtitle_path.write_text(_build_ass(inp.subtitle_words, width, height), encoding="utf-8")
+
+            output_path = workdir / "final.mp4"
+            cover_path = workdir / "cover.jpg"
+            command = _compose_command(
+                video_path,
+                audio_path,
+                bgm_path,
+                logo_path,
+                subtitle_path if inp.subtitle_words else None,
+                output_path,
+                width,
+                height,
+            )
+            await _run_ffmpeg(command, limit_seconds=300)
+            await _run_ffmpeg(
+                ["ffmpeg", "-y", "-i", str(output_path), "-frames:v", "1", "-q:v", "2", str(cover_path)],
+                limit_seconds=60,
+            )
+            video_key = await save_bytes("compose", "final.mp4", output_path.read_bytes())
+            cover_key = await save_bytes("compose", "cover.jpg", cover_path.read_bytes())
+
+        report = await inspect_media(
+            video_key,
+            require_audio=True,
+            expected_width=width,
+            expected_height=height,
+        )
+        return ComposeResult(
+            video_key=video_key,
+            cover_key=cover_key,
+            duration=report.duration,
+            quality=report.to_dict(),
+        )
 
 
 class ThirdPartyParser:
@@ -219,11 +276,174 @@ class ThirdPartyParser:
 
     name = "third-party-parse"
 
-    def __init__(self) -> None:
-        self._mock = MockParser()
-
     async def parse_url(self, url: str) -> ParseResult:
         if not settings.parse_api_url:
-            return await self._mock.parse_url(url)
-        # TODO(real): 第三方去水印解析 API
-        raise StepRecoverableError("第三方解析尚未联调")
+            raise StepRecoverableError("第三方解析服务未配置")
+        headers = {"Authorization": f"Bearer {settings.parse_api_key}"} if settings.parse_api_key else {}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+                response = await client.post(settings.parse_api_url, json={"url": url}, headers=headers)
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise StepRecoverableError(f"第三方解析失败: {exc}") from exc
+        data = payload.get("data", payload)
+        video_url = data.get("video_url") or data.get("video") or data.get("url")
+        if isinstance(video_url, list):
+            video_url = video_url[0] if video_url else None
+        if not isinstance(video_url, str) or not video_url.startswith(("http://", "https://")):
+            raise StepRecoverableError("第三方解析未返回可访问视频地址")
+        return ParseResult(
+            platform=str(data.get("platform") or "other"),
+            title=str(data.get("title") or ""),
+            video_key=video_url,
+        )
+
+
+def _target_size(ratio: str) -> tuple[int, int]:
+    return {
+        "16:9": (1920, 1080),
+        "1:1": (1080, 1080),
+    }.get(ratio, (1080, 1920))
+
+
+async def _materialize(key: str, directory: Path, name: str) -> Path:
+    if settings.storage_driver == "local" and exists(key):
+        return local_path(key)
+    try:
+        data = await read_bytes(key)
+    except (FileNotFoundError, OSError) as exc:
+        raise StepRecoverableError(f"合成素材不存在: {name}") from exc
+    suffix = Path(key).suffix or ".bin"
+    path = directory / f"{name}{suffix}"
+    await asyncio.to_thread(path.write_bytes, data)
+    return path
+
+
+def _compose_command(
+    video: Path,
+    audio: Path | None,
+    bgm: Path | None,
+    logo: Path | None,
+    subtitles: Path | None,
+    output: Path,
+    width: int,
+    height: int,
+) -> list[str]:
+    command = ["ffmpeg", "-y", "-i", str(video)]
+    audio_index = None
+    bgm_index = None
+    logo_index = None
+    next_index = 1
+    if audio:
+        audio_index = next_index
+        command.extend(["-i", str(audio)])
+        next_index += 1
+    if bgm:
+        bgm_index = next_index
+        command.extend(["-stream_loop", "-1", "-i", str(bgm)])
+        next_index += 1
+    if logo:
+        logo_index = next_index
+        command.extend(["-i", str(logo)])
+
+    video_filter = (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30"
+    )
+    if subtitles:
+        escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+        video_filter += f",subtitles='{escaped}'"
+
+    filter_parts: list[str] = []
+    video_map = "0:v:0"
+    if logo_index is not None:
+        filter_parts.extend(
+            [
+                f"[0:v]{video_filter}[vbase]",
+                f"[{logo_index}:v]scale=180:-1[logo]",
+                "[vbase][logo]overlay=W-w-40:40[vout]",
+            ]
+        )
+        video_map = "[vout]"
+
+    audio_map = f"{audio_index}:a:0" if audio_index is not None else "0:a:0?"
+    if bgm_index is not None and audio_index is not None:
+        filter_parts.append(f"[{audio_index}:a]volume=1[voice]")
+        filter_parts.append(f"[{bgm_index}:a]volume=0.12[bgm]")
+        filter_parts.append("[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+        audio_map = "[aout]"
+
+    if filter_parts:
+        command.extend(["-filter_complex", ";".join(filter_parts)])
+        if logo_index is None:
+            command.extend(["-vf", video_filter])
+    else:
+        command.extend(["-vf", video_filter])
+    command.extend(["-map", video_map, "-map", audio_map])
+    command.extend(
+        [
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "21",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            "-shortest",
+            str(output),
+        ]
+    )
+    return command
+
+
+async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=limit_seconds)
+    except FileNotFoundError as exc:
+        raise StepRecoverableError("FFmpeg 未安装或不可执行") from exc
+    except TimeoutError as exc:
+        process.kill()
+        await process.communicate()
+        raise StepRecoverableError("FFmpeg 合成超时") from exc
+    if process.returncode != 0:
+        detail = stderr.decode("utf-8", errors="replace")[-500:]
+        raise StepRecoverableError(f"FFmpeg 合成失败(exit={process.returncode}): {detail}")
+
+
+def _build_ass(words: list, width: int, height: int) -> str:
+    header = (
+        "[Script Info]\nScriptType: v4.00+\n"
+        f"PlayResX: {width}\nPlayResY: {height}\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, "
+        "Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+        "Style: Default,Arial,54,&H00FFFFFF,&H00000000,1,3,0,2,60,60,120,1\n"
+        "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+    )
+    events: list[str] = []
+    for index in range(0, len(words), 12):
+        group = words[index : index + 12]
+        text = "".join(word.word for word in group).replace("\n", " ").replace("{", "（").replace("}", "）")
+        events.append(f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},Default,,0,0,0,,{text}")
+    return header + "\n".join(events) + "\n"
+
+
+def _ass_time(seconds: float) -> str:
+    total = max(0, int(seconds * 100))
+    hours, remainder = divmod(total, 360_000)
+    minutes, remainder = divmod(remainder, 6_000)
+    secs, centiseconds = divmod(remainder, 100)
+    return f"{hours}:{minutes:02d}:{secs:02d}.{centiseconds:02d}"

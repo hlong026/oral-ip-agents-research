@@ -1,4 +1,4 @@
-import { pipelineApi } from "@oral/api-client";
+import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import { STEP_LABELS, type PipelineTask, type StepState } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,11 +29,18 @@ function StepNode({
   const [overrideKey, setOverrideKey] = useState("");
   const [overrideVal, setOverrideVal] = useState("");
   const [busy, setBusy] = useState(false);
+  const [retryQuote, setRetryQuote] = useState<{
+    quoteId: string;
+    estimatedPoints: number;
+    availablePoints: number;
+  } | null>(null);
+  const [actionError, setActionError] = useState("");
   const meta = STEP_STATUS_ICON[step.status] ?? STEP_STATUS_ICON.pending!;
   const canRetry =
-    step.status === "failed" ||
-    step.status === "done" ||
-    task.status === "failed";
+    task.status !== "done" &&
+    task.status !== "canceled" &&
+    task.status !== "running" &&
+    (step.status === "failed" || step.status === "done");
   const canOverride =
     step.status !== "running" &&
     task.status !== "running" &&
@@ -41,9 +48,31 @@ function StepNode({
 
   const retry = async () => {
     setBusy(true);
+    setActionError("");
     try {
-      await pipelineApi.retryStep(task.id, step.step);
+      await pipelineApi.retryStep(task.id, step.step, retryQuote?.quoteId);
+      setRetryQuote(null);
       onAction();
+    } catch (error) {
+      if (
+        error instanceof HttpError &&
+        error.body.code === "RETRY_REQUIRES_NEW_QUOTE"
+      ) {
+        try {
+          const quote = await pipelineApi.retryQuote(task.id);
+          setRetryQuote(quote);
+        } catch (quoteError) {
+          setActionError(
+            quoteError instanceof HttpError
+              ? quoteError.body.message
+              : "重试报价获取失败",
+          );
+        }
+      } else {
+        setActionError(
+          error instanceof HttpError ? error.body.message : "步骤重跑失败",
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -81,6 +110,11 @@ function StepNode({
           {(step.quotaCost ?? 0) > 0 && (
             <span className="chip text-[11px]">{step.quotaCost} 点</span>
           )}
+          {step.durationMs != null && (
+            <span className="chip text-[11px]">
+              {(step.durationMs / 1000).toFixed(1)} 秒
+            </span>
+          )}
           <div className="flex-1" />
           {canRetry && (
             <button
@@ -114,6 +148,30 @@ function StepNode({
             className={`mt-1.5 text-xs ${step.status === "failed" ? "text-danger" : "text-text-3"}`}
           >
             {step.message}
+          </div>
+        )}
+        {actionError && (
+          <div className="mt-2 text-xs text-danger">{actionError}</div>
+        )}
+        {retryQuote && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-warning/30 bg-warning/10 p-3 text-xs">
+            <span className="flex-1 text-warning">
+              本次续跑需重新冻结 {retryQuote.estimatedPoints} 点，当前可用{" "}
+              {retryQuote.availablePoints} 点
+            </span>
+            <button
+              className="btn-primary px-3 py-1 text-xs"
+              disabled={busy}
+              onClick={retry}
+            >
+              确认报价并续跑
+            </button>
+            <button
+              className="btn-ghost px-3 py-1 text-xs"
+              onClick={() => setRetryQuote(null)}
+            >
+              取消
+            </button>
           </div>
         )}
         {step.artifacts && Object.keys(step.artifacts).length > 0 && (
@@ -234,7 +292,7 @@ export default function TaskDetailPage() {
         <div className="glass flex items-center gap-3 border-danger/40 p-4">
           <span className="text-danger">✕</span>
           <span className="flex-1 text-sm text-danger">
-            任务失败：可从失败步骤重跑，已扣点数自动退还
+            任务失败：{task.error || "可从失败步骤重新报价后续跑"}
           </span>
         </div>
       )}

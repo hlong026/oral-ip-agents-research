@@ -36,6 +36,7 @@ apps/desktop/src-tauri/target/
 # playwright
 test-results/
 playwright-report/
+evidence/
 
 # sqlite 本地库
 server/*.db

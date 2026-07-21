@@ -6,13 +6,14 @@ voice 业务编排（异步克隆 + 试听确认 + TTS 合成）
 """
 
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
+from app.core.security import consent_fingerprint
 from app.providers.hifly import HiFlyAPIError, get_client
 from app.providers.registry import registry
 
@@ -75,6 +76,8 @@ async def clone_voice(
         reservation_id=reservation_id,
         sample_key=sample_key,
         language=language,
+        consent_hash=consent_fingerprint(user_id, "voice", consent_token),
+        consented_at=datetime.now(UTC),
         status="training",
     )
     return to_out(v)

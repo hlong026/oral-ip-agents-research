@@ -69,6 +69,26 @@ services:
       - ./server:/app
       - oral-storage:/app/storage
 
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    command: dramatiq app.workers.tasks --processes 1 --threads 4
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app
+      - oral-storage:/app/storage
+
 volumes:
   pg-data:
   redis-data:

@@ -19,6 +19,7 @@ from app.core.db import SessionLocal, init_models, verify_migrations_current
 from app.core.events import init_redis
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import TraceMiddleware
+from app.providers.base import ProviderError
 
 settings = get_settings()
 setup_logging(settings.app_env)  # 初始化 structlog（必须在其他模块加载前）
@@ -49,6 +50,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with SessionLocal() as db:
         await seed_prices(db)
         await seed_initial_price_catalog(db)
+        from app.modules.pipeline.service import recover_incomplete_tasks
+        from app.modules.publish.service import recover_publish_jobs
+
+        await recover_incomplete_tasks(db)
+        await recover_publish_jobs(db)
     if settings.im_enabled:
         from app.workers.im_listener import restore_listeners
 
@@ -86,6 +92,20 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Trace-Id"],  # 允许前端读取 trace_id
 )
+
+
+@app.exception_handler(ProviderError)
+async def provider_exc(request: Request, exc: ProviderError) -> JSONResponse:
+    logger.warning("provider_request_failed", method=request.method, path=request.url.path, error=str(exc)[:200])
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": {
+                "code": "PROVIDER_UNAVAILABLE",
+                "message": str(exc)[:200] or "外部服务暂不可用，请稍后重试",
+            }
+        },
+    )
 
 
 @app.exception_handler(Exception)

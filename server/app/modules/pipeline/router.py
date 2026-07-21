@@ -8,7 +8,7 @@ from app.core.db import get_db
 from app.core.deps import get_current_user_id
 
 from . import service
-from .schemas import CreatePipelineIn, StatsOut, TaskOut, TaskPageOut
+from .schemas import CreatePipelineIn, RetryStepIn, StatsOut, TaskOut, TaskPageOut
 
 router = APIRouter(prefix="/pipelines", tags=["pipeline"])
 
@@ -55,15 +55,25 @@ async def get_pipeline(
     return await service.get_task(db, task_id, user_id)
 
 
+@router.post("/{task_id}/retry-quote")
+async def retry_quote(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    return await service.create_retry_quote(db, task_id, user_id)
+
+
 @router.post("/{task_id}/steps/{step}/retry", response_model=TaskOut)
 async def retry_step(
     task_id: str,
     step: str,
+    inp: RetryStepIn | None = None,
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> TaskOut:
     """单步重跑（F-405）"""
-    return await service.retry_step(db, task_id, step, user_id)
+    return await service.retry_step(db, task_id, step, user_id, inp.quoteId if inp else None)
 
 
 @router.post("/{task_id}/steps/{step}/override", response_model=TaskOut)

@@ -5,6 +5,7 @@ import {
   contentApi,
   HttpError,
   pipelineApi,
+  publishApi,
   voiceApi,
 } from "@oral/api-client";
 import { useIp } from "@oral/stores";
@@ -711,6 +712,10 @@ function StepPublish({
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
 }) {
+  const { data: capabilities } = useQuery({
+    queryKey: ["publish-capabilities"],
+    queryFn: () => publishApi.capabilities(),
+  });
   const toggle = (p: Platform) =>
     setWiz({
       ...wiz,
@@ -726,20 +731,30 @@ function StepPublish({
           发布平台（可仅生成不发布，稍后在发布管理手动发）
         </label>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {PUBLISH_PLATFORMS.map((p) => (
-            <button
-              key={p}
-              onClick={() => toggle(p)}
-              className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm transition-all ${
-                wiz.platforms.includes(p)
-                  ? "border-brand-from/60 bg-brand-from/10 text-text-1"
-                  : "border-stroke bg-white/[0.03] text-text-3"
-              }`}
-            >
-              <PlatformIcon platform={p} size={18} />
-              {PLATFORM_NAMES[p]}
-            </button>
-          ))}
+          {PUBLISH_PLATFORMS.map((p) => {
+            const capability = capabilities?.find(
+              (item) => item.platform === p,
+            );
+            return (
+              <button
+                key={p}
+                onClick={() => toggle(p)}
+                className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm transition-all ${
+                  wiz.platforms.includes(p)
+                    ? "border-brand-from/60 bg-brand-from/10 text-text-1"
+                    : "border-stroke bg-white/[0.03] text-text-3"
+                }`}
+              >
+                <PlatformIcon platform={p} size={18} />
+                <span>
+                  {PLATFORM_NAMES[p]}
+                  <span className="block text-[10px] opacity-70">
+                    {capability?.automaticEnabled ? "自动发布" : "人工发布包"}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
       <div>

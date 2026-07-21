@@ -17,8 +17,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config
 from app.core.storage import read_bytes, save_bytes
+from app.providers.duration_probe import probe_media_bytes
 
-from .base import StepRecoverableError, SynthesizeResult, WordTs
+from .base import ProviderError, StepRecoverableError, SynthesizeResult, WordTs
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,7 +46,7 @@ ERROR_MESSAGES: dict[int, str] = {
 }
 
 
-class HiFlyAPIError(Exception):
+class HiFlyAPIError(ProviderError):
     """飞影 API 业务错误（含用户友好消息）"""
 
     def __init__(self, code: int, message: str = ""):
@@ -144,10 +145,17 @@ class HiFlyClient:
 
     async def download_to_storage(self, url: str, prefix: str, filename: str) -> str:
         """下载远程文件转存到自有存储，返回存储 key（白标：不暴露供应商临时链接）"""
-        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as dl_client:
-            resp = await dl_client.get(url)
-            resp.raise_for_status()
-            return await save_bytes(prefix, filename, resp.content)
+        if not url.startswith(("http://", "https://")):
+            raise StepRecoverableError("供应商未返回有效下载地址")
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as dl_client:
+                resp = await dl_client.get(url)
+                resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise StepRecoverableError(f"产物下载失败: {exc}") from exc
+        if not resp.content:
+            raise StepRecoverableError("供应商返回的产物为空")
+        return await save_bytes(prefix, filename, resp.content)
 
 
 # 全局单例
@@ -216,16 +224,22 @@ class HiFlyVoice:
         }
         data = await self._c.request("POST", "/api/v2/hifly/audio/create_by_tts", json=payload)
         task_id = data.get("task_id", "")
+        if not task_id:
+            raise StepRecoverableError("TTS 未返回 task_id")
 
         # 轮询任务完成
         result = await self._poll_video_task(task_id)
-        video_url = result.get("video_Url", "")
-        duration = float(result.get("duration", 0))
+        audio_url = result.get("audio_url") or result.get("video_Url") or result.get("video_url") or ""
+        duration = float(result.get("duration", 0) or 0)
 
         # 下载音频转存
-        audio_key = ""
-        if video_url:
-            audio_key = await self._c.download_to_storage(video_url, "tts", "audio.mp3")
+        if not audio_url:
+            raise StepRecoverableError("TTS 完成但未返回音频地址")
+        audio_key = await self._c.download_to_storage(audio_url, "tts", "audio.mp3")
+        probed_duration = await probe_media_bytes(await read_bytes(audio_key), ".mp3")
+        duration = probed_duration or duration
+        if duration <= 0:
+            raise StepRecoverableError("TTS 音频时长无法验证")
 
         # 生成字级时间戳（均匀分布）
         words: list[WordTs] = []
@@ -350,6 +364,8 @@ class HiFlyAvatar:
             },
         )
         task_id = data.get("task_id", "")
+        if not task_id:
+            raise StepRecoverableError("数字人任务未返回 task_id")
         logger.info(f"[hifly] video create_by_audio task: {task_id}")
         return task_id
 
@@ -392,6 +408,8 @@ class HiFlyAvatar:
         for _ in range(max_attempts):
             result = await self.query_video_task(task_id)
             if result["status"] == 3:
+                if not result.get("video_url"):
+                    raise StepRecoverableError("数字人任务完成但未返回视频地址")
                 return result
             if result["status"] == 4:
                 raise HiFlyAPIError(2015, "视频生成失败")
@@ -400,6 +418,8 @@ class HiFlyAvatar:
 
     async def download_video(self, temp_url: str) -> str:
         """下载临时视频 URL 转存到自有存储（白标），返回 video_key"""
+        if not temp_url:
+            raise StepRecoverableError("数字人任务未返回视频地址")
         return await self._c.download_to_storage(temp_url, "avatar-videos", "video.mp4")
 
     async def list_public(self) -> list[dict[str, Any]]:

@@ -3,6 +3,8 @@
 Stage 1: 结构拆解 → Stage 2: IP化大纲 → Stage 3: 全文生成 + 校验
 """
 
+PROMPT_VERSION = "content-v1"
+
 # ============ Stage 1: 爆款结构拆解 ============
 
 STRUCTURE_ANALYSIS_SYSTEM = """\

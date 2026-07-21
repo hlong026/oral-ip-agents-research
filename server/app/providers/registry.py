@@ -38,24 +38,34 @@ logger = get_logger("oral.providers.registry")
 
 
 class ProviderRegistry:
-    """每类 Provider 持有「主实现 → 备用实现」降级链（配置由前端设置页管理，未配置时自动降级到 Mock）"""
+    """生产链只包含真实 Provider；开发和测试才追加显式 Mock。"""
 
     def __init__(self) -> None:
-        self.llm_chain: list[LLMProvider] = [DeepSeekLLM(), MockLLM()]
-        self.parse_chain: list[ParseProvider] = [DouyidouParser(), ThirdPartyParser(), MockParser()]
-        self.asr_chain: list[ASRProvider] = [AliyunASR(), MockASR()]
-        self.voice_chain: list[VoiceProvider] = [HiFlyVoice(), MockVoice()]
-        self.avatar_chain: list[AvatarProvider] = [HiFlyAvatar(), MockAvatar()]
-        self.compose_chain: list[ComposeEngine] = [FFmpegCompose(), MockCompose()]
-        # 发布驱动：SAU 浏览器自动化（真实）→ Mock（降级兜底）
-        self.publish_drivers: dict[str, PublishDriver] = {
-            "douyin": DouyinPublishDriver(),
-            "xiaohongshu": XiaohongshuPublishDriver(),
-            "shipinhao": TencentPublishDriver(),
-        }
-        self._publish_mock_fallback: dict[str, PublishDriver] = {
-            p: MockPublishDriver(p) for p in ("douyin", "xiaohongshu", "shipinhao")
-        }
+        allow_mock = get_settings().app_env in {"dev", "test"}
+        self.llm_chain: list[LLMProvider] = [DeepSeekLLM()]
+        self.parse_chain: list[ParseProvider] = [DouyidouParser(), ThirdPartyParser()]
+        self.asr_chain: list[ASRProvider] = [AliyunASR()]
+        self.voice_chain: list[VoiceProvider] = [HiFlyVoice()]
+        self.avatar_chain: list[AvatarProvider] = [HiFlyAvatar()]
+        self.compose_chain: list[ComposeEngine] = [FFmpegCompose()]
+        if allow_mock:
+            self.llm_chain.append(MockLLM())
+            self.parse_chain.append(MockParser())
+            self.asr_chain.append(MockASR())
+            self.voice_chain.append(MockVoice())
+            self.avatar_chain.append(MockAvatar())
+            self.compose_chain.append(MockCompose())
+        self.publish_drivers: dict[str, PublishDriver]
+        if get_settings().app_env == "dev":
+            self.publish_drivers = {
+                platform: MockPublishDriver(platform) for platform in ("douyin", "xiaohongshu", "shipinhao")
+            }
+        else:
+            self.publish_drivers = {
+                "douyin": DouyinPublishDriver(),
+                "xiaohongshu": XiaohongshuPublishDriver(),
+                "shipinhao": TencentPublishDriver(),
+            }
         # #9 IM Provider：未配置 key 时使用 MockIMProvider
         _has_im_key = get_settings().im_enabled and bool(get_settings().douyin_im_app_key)
         self.im_drivers: dict[str, IMProvider] = {

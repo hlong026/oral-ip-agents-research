@@ -1,6 +1,6 @@
 """publish 数据访问"""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import PublishAccount, PublishJob
@@ -80,6 +80,27 @@ async def create_job(db: AsyncSession, **fields) -> PublishJob:
     return j
 
 
+async def get_task_platform_job(
+    db: AsyncSession,
+    user_id: str,
+    task_id: str,
+    platform: str,
+) -> PublishJob | None:
+    if not task_id:
+        return None
+    result = await db.execute(
+        select(PublishJob)
+        .where(
+            PublishJob.user_id == user_id,
+            PublishJob.task_id == task_id,
+            PublishJob.platform == platform,
+        )
+        .order_by(PublishJob.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def get_job(db: AsyncSession, job_id: str, user_id: str | None = None) -> PublishJob | None:
     q = select(PublishJob).where(PublishJob.id == job_id)
     if user_id:
@@ -92,6 +113,34 @@ async def save_job(db: AsyncSession, job: PublishJob) -> PublishJob:
     await db.commit()
     await db.refresh(job)
     return job
+
+
+async def claim_job(db: AsyncSession, job_id: str) -> PublishJob | None:
+    result = await db.execute(
+        update(PublishJob)
+        .where(PublishJob.id == job_id, PublishJob.status == "queued")
+        .values(status="publishing", queue_message_id="")
+        .execution_options(synchronize_session=False)
+    )
+    if int(getattr(result, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        return None
+    await db.commit()
+    return await get_job(db, job_id)
+
+
+async def record_queue_message(db: AsyncSession, job_id: str, message_id: str) -> None:
+    await db.execute(
+        update(PublishJob)
+        .where(
+            PublishJob.id == job_id,
+            PublishJob.status == "queued",
+            PublishJob.queue_message_id == "",
+        )
+        .values(queue_message_id=message_id)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
 
 
 async def list_jobs(
@@ -109,3 +158,13 @@ async def list_jobs(
         .limit(page_size)
     )
     return list(res.scalars().all()), int(total)
+
+
+async def list_recoverable_jobs(db: AsyncSession) -> list[PublishJob]:
+    result = await db.execute(
+        select(PublishJob).where(
+            (PublishJob.status == "publishing")
+            | ((PublishJob.status == "queued") & (PublishJob.queue_message_id == ""))
+        )
+    )
+    return list(result.scalars().all())
