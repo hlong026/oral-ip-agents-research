@@ -89,6 +89,26 @@ services:
       - ./server:/app
       - oral-storage:/app/storage
 
+  im-listener:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    command: python -m app.workers.im_listener
+    env_file:
+      - ./server/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app
+      - oral-storage:/app/storage
+
 volumes:
   pg-data:
   redis-data:

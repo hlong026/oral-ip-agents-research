@@ -55,20 +55,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         await recover_incomplete_tasks(db)
         await recover_publish_jobs(db)
-    if settings.im_enabled:
-        from app.workers.im_listener import restore_listeners
-
-        await restore_listeners()
     # 发布模块：启动 Cookie 心跳检测后台任务
     from app.providers.publish.heartbeat import start_heartbeat
 
     start_heartbeat()
     logger.info("oral-ip-agents server ready")
     yield
-    if settings.im_enabled:
-        from app.workers.im_listener import shutdown_all
-
-        await shutdown_all()
 
 
 app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)

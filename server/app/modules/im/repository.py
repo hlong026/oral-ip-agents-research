@@ -9,6 +9,11 @@ from app.modules.publish.models import PublishAccount
 
 from .models import IMAutoReplyRule, IMConversation, IMListenerState, IMMessage
 
+
+class ListenerOwnershipConflict(RuntimeError):
+    """The durable listener row already belongs to another user."""
+
+
 # ---- 会话 ----
 
 
@@ -161,7 +166,8 @@ async def upsert_listener_state(db: AsyncSession, account_id: str, user_id: str,
             state = IMListenerState(account_id=account_id, user_id=user_id, **fields)
             db.add(state)
         else:
-            existing.user_id = user_id
+            if existing.user_id != user_id:
+                raise ListenerOwnershipConflict(f"listener state for account {account_id} belongs to another user")
             state = existing
             for k, v in fields.items():
                 setattr(state, k, v)

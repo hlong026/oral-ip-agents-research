@@ -230,9 +230,8 @@ async def get_listener_status(db: AsyncSession, user_id: str) -> list[ListenerSt
 
 
 async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) -> ListenerStatusOut:
-    """启动指定账号的消息监听"""
+    """Persist listener intent; the independent supervisor owns the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
-    from app.workers.im_listener import start_listening
 
     await repo.upsert_listener_state(
         db, account_id=inp.accountId, user_id=user_id, status="listening", started_at=datetime.now(UTC), error_msg=""
@@ -240,16 +239,13 @@ async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn)
     await emit(
         CHANNEL_IM, {"kind": EV_LISTENER_STATUS, "userId": user_id, "accountId": inp.accountId, "status": "listening"}
     )
-    start_listening(inp.accountId, user_id)
     return ListenerStatusOut(accountId=inp.accountId, status="listening")
 
 
 async def stop_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn) -> ListenerStatusOut:
-    """停止指定账号的消息监听"""
+    """Persist stop intent; the independent supervisor observes and closes the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
-    from app.workers.im_listener import stop_listening
 
-    stop_listening(inp.accountId)
     await repo.upsert_listener_state(db, account_id=inp.accountId, user_id=user_id, status="disconnected", error_msg="")
     await emit(
         CHANNEL_IM,

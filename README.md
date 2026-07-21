@@ -25,7 +25,13 @@ alembic upgrade head
 uvicorn app.main:app --reload
 # 另开终端启动持久任务 Worker
 uv run dramatiq app.workers.tasks --processes 1 --threads 4
+# IM_ENABLED=true 的开发/测试环境另开独立私信监听 Worker
+uv run python -m app.workers.im_listener
 ```
+
+私信监听意图保存在数据库，实际 WebSocket 连接只由独立监听 Worker 持有；
+Redis 租约保证同一账号不会被多个 Worker 重复监听。生产环境仍受第三阶段
+Go/No-Go 门禁约束，不得仅通过设置 `IM_ENABLED=true` 绕过授权与灰度验收。
 
 本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的
 ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置 FFmpeg。
