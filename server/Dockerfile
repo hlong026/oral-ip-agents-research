@@ -8,12 +8,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e . || pip install --no-cache-dir \
-    fastapi "uvicorn[standard]" "sqlalchemy[asyncio]" aiosqlite asyncpg \
-    pydantic pydantic-settings "python-jose[cryptography]" "passlib[bcrypt]" \
-    redis httpx python-multipart
-
 COPY app ./app
+COPY alembic.ini ./
+COPY alembic ./alembic
+RUN pip install --no-cache-dir .
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

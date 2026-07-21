@@ -18,6 +18,7 @@ import type {
   PricePreview,
   PricePreviewRequest,
   PublishAccount,
+  PublishCapability,
   PublishJob,
   Quota,
   QuotaUsageItem,
@@ -235,8 +236,12 @@ export const pipelineApi = {
       `/pipelines?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
     ),
   get: (id: string) => http.get<PipelineTask>(`/pipelines/${id}`),
-  retryStep: (id: string, step: string) =>
-    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`),
+  retryQuote: (id: string) =>
+    http.post<PricePreview>(`/pipelines/${id}/retry-quote`),
+  retryStep: (id: string, step: string, quoteId?: string) =>
+    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`, {
+      quoteId,
+    }),
   overrideStep: (id: string, step: string, artifacts: Record<string, string>) =>
     http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/override`, {
       artifacts,
@@ -258,6 +263,7 @@ export interface CreatePublishInput {
 }
 
 export const publishApi = {
+  capabilities: () => http.get<PublishCapability[]>("/publish/capabilities"),
   accounts: () => http.get<PublishAccount[]>("/publish/accounts"),
   qrcodeStart: (platform: Platform) =>
     http.post<{ ticket: string; qrcodeUrl: string }>(
@@ -290,9 +296,13 @@ export const publishApi = {
   retryJob: (jobId: string) =>
     http.post<PublishJob>(`/publish/jobs/${jobId}/retry`),
   exportJob: (jobId: string) =>
-    http.post<{ jobId: string; videoUrl: string }>(
-      `/publish/jobs/${jobId}/export`,
-    ),
+    http.post<{
+      jobId: string;
+      videoUrl: string;
+      packageKey: string;
+      packageUrl: string;
+      metadata: Record<string, unknown>;
+    }>(`/publish/jobs/${jobId}/export`),
 };
 
 // ---------- notify（站内信） ----------

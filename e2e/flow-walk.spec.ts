@@ -164,3 +164,18 @@ test("一键成片 7 步向导：step 参数驱动 flow-bar 当前步高亮", as
     await expect(activeLink).toHaveClass(/bg-brand-grad/);
   }
 });
+
+test("主链输入降级与未验收发布能力在 Web/桌面共用页面可见", async ({
+  page,
+}) => {
+  await page.goto("/create?step=link");
+  await expect(page.getByRole("button", { name: "链接解析" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "直接写文案" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "上传本地文件提取文案" }),
+  ).toBeVisible();
+
+  await page.goto("/publish/jobs");
+  await expect(page.getByText(/未完成真实账号验收的平台只生成/)).toBeVisible();
+  await expect(page.getByText("仅支持人工发布包").first()).toBeVisible();
+});

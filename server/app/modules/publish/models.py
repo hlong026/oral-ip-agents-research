@@ -50,6 +50,8 @@ class PublishJob(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     post_id: Mapped[str] = mapped_column(String(64), default="")
     retry_count: Mapped[str] = mapped_column(String(8), default="0")
+    queue_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    export_key: Mapped[str] = mapped_column(String(256), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)

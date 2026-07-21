@@ -50,6 +50,7 @@ class JobOut(BaseModel):
     error: str = ""
     postId: str = ""
     videoUrl: str | None = None
+    packageUrl: str | None = None
     retryCount: int = 0
     createdAt: str
     updatedAt: str
@@ -65,3 +66,16 @@ class JobPageOut(BaseModel):
 class ExportOut(BaseModel):
     jobId: str
     videoUrl: str
+    packageKey: str
+    packageUrl: str
+    metadata: dict[str, object]
+
+
+class PublishCapabilityOut(BaseModel):
+    platform: str
+    platformName: str
+    mode: str  # automatic | semi_automatic | export_only | development_mock
+    verificationStatus: str  # verified | unverified | development_mock
+    automaticEnabled: bool
+    fallback: str = "manual_package"
+    reason: str = ""

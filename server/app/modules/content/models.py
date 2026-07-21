@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Float, String, Text
+from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -28,5 +28,25 @@ class Script(Base):
     rewritten_text: Mapped[str] = mapped_column(Text, default="")
     words_json: Mapped[str] = mapped_column(Text, default="[]")  # 字级时间戳
     similarity_score: Mapped[float] = mapped_column(Float, default=0.0)
+    current_version: Mapped[int] = mapped_column(Integer, default=1)
+    model_name: Mapped[str] = mapped_column(String(64), default="")
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft | confirmed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class ScriptVersion(Base):
+    """文案每次来源、模型生成或人工编辑的不可变快照。"""
+
+    __tablename__ = "script_versions"
+    __table_args__ = (UniqueConstraint("script_id", "version", name="uq_script_versions_script_version"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    script_id: Mapped[str] = mapped_column(String(32), index=True)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(24))
+    text: Mapped[str] = mapped_column(Text)
+    model_name: Mapped[str] = mapped_column(String(64), default="")
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

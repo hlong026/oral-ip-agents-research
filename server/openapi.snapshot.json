@@ -1651,6 +1651,108 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": ["content"],
+        "summary": "Api Update Script",
+        "operationId": "api_update_script_api_v1_content_scripts__script_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "script_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Script Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/content/scripts/{script_id}/versions": {
+      "get": {
+        "tags": ["content"],
+        "summary": "Api Script Versions",
+        "operationId": "api_script_versions_api_v1_content_scripts__script_id__versions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "script_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Script Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScriptVersionOut"
+                  },
+                  "title": "Response Api Script Versions Api V1 Content Scripts  Script Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/pipelines": {
@@ -1844,6 +1946,53 @@
         }
       }
     },
+    "/api/v1/pipelines/{task_id}/retry-quote": {
+      "post": {
+        "tags": ["pipeline"],
+        "summary": "Retry Quote",
+        "operationId": "retry_quote_api_v1_pipelines__task_id__retry_quote_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Retry Quote Api V1 Pipelines  Task Id  Retry Quote Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pipelines/{task_id}/steps/{step}/retry": {
       "post": {
         "tags": ["pipeline"],
@@ -1875,6 +2024,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RetryStepIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Inp"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -2053,6 +2219,35 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/publish/capabilities": {
+      "get": {
+        "tags": ["publish"],
+        "summary": "Capabilities",
+        "description": "返回真实验收口径；未验收平台只展示人工发布包。",
+        "operationId": "capabilities_api_v1_publish_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PublishCapabilityOut"
+                  },
+                  "type": "array",
+                  "title": "Response Capabilities Api V1 Publish Capabilities Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/api/v1/publish/accounts": {
@@ -2552,7 +2747,7 @@
       "post": {
         "tags": ["publish"],
         "summary": "Export Job",
-        "description": "失败降级：仅导出 MP4（F-504）",
+        "description": "失败降级：导出视频、封面和元数据完整发布包（F-504）",
         "operationId": "export_job_api_v1_publish_jobs__job_id__export_post",
         "security": [
           {
@@ -4631,10 +4826,29 @@
           "videoUrl": {
             "type": "string",
             "title": "Videourl"
+          },
+          "packageKey": {
+            "type": "string",
+            "title": "Packagekey"
+          },
+          "packageUrl": {
+            "type": "string",
+            "title": "Packageurl"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
           }
         },
         "type": "object",
-        "required": ["jobId", "videoUrl"],
+        "required": [
+          "jobId",
+          "videoUrl",
+          "packageKey",
+          "packageUrl",
+          "metadata"
+        ],
         "title": "ExportOut"
       },
       "FeedEvent": {
@@ -4739,6 +4953,17 @@
               }
             ],
             "title": "Videourl"
+          },
+          "packageUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Packageurl"
           },
           "retryCount": {
             "type": "integer",
@@ -5066,6 +5291,19 @@
             ],
             "title": "Url"
           },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
           "videoId": {
             "anyOf": [
               {
@@ -5118,6 +5356,22 @@
           "degraded": {
             "type": "boolean",
             "title": "Degraded"
+          },
+          "inputType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inputtype"
+          },
+          "sourceStatus": {
+            "type": "string",
+            "title": "Sourcestatus",
+            "default": "ready"
           },
           "platform": {
             "anyOf": [
@@ -5929,6 +6183,49 @@
         "required": ["durationSeconds"],
         "title": "ProbeUrlOut"
       },
+      "PublishCapabilityOut": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "platformName": {
+            "type": "string",
+            "title": "Platformname"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "verificationStatus": {
+            "type": "string",
+            "title": "Verificationstatus"
+          },
+          "automaticEnabled": {
+            "type": "boolean",
+            "title": "Automaticenabled"
+          },
+          "fallback": {
+            "type": "string",
+            "title": "Fallback",
+            "default": "manual_package"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "platform",
+          "platformName",
+          "mode",
+          "verificationStatus",
+          "automaticEnabled"
+        ],
+        "title": "PublishCapabilityOut"
+      },
       "QrcodePollOut": {
         "properties": {
           "status": {
@@ -6150,6 +6447,23 @@
         ],
         "title": "ReservationStateOut"
       },
+      "RetryStepIn": {
+        "properties": {
+          "quoteId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quoteid"
+          }
+        },
+        "type": "object",
+        "title": "RetryStepIn"
+      },
       "RewriteIn": {
         "properties": {
           "text": {
@@ -6315,6 +6629,18 @@
             "type": "number",
             "title": "Similarityscore"
           },
+          "currentVersion": {
+            "type": "integer",
+            "title": "Currentversion"
+          },
+          "modelName": {
+            "type": "string",
+            "title": "Modelname"
+          },
+          "promptVersion": {
+            "type": "string",
+            "title": "Promptversion"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -6333,10 +6659,75 @@
           "originalText",
           "rewrittenText",
           "similarityScore",
+          "currentVersion",
+          "modelName",
+          "promptVersion",
           "status",
           "createdAt"
         ],
         "title": "ScriptOut"
+      },
+      "ScriptUpdateIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": ["title", "text"],
+        "title": "ScriptUpdateIn"
+      },
+      "ScriptVersionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "modelName": {
+            "type": "string",
+            "title": "Modelname"
+          },
+          "promptVersion": {
+            "type": "string",
+            "title": "Promptversion"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "version",
+          "kind",
+          "text",
+          "modelName",
+          "promptVersion",
+          "createdAt"
+        ],
+        "title": "ScriptVersionOut"
       },
       "SettingsIn": {
         "properties": {
@@ -6526,6 +6917,17 @@
               }
             ],
             "title": "Finishedat"
+          },
+          "durationMs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Durationms"
           }
         },
         "type": "object",
@@ -6714,6 +7116,17 @@
           "quotaCost": {
             "type": "number",
             "title": "Quotacost"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "artifacts": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Artifacts",
+            "default": {}
           },
           "batchId": {
             "anyOf": [

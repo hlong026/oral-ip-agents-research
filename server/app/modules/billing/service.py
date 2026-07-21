@@ -405,7 +405,7 @@ async def reserve_quote(
     )
 
 
-def _expected_pipeline_quote(task: dict, quote_items: list[dict]) -> dict[str, int]:
+def pipeline_quote_quantities(task: dict, module_units: dict[str, str]) -> dict[str, int]:
     """从服务端收到的任务参数重建单个任务用量，防止客户端删减报价模块。"""
     script_text = str(task.get("scriptText") or "").strip()
     target_duration = max(1, int(task.get("_targetDurationSeconds") or 60))
@@ -422,12 +422,11 @@ def _expected_pipeline_quote(task: dict, quote_items: list[dict]) -> dict[str, i
     if task.get("topic") and not script_text:
         required_modules.add("topic_generation")
 
+    if not required_modules.issubset(module_units):
+        return {}
     expected: dict[str, int] = {}
-    for item in quote_items:
-        module = str(item.get("module") or "")
-        if module not in required_modules:
-            continue
-        unit = str(item.get("unit") or "")
+    for module in required_modules:
+        unit = module_units[module]
         if unit in {"per_minute", "per_second"}:
             quantity = duration_seconds
         elif unit == "per_1k_chars":
@@ -437,9 +436,12 @@ def _expected_pipeline_quote(task: dict, quote_items: list[dict]) -> dict[str, i
         else:
             quantity = 1
         expected[module] = quantity
-    if set(expected) != required_modules:
-        return {}
     return expected
+
+
+def _expected_pipeline_quote(task: dict, quote_items: list[dict]) -> dict[str, int]:
+    module_units = {str(item.get("module") or ""): str(item.get("unit") or "") for item in quote_items}
+    return pipeline_quote_quantities(task, module_units)
 
 
 def _validate_quote_matches_task(quote: PriceQuote, task: dict) -> None:

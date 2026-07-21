@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T06:00:03.154Z
+ * API 版本：1.0.0 · 生成时间：2026-07-21T06:58:53.497Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -150,6 +150,9 @@ export interface CreditAdjustIn {
 export interface ExportOut {
   jobId: string;
   videoUrl: string;
+  packageKey: string;
+  packageUrl: string;
+  metadata: Record<string, unknown>;
 }
 
 export interface FeedEvent {
@@ -172,6 +175,7 @@ export interface JobOut {
   error?: string;
   postId?: string;
   videoUrl?: string | null;
+  packageUrl?: string | null;
   retryCount?: number;
   createdAt: string;
   updatedAt: string;
@@ -251,6 +255,7 @@ export interface OverviewOut {
 
 export interface ParseIn {
   url?: string | null;
+  body?: string | null;
   videoId?: string | null;
   platform?: string | null;
   quoteId?: string | null;
@@ -259,6 +264,8 @@ export interface ParseIn {
 export interface ParseOut {
   transcript: TranscriptOut | null;
   degraded: boolean;
+  inputType?: string | null;
+  sourceStatus?: string;
   platform?: string | null;
   title?: string | null;
   scriptId?: string | null;
@@ -395,6 +402,16 @@ export interface ProbeUrlOut {
   durationSeconds: number;
 }
 
+export interface PublishCapabilityOut {
+  platform: string;
+  platformName: string;
+  mode: string;
+  verificationStatus: string;
+  automaticEnabled: boolean;
+  fallback?: string;
+  reason?: string;
+}
+
 export interface QrcodePollOut {
   status: string;
   account?: AccountOut | null;
@@ -453,6 +470,10 @@ export interface ReservationStateOut {
   availablePoints: number;
 }
 
+export interface RetryStepIn {
+  quoteId?: string | null;
+}
+
 export interface RewriteIn {
   text: string;
   intensity?: string;
@@ -484,7 +505,25 @@ export interface ScriptOut {
   originalText: string;
   rewrittenText: string;
   similarityScore: number;
+  currentVersion: number;
+  modelName: string;
+  promptVersion: string;
   status: string;
+  createdAt: string;
+}
+
+export interface ScriptUpdateIn {
+  title: string;
+  text: string;
+}
+
+export interface ScriptVersionOut {
+  id: string;
+  version: number;
+  kind: string;
+  text: string;
+  modelName: string;
+  promptVersion: string;
   createdAt: string;
 }
 
@@ -532,6 +571,7 @@ export interface StepStateOut {
   artifacts?: Record<string, string>;
   startedAt?: string | null;
   finishedAt?: string | null;
+  durationMs?: number | null;
 }
 
 export interface SubscriptionOut {
@@ -569,6 +609,8 @@ export interface TaskOut {
   currentStep?: string | null;
   compute: string;
   quotaCost: number;
+  error?: string;
+  artifacts?: Record<string, unknown>;
   batchId?: string | null;
   createdAt: string;
   updatedAt: string;

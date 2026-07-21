@@ -12,6 +12,7 @@ from app.core.security import hash_password
 from app.modules.auth.models import User
 from app.modules.billing.models import CreditLedger, CreditReservation, PriceQuote, QuotaAccount
 from app.modules.billing.service import grant_points, release_reservation, reserve_quote
+from app.modules.notify.models import Notification
 from app.modules.pipeline.models import PipelineTask
 
 
@@ -84,9 +85,21 @@ async def test_pipeline_success_settles_once(client, monkeypatch) -> None:
                 CreditLedger.event_type == "settle",
             )
         )
+        notification = (
+            (
+                await db.execute(
+                    select(Notification)
+                    .where(Notification.user_id == task.user_id)
+                    .order_by(Notification.created_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
     assert task is not None and task.status == "done"
     assert reservation is not None and reservation.status == "settled"
     assert settlements == 1
+    assert notification is not None and "全流程完成" in notification.title
 
 
 async def test_provider_failure_releases_pipeline_reservation(client, monkeypatch) -> None:
@@ -106,9 +119,20 @@ async def test_provider_failure_releases_pipeline_reservation(client, monkeypatc
         task = await db.get(PipelineTask, task_id)
         reservation = await db.get(CreditReservation, reservation_id)
         account = (await db.execute(select(QuotaAccount).where(QuotaAccount.user_id == user_id))).scalar_one()
+        notification = (
+            (
+                await db.execute(
+                    select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
     assert task is not None and task.status == "failed"
     assert reservation is not None and reservation.status == "released"
     assert account.balance == 10
+    assert notification is not None and "任务失败" in notification.title
+    assert "parse" in notification.body
 
 
 async def test_settlement_failure_marks_task_failed_and_releases_reservation(client, monkeypatch) -> None:

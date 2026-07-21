@@ -13,6 +13,7 @@ dependencies = [
     "aiosqlite>=0.20",
     "asyncpg>=0.30",
     "redis>=5.2",
+    "dramatiq[redis]>=2.2,<3",
     "httpx>=0.28",
     "tenacity>=9.0",
     "python-jose[cryptography]>=3.3",
@@ -38,6 +39,13 @@ dev = [
     "mypy>=1.13",
     "types-aiofiles>=24.1",
 ]
+
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.uv]
 package = false

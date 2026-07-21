@@ -35,6 +35,10 @@ async def init_redis(redis_url: str) -> None:
         logger.info("event bus: redis connected")
     except Exception as e:  # noqa: BLE001
         _redis = None
+        from app.core.config import get_settings
+
+        if get_settings().app_env not in {"dev", "test"}:
+            raise RuntimeError("生产环境 Redis 不可用，拒绝启动任务与通知服务") from e
         logger.warning(f"event bus: redis unavailable ({e}), fallback to in-process broadcast")
 
 

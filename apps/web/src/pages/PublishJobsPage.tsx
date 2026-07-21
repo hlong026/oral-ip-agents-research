@@ -15,9 +15,13 @@ const JOB_STATUS: Record<string, { label: string; cls: string }> = {
   publishing: { label: "发布中", cls: "border-warning/40 text-warning" },
   success: { label: "成功", cls: "border-success/40 text-success" },
   failed: { label: "失败", cls: "border-danger/40 text-danger" },
+  export_ready: {
+    label: "待人工发布",
+    cls: "border-warning/40 text-warning",
+  },
 };
 
-/** 单条发布任务行：状态追踪 / 失败原因 / 重试与「仅导出 MP4」降级（F-504） */
+/** 单条发布任务行：状态追踪 / 失败原因 / 重试与完整人工发布包降级（F-504） */
 function JobRow({ job, onAction }: { job: PublishJob; onAction: () => void }) {
   const [busy, setBusy] = useState(false);
   const [exported, setExported] = useState("");
@@ -37,7 +41,7 @@ function JobRow({ job, onAction }: { job: PublishJob; onAction: () => void }) {
     setBusy(true);
     try {
       const res = await publishApi.exportJob(job.id);
-      setExported(res.videoUrl);
+      setExported(res.packageUrl);
     } finally {
       setBusy(false);
     }
@@ -66,39 +70,53 @@ function JobRow({ job, onAction }: { job: PublishJob; onAction: () => void }) {
       </td>
       <td className="py-2.5 pr-3">
         <span className={`chip text-[11px] ${meta.cls}`}>{meta.label}</span>
-        {job.status === "failed" && job.error && (
-          <div className="mt-1 max-w-52 text-xs text-danger" title={job.error}>
-            {job.error}
-          </div>
-        )}
+        {(job.status === "failed" || job.status === "export_ready") &&
+          job.error && (
+            <div
+              className={`mt-1 max-w-52 text-xs ${job.status === "failed" ? "text-danger" : "text-warning"}`}
+              title={job.error}
+            >
+              {job.error}
+            </div>
+          )}
         {exported && (
           <div
             className="mt-1 max-w-52 truncate text-xs text-success"
             title={exported}
           >
-            已导出：{exported}
+            发布包已就绪
           </div>
         )}
       </td>
       <td className="py-2.5">
         <div className="flex gap-1.5">
           {job.status === "failed" && (
-            <>
-              <button
-                className="btn-primary px-2.5 py-0.5 text-xs"
-                disabled={busy}
-                onClick={retry}
-              >
-                重试
-              </button>
-              <button
-                className="btn-ghost px-2.5 py-0.5 text-xs"
-                disabled={busy}
-                onClick={exportMp4}
-              >
-                仅导出 MP4
-              </button>
-            </>
+            <button
+              className="btn-primary px-2.5 py-0.5 text-xs"
+              disabled={busy}
+              onClick={retry}
+            >
+              重试
+            </button>
+          )}
+          {(job.status === "failed" || job.status === "export_ready") && (
+            <button
+              className="btn-ghost px-2.5 py-0.5 text-xs"
+              disabled={busy}
+              onClick={exportMp4}
+            >
+              生成发布包
+            </button>
+          )}
+          {(exported || job.packageUrl) && (
+            <a
+              className="btn-ghost px-2.5 py-0.5 text-xs"
+              href={exported || job.packageUrl || "#"}
+              target="_blank"
+              rel="noreferrer"
+            >
+              下载 ZIP
+            </a>
           )}
           {job.status === "success" && job.videoUrl && (
             <a
@@ -132,6 +150,10 @@ export default function PublishJobsPage({
   const { data: accounts } = useQuery({
     queryKey: ["publish-accounts"],
     queryFn: () => publishApi.accounts(),
+  });
+  const { data: capabilities } = useQuery({
+    queryKey: ["publish-capabilities"],
+    queryFn: () => publishApi.capabilities(),
   });
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["publish-jobs", showLogs ? "logs" : status, page],
@@ -168,6 +190,7 @@ export default function PublishJobsPage({
     { key: "publishing", label: "发布中" },
     { key: "success", label: "成功" },
     { key: "failed", label: "失败" },
+    { key: "export_ready", label: "待人工发布" },
   ] as const;
 
   return (
@@ -178,7 +201,7 @@ export default function PublishJobsPage({
             {showLogs ? "发布日志" : "发布管理"}
           </h1>
           <p className="mt-1 text-sm text-text-3">
-            多平台分发 · 定时发布 · 失败可重试 / 仅导出 MP4 降级
+            多平台分发 · 定时发布 · 未验收能力自动降级为完整人工发布包
           </p>
         </div>
         <div className="flex gap-2">
@@ -227,9 +250,19 @@ export default function PublishJobsPage({
         </div>
       )}
 
+      {(capabilities ?? []).some((item) => !item.automaticEnabled) && (
+        <div className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+          未完成真实账号验收的平台只生成包含视频、封面和发布文案的 ZIP
+          发布包，不会触发自动发布。
+        </div>
+      )}
+
       {/* 平台账号健康状态 */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {PUBLISH_PLATFORMS.map((p) => {
+          const capability = (capabilities ?? []).find(
+            (item) => item.platform === p,
+          );
           const bound = (accounts ?? []).filter((a) => a.platform === p);
           const hasExpired = bound.some((a) => a.status === "expired");
           return (
@@ -240,11 +273,13 @@ export default function PublishJobsPage({
                 <div
                   className={`text-xs ${hasExpired ? "text-danger" : "text-text-3"}`}
                 >
-                  {bound.length === 0
-                    ? "未绑定账号"
-                    : hasExpired
-                      ? "登录态失效"
-                      : `${bound.length} 个账号正常`}
+                  {!capability?.automaticEnabled
+                    ? "仅支持人工发布包"
+                    : bound.length === 0
+                      ? "未绑定账号"
+                      : hasExpired
+                        ? "登录态失效"
+                        : `${bound.length} 个账号正常`}
                 </div>
               </div>
               <span
@@ -256,7 +291,13 @@ export default function PublishJobsPage({
                       : "border-success/40 text-success"
                 }`}
               >
-                {bound.length === 0 ? "未绑定" : hasExpired ? "异常" : "正常"}
+                {!capability?.automaticEnabled
+                  ? "未验收"
+                  : bound.length === 0
+                    ? "未绑定"
+                    : hasExpired
+                      ? "异常"
+                      : "正常"}
               </span>
             </div>
           );

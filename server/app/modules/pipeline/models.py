@@ -59,6 +59,7 @@ class PipelineTask(Base):
     batch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     trace_id: Mapped[str] = mapped_column(String(64), default=new_id)
     error: Mapped[str] = mapped_column(Text, default="")
+    queue_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     publish_at: Mapped[str] = mapped_column(String(32), default="")  # ISO 定时（F-503/F-722 预留）
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(

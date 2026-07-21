@@ -38,6 +38,8 @@ class Avatar(Base):
     style: Mapped[str] = mapped_column(String(32), default="")
     cover_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     preview_key: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 预览视频/图片
+    consent_hash: Mapped[str] = mapped_column(String(64), default="")
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # status: training → ready / failed
     status: Mapped[str] = mapped_column(String(20), default="training")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

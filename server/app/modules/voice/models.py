@@ -38,6 +38,8 @@ class Voice(Base):
     language: Mapped[str] = mapped_column(String(16), default="zh")  # zh/en/jp/ko 等
     sample_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     demo_key: Mapped[str | None] = mapped_column(String(128), nullable=True)  # 试听音频存储 key
+    consent_hash: Mapped[str] = mapped_column(String(64), default="")
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     rate: Mapped[str] = mapped_column(String(8), default="1.0")  # 语速
     volume: Mapped[str] = mapped_column(String(8), default="1.0")  # 音量
     pitch: Mapped[str] = mapped_column(String(8), default="1.0")  # 语调

@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # 数据层
     database_url: str = "sqlite+aiosqlite:///./oral.db"
     redis_url: str = "redis://localhost:6379/0"
+    task_queue_name: str = "oral"
 
     # 存储
     storage_driver: str = "local"  # local | s3
@@ -88,6 +89,8 @@ class Settings(BaseSettings):
     publish_browser_headless: bool = True
     publish_max_concurrency: int = 2  # 浏览器并发槽位数
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
+    # 仅列出已经用真实账号验收通过的平台；未列出平台只提供完整人工发布包。
+    publish_verified_platforms: str = ""
 
     # 抖音 IM 私信（#11: APP_KEY 移入配置，未配置时自动降级到 MockIMProvider）
     im_enabled: bool = False

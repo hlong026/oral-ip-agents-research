@@ -21,8 +21,18 @@ from app.providers.registry import registry
 from app.providers.url_resolver import resolve_input
 
 from . import repository as repo
-from .models import Script
-from .schemas import ParseOut, RewriteOut, ScriptOut, SimilarityOut, SpanOut, TranscriptOut, WordTsOut
+from .models import Script, ScriptVersion
+from .prompts import PROMPT_VERSION
+from .schemas import (
+    ParseOut,
+    RewriteOut,
+    ScriptOut,
+    ScriptVersionOut,
+    SimilarityOut,
+    SpanOut,
+    TranscriptOut,
+    WordTsOut,
+)
 
 logger = get_logger("oral.content")
 
@@ -67,7 +77,14 @@ async def parse_url(
         title = parse_result.title
 
     if not video_url:
-        return ParseOut(transcript=None, degraded=True, platform=platform, title=title)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "LINK_SOURCE_UNAVAILABLE",
+                "message": "链接暂时无法访问，请粘贴正文或上传本地文件继续",
+                "fallbacks": ["paste_text", "upload_file"],
+            },
+        )
 
     known_dur = douyidou_result.duration_sec if douyidou_result else None
     duration_sec = verified_duration_seconds or await probe_duration(
@@ -95,7 +112,7 @@ async def parse_url(
         language=tr.language,
         words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in tr.words],
     )
-    script = await repo.create(
+    script = await _create_script_with_source_version(
         db,
         user_id=user_id,
         persona_id=persona_id or "",
@@ -108,6 +125,8 @@ async def parse_url(
     return ParseOut(
         transcript=transcript,
         degraded=False,
+        inputType="link",
+        sourceStatus="ready",
         platform=platform,
         title=title,
         scriptId=script.id,
@@ -121,7 +140,7 @@ async def _save_text_result(
 ) -> ParseOut:
     """Douyidou 已返回文案时直接落库（跳过ASR，零成本）"""
     text = result.text or ""
-    script = await repo.create(
+    script = await _create_script_with_source_version(
         db,
         user_id=user_id,
         persona_id=persona_id or "",
@@ -135,6 +154,8 @@ async def _save_text_result(
     return ParseOut(
         transcript=TranscriptOut(text=text, words=[], duration=0, language="zh"),
         degraded=False,
+        inputType="link",
+        sourceStatus="ready",
         platform=result.platform,
         title=result.title,
         scriptId=script.id,
@@ -220,12 +241,10 @@ async def parse_upload(
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
     key = await save_bytes("uploads", filename, data)
-    # 按文件大小估算时长（用于 ASR 分流决策，短视频可走 Flash 同步）
-    verified_duration = duration_seconds or len(data) / 300_000
     tr, _ = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", key, duration_sec=verified_duration
+        "asr", registry.asr_chain, "transcribe", key, duration_sec=duration_seconds
     )
-    script = await repo.create(
+    script = await _create_script_with_source_version(
         db,
         user_id=user_id,
         persona_id=persona_id or "",
@@ -241,9 +260,45 @@ async def parse_upload(
             language=tr.language,
             words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in tr.words],
         ),
-        degraded=True,
+        degraded=False,
+        inputType="upload",
+        sourceStatus="ready",
         platform="upload",
         title=filename,
+        scriptId=script.id,
+    )
+
+
+async def parse_text(
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    persona_id: str | None,
+) -> ParseOut:
+    """正文粘贴是正式输入，不经过链接解析或 ASR。"""
+    normalized = text.strip()
+    if not normalized:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "TEXT_REQUIRED", "message": "请粘贴正文后重试"},
+        )
+    script = await _create_script_with_source_version(
+        db,
+        user_id=user_id,
+        persona_id=persona_id or "",
+        title=normalized[:20],
+        source_url="",
+        platform="manual",
+        original_text=normalized,
+        words_json="[]",
+    )
+    return ParseOut(
+        transcript=TranscriptOut(text=normalized, words=[], duration=0, language="zh"),
+        degraded=False,
+        inputType="text",
+        sourceStatus="ready",
+        platform="manual",
+        title=script.title,
         scriptId=script.id,
     )
 
@@ -279,6 +334,7 @@ async def rewrite(
                 persona_ctx = persona_prompt_context(persona)
 
     llm = registry.get("llm")
+    provider_name = llm.name
     duration = persona.video_duration if persona else 60
     taboo_words = "、".join(json.loads(persona.taboo_words or "[]")) if persona else "无"
     cta_style = persona.cta_style if persona else "关注收藏"
@@ -289,9 +345,13 @@ async def rewrite(
         if persona_ctx:
             result = await llm.polish_light(text, persona_ctx)
         else:
-            result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "rewrite", text, "light", prompt)
+            result, provider_name = await registry.run_with_fallback(
+                "llm", registry.llm_chain, "rewrite", text, "light", prompt
+            )
         # 禁忌词校验
         result, passed = _validate_taboo(result, taboo_words, avoid_topics)
+        if script_id:
+            await _append_generated_version(db, user_id, script_id, result, provider_name, 0.0)
         return RewriteOut(text=result, validationPassed=passed)
 
     # ---- Stage 1: 结构拆解 ----
@@ -323,7 +383,7 @@ async def rewrite(
         if found_avoid:
             issues.append(f"涉及回避话题：{'、'.join(found_avoid)}")
         # 去重检测
-        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result)
+        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result, text)
         final_score = sim_result.score
         if sim_result.score > 60:
             issues.append(f"与原文相似度偏高（{sim_result.score:.0f}分），需降低重复度")
@@ -338,7 +398,7 @@ async def rewrite(
         result = await llm.validation_rewrite(result, persona_ctx, "\n".join(issues))
     else:
         # 循环耗尽（文本被重写过），重新检测最终相似度
-        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result)
+        sim_result, _ = await registry.run_with_fallback("llm", registry.llm_chain, "check_similarity", result, text)
         final_score = sim_result.score
         validation_passed = sim_result.score <= 60
 
@@ -347,7 +407,19 @@ async def rewrite(
         s = await repo.get(db, script_id, user_id)
         if s:
             s.rewritten_text = result
+            s.similarity_score = final_score
+            s.current_version += 1
+            s.model_name = provider_name
+            s.prompt_version = PROMPT_VERSION
             await repo.save(db, s)
+            await repo.append_version(
+                db,
+                s,
+                kind="model_rewrite",
+                text=result,
+                model_name=provider_name,
+                prompt_version=PROMPT_VERSION,
+            )
 
     # 仿写完成：记录 INFO（§10.6.8-B #3）
     duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -402,7 +474,7 @@ async def create_script(
     db: AsyncSession, user_id: str, persona_id: str | None, title: str, text: str, platform: str, topic: str | None
 ) -> ScriptOut:
     """手动创建文案资产（选题生成 / 直接编写入口），与解析产物同构"""
-    script = await repo.create(
+    script = await _create_script_with_source_version(
         db,
         user_id=user_id,
         persona_id=persona_id or "",
@@ -413,6 +485,40 @@ async def create_script(
         words_json="[]",
     )
     return to_out(script)
+
+
+async def update_script(
+    db: AsyncSession,
+    user_id: str,
+    script_id: str,
+    *,
+    title: str,
+    text: str,
+) -> ScriptOut:
+    script = await repo.get(db, script_id, user_id)
+    if not script:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "文案不存在"})
+    script.title = title.strip()
+    script.rewritten_text = text.strip()
+    script.current_version += 1
+    script.model_name = "human"
+    script.prompt_version = "manual"
+    await repo.save(db, script)
+    await repo.append_version(
+        db,
+        script,
+        kind="manual_edit",
+        text=script.rewritten_text,
+        model_name="human",
+        prompt_version="manual",
+    )
+    return to_out(script)
+
+
+async def list_script_versions(db: AsyncSession, user_id: str, script_id: str) -> list[ScriptVersionOut]:
+    if not await repo.get(db, script_id, user_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "文案不存在"})
+    return [version_to_out(version) for version in await repo.list_versions(db, script_id, user_id)]
 
 
 async def list_scripts(db: AsyncSession, user_id: str) -> list[ScriptOut]:
@@ -436,6 +542,67 @@ def to_out(s: Script) -> ScriptOut:
         originalText=s.original_text,
         rewrittenText=s.rewritten_text,
         similarityScore=s.similarity_score,
+        currentVersion=s.current_version,
+        modelName=s.model_name,
+        promptVersion=s.prompt_version,
         status=s.status,
         createdAt=s.created_at.astimezone(UTC).isoformat(),
+    )
+
+
+def version_to_out(version: ScriptVersion) -> ScriptVersionOut:
+    return ScriptVersionOut(
+        id=version.id,
+        version=version.version,
+        kind=version.kind,
+        text=version.text,
+        modelName=version.model_name,
+        promptVersion=version.prompt_version,
+        createdAt=version.created_at.astimezone(UTC).isoformat(),
+    )
+
+
+async def _create_script_with_source_version(db: AsyncSession, **fields) -> Script:
+    script = await repo.create(
+        db,
+        current_version=1,
+        model_name="source",
+        prompt_version="source",
+        **fields,
+    )
+    await repo.append_version(
+        db,
+        script,
+        kind="source",
+        text=script.original_text,
+        model_name="source",
+        prompt_version="source",
+    )
+    return script
+
+
+async def _append_generated_version(
+    db: AsyncSession,
+    user_id: str,
+    script_id: str,
+    text: str,
+    provider_name: str,
+    similarity_score: float,
+) -> None:
+    script = await repo.get(db, script_id, user_id)
+    if not script:
+        return
+    script.rewritten_text = text
+    script.similarity_score = similarity_score
+    script.current_version += 1
+    script.model_name = provider_name
+    script.prompt_version = PROMPT_VERSION
+    await repo.save(db, script)
+    await repo.append_version(
+        db,
+        script,
+        kind="model_rewrite",
+        text=text,
+        model_name=provider_name,
+        prompt_version=PROMPT_VERSION,
     )

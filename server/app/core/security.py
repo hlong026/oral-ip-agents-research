@@ -1,5 +1,7 @@
 """安全：密码散列 + JWT 双令牌（F-601 / C7）"""
 
+import hashlib
+import hmac
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -21,6 +23,12 @@ def verify_password(raw: str, hashed: str) -> bool:
         return bcrypt.checkpw(raw.encode("utf-8")[:72], hashed.encode("utf-8"))
     except ValueError:
         return False
+
+
+def consent_fingerprint(user_id: str, asset_kind: str, token: str) -> str:
+    """保存可审计的授权指纹，不落授权凭证明文。"""
+    message = f"{user_id}:{asset_kind}:{token.strip()}".encode()
+    return hmac.new(settings.app_secret.encode(), message, hashlib.sha256).hexdigest()
 
 
 def _make_token(
