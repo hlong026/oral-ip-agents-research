@@ -134,33 +134,79 @@ async def cookie_auth(account_file):
 
 
 async def _extract_tencent_qrcode_src(page: Page) -> str:
-    if hasattr(page, "frame_locator"):
-        try:
-            iframe_locator = page.frame_locator('[src*="login-for-iframe"]')
-            qr_code_img = iframe_locator.locator('div#app img.qrcode').first
-            await qr_code_img.wait_for(state="visible", timeout=30000)
-            src = await qr_code_img.get_attribute("src")
-            if src and src.startswith("data:image/"):
-                return src
-        except Exception:
-            pass
+    """提取登录二维码，统一返回 data:image/... URL
+    2026-07 实测结构：login.html 内嵌 open.weixin.qq.com/connect/qrconnect iframe，
+    可见二维码 img 的 src 为相对路径 /connect/qrcode/xxx（首个匹配元素隐藏、非 data URL），
+    因此优先按 src 抓图转 data URL；失败再退到元素截图，兼容旧版 data URL 结构。
+    """
+    import base64
 
-    selector_candidates = [
-        "div.login-qrcode-wrap img.qrcode",
-        "div.qrcode-wrap img.qrcode",
-        "img.qrcode",
-        'img[src^="data:image/"]',
-    ]
-    for selector in selector_candidates:
-        qr_code_img = page.locator(selector).first
+    # ① iframe（qrconnect / login-for-iframe）内按 src 特征找二维码图
+    for frame in page.frames:
+        if "qrconnect" not in frame.url and "login-for-iframe" not in frame.url:
+            continue
         try:
-            if not await qr_code_img.count() or not await qr_code_img.is_visible():
+            await frame.wait_for_selector(
+                'img[src*="/connect/qrcode/"], img.qrcode', state="attached", timeout=30000
+            )
+        except Exception:
+            continue
+        imgs = frame.locator('img[src*="/connect/qrcode/"], img.qrcode')
+        for i in range(await imgs.count()):
+            src = await imgs.nth(i).get_attribute("src") or ""
+            if not src:
                 continue
-            src = await qr_code_img.get_attribute("src")
+            if src.startswith("data:image/"):
+                return src
+            if "/connect/qrcode/" not in src:
+                continue
+            # 相对路径 → 绝对 URL，用浏览器上下文抓图转 data URL（自包含，前端可直接渲染）
+            if src.startswith("/"):
+                src = frame.url.split("/connect/")[0] + src
+            try:
+                resp = await page.context.request.get(src)
+                if resp.ok:
+                    body = await resp.body()
+                    ctype = resp.headers.get("content-type", "image/png").split(";")[0]
+                    if not ctype.startswith("image/"):
+                        ctype = "image/png"
+                    return f"data:{ctype};base64," + base64.b64encode(body).decode()
+            except Exception:
+                continue
+
+    # ② 页面级选择器兜底（旧结构 data URL）
+    for selector in ["div.login-qrcode-wrap img.qrcode", "div.qrcode-wrap img.qrcode", "img.qrcode", 'img[src^="data:image/"]']:
+        loc = page.locator(selector).first
+        try:
+            if not await loc.count():
+                continue
+            src = await loc.get_attribute("src")
             if src and src.startswith("data:image/"):
                 return src
         except Exception:
             continue
+
+    # ③ 最后手段：截图可见的二维码区域（iframe 整体或图片元素）
+    for target in ['iframe[src*="qrconnect"]', 'iframe[src*="login-for-iframe"]', "img.qrcode"]:
+        loc = page.locator(target).first
+        try:
+            if not await loc.count():
+                continue
+            png_bytes = await loc.screenshot(timeout=5000)
+            return "data:image/png;base64," + base64.b64encode(png_bytes).decode()
+        except Exception:
+            continue
+
+    # 诊断：记录页面 URL + iframe 列表 + 截图，便于排查无头出码失败
+    try:
+        frame_urls = [f.url for f in page.frames]
+        tencent_logger.error(_msg("😢", f"视频号二维码提取失败 page_url={page.url} frames={frame_urls}"))
+        debug_shot = Path(BASE_DIR) / "logs" / "tencent_qrcode_debug.png"
+        debug_shot.parent.mkdir(parents=True, exist_ok=True)
+        await page.screenshot(path=str(debug_shot), full_page=True)
+        tencent_logger.error(_msg("😢", f"已保存调试截图: {debug_shot}"))
+    except Exception:
+        pass
 
     raise RuntimeError("未获取到视频号登录二维码地址")
 
@@ -197,6 +243,7 @@ async def _save_tencent_qrcode(page: Page, account_file: str, previous_qrcode_pa
 
 
 async def _is_tencent_login_completed(page: Page) -> bool:
+    # ① 发表页功能标记可见 → 已登录（最强信号）
     publish_markers = [
         page.locator('div:has-text("发表视频")').first,
         page.locator('button:has-text("发表")').first,
@@ -209,9 +256,7 @@ async def _is_tencent_login_completed(page: Page) -> bool:
         except Exception:
             continue
 
-    if not (page.url.startswith(TENCENT_UPLOAD_URL) or page.url.startswith(TENCENT_MANAGE_URL)):
-        return False
-
+    # ② 登录二维码/登录标识仍可见 → 未完成（无论 URL 如何）
     login_markers = [
         page.locator("div.login-qrcode-wrap").first,
         page.locator("div.qrcode-wrap").first,
@@ -225,7 +270,12 @@ async def _is_tencent_login_completed(page: Page) -> bool:
         except Exception:
             continue
 
-    return True
+    # ③ 扫码确认后落地页不一定是 /platform/post/create|list（可能是 /platform 或根路径 SPA），
+    #    登录标记已不可见且不在登录页(login.html)即视为完成；个别误判由 cookie_auth 最终兜庭
+    base_url = page.url.split("?")[0].split("#")[0].rstrip("/")
+    if not base_url.startswith("https://channels.weixin.qq.com"):
+        return False
+    return not base_url.endswith("/login.html")
 
 
 async def _is_tencent_qrcode_expired(page: Page) -> bool:
@@ -352,11 +402,25 @@ async def tencent_cookie_gen(
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
         context = await browser.new_context()
+        context = await set_init_script(context)
         qrcode_path = None
         result = _build_login_result(False, "failed", "视频号登录失败", account_file)
         try:
             page = await context.new_page()
-            await page.goto(TENCENT_LOGIN_URL)
+            await page.goto(TENCENT_LOGIN_URL, wait_until="domcontentloaded")
+            # 无头下 qrconnect iframe 加载慢：先等网络安静 + iframe 挂载，再提取二维码
+            try:
+                await page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                pass
+            try:
+                await page.wait_for_selector(
+                    'iframe[src*="qrconnect"], iframe[src*="login-for-iframe"]',
+                    state="attached",
+                    timeout=30000,
+                )
+            except Exception:
+                tencent_logger.warning(_msg("😵", "未等到视频号登录 iframe，继续尝试提取二维码"))
             qrcode_info = await _save_tencent_qrcode(page, account_file, qrcode_callback=qrcode_callback)
             qrcode_path = Path(qrcode_info["image_path"])
             tencent_logger.info(_msg("🧍", "请扫码，小人正在耐心等待登录完成"))

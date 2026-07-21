@@ -64,6 +64,12 @@ async def qrcode_poll(db: AsyncSession, user_id: str, platform: str, ticket: str
     session = await driver.check_login(ticket)
     if session is None:
         return QrcodePollOut(status="waiting")
+    # 等待扫码中：透传最新二维码（平台二维码过期刷新后前端同步换图）
+    if session.get("_waiting"):
+        return QrcodePollOut(status="waiting", qrcodeUrl=session.get("qrcode_url") or None)
+    # 登录失败：返回 expired 状态告知前端
+    if session.get("_failed"):
+        return QrcodePollOut(status="expired")
     account = await repo.create_account(
         db, user_id=user_id, platform=platform,
         nickname=session.get("nickname", f"{PLATFORM_NAMES[platform]} 账号"),
@@ -80,6 +86,21 @@ async def remove_account(db: AsyncSession, user_id: str, account_id: str) -> Non
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "账号不存在"})
     await repo.delete_account(db, a)
+
+
+async def rename_account(db: AsyncSession, user_id: str, account_id: str, nickname: str) -> AccountOut:
+    """账号重命名（多账号辨识）：昵称提取失败或与平台同名时，用户可手动标记"""
+    a = await repo.get_account(db, account_id, user_id)
+    if not a:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "账号不存在"})
+    cleaned = nickname.strip()[:30]
+    if not cleaned:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail={"code": "NICKNAME_EMPTY", "message": "账号名称不能为空"})
+    a.nickname = cleaned
+    await repo.save_account(db, a)
+    logger.info("account_renamed", account_id=account_id, nickname=cleaned)
+    return account_to_out(a)
 
 
 async def reauth_account(db: AsyncSession, user_id: str, account_id: str) -> QrcodeStartOut:

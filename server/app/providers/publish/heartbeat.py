@@ -9,7 +9,8 @@ import json
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.core.events import CHANNEL_ALERT, publish as emit
+from app.core.events import CHANNEL_ALERT
+from app.core.events import publish as emit
 from app.core.logging import get_logger
 from app.providers.registry import registry
 
@@ -21,8 +22,9 @@ HEARTBEAT_INTERVAL = get_settings().publish_cookie_heartbeat_min * 60
 
 async def check_all_accounts() -> None:
     """检测所有 active 账号的 Cookie 有效性"""
-    from app.modules.publish.models import PublishAccount
     from sqlalchemy import select
+
+    from app.modules.publish.models import PublishAccount
 
     async with SessionLocal() as db:
         result = await db.execute(
@@ -57,7 +59,7 @@ async def check_all_accounts() -> None:
                         await save_account(db, acc)
 
                 # 推送告警
-                platform_names = {"douyin": "抖音", "kuaishou": "快手",
+                platform_names = {"douyin": "抖音",
                                   "xiaohongshu": "小红书", "shipinhao": "视频号"}
                 await emit(CHANNEL_ALERT, {
                     "level": "warning",

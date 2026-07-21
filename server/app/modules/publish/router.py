@@ -6,7 +6,16 @@ from app.core.db import get_db
 from app.core.deps import get_current_user_id
 
 from . import service
-from .schemas import AccountOut, ExportOut, JobOut, JobPageOut, PublishIn, QrcodePollOut, QrcodeStartOut
+from .schemas import (
+    AccountOut,
+    AccountUpdateIn,
+    ExportOut,
+    JobOut,
+    JobPageOut,
+    PublishIn,
+    QrcodePollOut,
+    QrcodeStartOut,
+)
 
 router = APIRouter(prefix="/publish", tags=["publish"])
 
@@ -58,6 +67,17 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await service.remove_account(db, user_id, account_id)
+
+
+@router.patch("/accounts/{account_id}", response_model=AccountOut)
+async def rename_account(
+    account_id: str,
+    inp: AccountUpdateIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> AccountOut:
+    """账号重命名（多账号辨识：昵称提取失败或与平台同名时手动标记）"""
+    return await service.rename_account(db, user_id, account_id, inp.nickname)
 
 
 # ---- 发布任务 ----

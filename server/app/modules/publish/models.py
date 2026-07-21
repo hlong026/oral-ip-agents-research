@@ -7,8 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
 
-PLATFORMS = ["douyin", "kuaishou", "xiaohongshu", "shipinhao"]
-PLATFORM_NAMES = {"douyin": "抖音", "kuaishou": "快手", "xiaohongshu": "小红书", "shipinhao": "视频号"}
+PLATFORMS = ["douyin", "xiaohongshu", "shipinhao"]
+PLATFORM_NAMES = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
 
 
 def new_id() -> str:

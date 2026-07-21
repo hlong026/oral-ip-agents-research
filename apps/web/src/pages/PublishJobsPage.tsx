@@ -1,5 +1,5 @@
 import { HttpError, publishApi } from "@oral/api-client";
-import { PLATFORM_NAMES, type Platform, type PublishJob } from "@oral/types";
+import { PLATFORM_NAMES, PUBLISH_PLATFORMS, type PublishJob } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -161,7 +161,7 @@ export default function PublishJobsPage({ showLogs = false }: { showLogs?: boole
 
       {/* 平台账号健康状态 */}
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {(Object.keys(PLATFORM_NAMES) as Platform[]).map((p) => {
+        {PUBLISH_PLATFORMS.map((p) => {
           const bound = (accounts ?? []).filter((a) => a.platform === p);
           const hasExpired = bound.some((a) => a.status === "expired");
           return (

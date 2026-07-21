@@ -63,12 +63,18 @@ async def _read_verify_code(code_file: str) -> str:
         return ""
 
 
-async def cookie_auth(account_file):
-    # 抖音无头会撞反爬墙→content/upload 跳登录→误判 cookie 失效（间歇性）。校验必须有头。
-    # 即便有头，页面慢/瞬时跳转仍会让 wait_for_url(精确URL,5s) 误判→重试3次+宽松判定(URL含 content/upload 且无登录文案)。
-    # 允许 linux server 用户通过 env var 强制无头: DOUYIN_COOKIE_AUTH_HEADLESS=true
-    use_headless = os.environ.get("DOUYIN_COOKIE_AUTH_HEADLESS", "").lower() in ("1", "true", "yes")
-    launch_kwargs = {"headless": use_headless, "channel": "msedge", "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"]}
+async def cookie_auth(account_file, headless: bool | None = None):
+    # headless=None → 取 LOCAL_CHROME_HEADLESS（跟随全局发布浏览器配置，默认无头不弹窗）。
+    # env var DOUYIN_COOKIE_AUTH_HEADLESS=true/false 可双向强制覆盖（linux server 排障用）。
+    # 页面慢/瞬时跳转会让 wait_for_url(精确URL,5s) 误判→重试3次+宽松判定(URL含 content/upload 且无登录文案)。
+    if headless is None:
+        headless = LOCAL_CHROME_HEADLESS
+    env_override = os.environ.get("DOUYIN_COOKIE_AUTH_HEADLESS", "").lower()
+    if env_override in ("1", "true", "yes"):
+        headless = True
+    elif env_override in ("0", "false", "no"):
+        headless = False
+    launch_kwargs = {"headless": headless, "channel": "msedge", "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"]}
     for _attempt in range(3):
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(**launch_kwargs)
@@ -189,7 +195,7 @@ async def _wait_for_douyin_login(page: Page, account_file: str, qrcode_info: dic
     qrcode_path = Path(qrcode_info["image_path"]) if qrcode_info.get("image_path") else None
     original_url = page.url
     saw_2fa = False
-    for _ in range(max_checks):
+    for i in range(max_checks):
         if await _is_douyin_login_completed(page):
             douyin_logger.info(_msg("🥳", f"扫码成功，已经跳转到登录后页面: {page.url}"))
             return _build_login_result(True, "success", "抖音扫码登录成功", account_file, qrcode_info, page.url)

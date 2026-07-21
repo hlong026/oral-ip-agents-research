@@ -4,8 +4,6 @@
 - 发布：XiaoHongShuVideo 上传视频 + 标题/话题/定时
 - Cookie 检测：cookie_auth
 """
-from typing import Any
-
 from app.core.logging import get_logger
 
 from .base_driver import SAUPublishDriverBase
@@ -19,6 +17,15 @@ class XiaohongshuPublishDriver(SAUPublishDriverBase):
 
     # 登录后抓取昵称：访问小红书创作者中心
     _nickname_url = "https://creator.xiaohongshu.com/creator/home"
+    # 小红书创作者中心用户信息接口（Cookie 鉴权）
+    _nickname_api = ("https://creator.xiaohongshu.com/api/galaxy/user/info", "GET", None)
+    _nickname_paths = [
+        ["data", "userName"],
+        ["data", "userDetail", "name"],
+        ["data", "nickname"],
+        ["userName"],
+    ]
+    _sniff_keywords = ["galaxy/user", "user/info", "user/me"]
     _nickname_selectors = [
         ".user-name",
         ".creator-name",
@@ -32,6 +39,9 @@ class XiaohongshuPublishDriver(SAUPublishDriverBase):
         """调用 SAU xiaohongshu_cookie_gen 执行扫码登录"""
         from uploader.xiaohongshu_uploader.main import xiaohongshu_cookie_gen
 
+        from app.core.config import get_settings
+        headless = get_settings().publish_browser_headless
+
         session_data = self._login_sessions.get(ticket)
         if not session_data:
             return
@@ -43,20 +53,23 @@ class XiaohongshuPublishDriver(SAUPublishDriverBase):
             result = await xiaohongshu_cookie_gen(
                 account_file,
                 qrcode_callback=qrcode_callback,
-                headless=True,
+                headless=headless,
                 poll_interval=3,
                 max_checks=100,
             )
             if result.get("success"):
-                session_data["status"] = "success"
+                # 先抓取真实昵称，再标记成功（避免轮询在昵称就绪前命中 success 拿到兜底名）
                 nickname = await self._extract_nickname(account_file)
-                session_data["nickname"] = nickname or "小红书账号"
+                session_data["nickname"] = nickname or f"小红书账号-{ticket[-4:]}"
+                session_data["status"] = "success"
                 logger.info("xiaohongshu_login_success", ticket=ticket, nickname=nickname)
             else:
                 session_data["status"] = "failed"
+                session_data["error"] = result.get("message", "小红书登录失败")
                 logger.warning("xiaohongshu_login_failed", ticket=ticket, msg=result.get("message", ""))
         except Exception as e:
             session_data["status"] = "failed"
+            session_data["error"] = str(e)[:200]
             logger.error("xiaohongshu_login_error", ticket=ticket, error=str(e)[:200])
 
     async def _do_publish(self, cookie_file: str, video_path: str, title: str,

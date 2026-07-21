@@ -29,7 +29,6 @@ from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPub
 from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
 from .hifly import HiFlyAvatar, HiFlyVoice
 from .publish.douyin import DouyinPublishDriver
-from .publish.kuaishou import KuaishouPublishDriver
 from .publish.xiaohongshu import XiaohongshuPublishDriver
 from .publish.tencent import TencentPublishDriver
 
@@ -49,12 +48,11 @@ class ProviderRegistry:
         # 发布驱动：SAU 浏览器自动化（真实）→ Mock（降级兜底）
         self.publish_drivers: dict[str, PublishDriver] = {
             "douyin": DouyinPublishDriver(),
-            "kuaishou": KuaishouPublishDriver(),
             "xiaohongshu": XiaohongshuPublishDriver(),
             "shipinhao": TencentPublishDriver(),
         }
         self._publish_mock_fallback: dict[str, PublishDriver] = {
-            p: MockPublishDriver(p) for p in ("douyin", "kuaishou", "xiaohongshu", "shipinhao")
+            p: MockPublishDriver(p) for p in ("douyin", "xiaohongshu", "shipinhao")
         }
         # #9 IM Provider：未配置 key 时使用 MockIMProvider
         _has_im_key = bool(get_settings().douyin_im_app_key)

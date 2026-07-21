@@ -4,8 +4,6 @@
 - 发布：DouYinVideo 上传视频 + 标题/话题/封面/定时
 - Cookie 检测：cookie_auth
 """
-from typing import Any
-
 from app.core.logging import get_logger
 
 from .base_driver import SAUPublishDriverBase
@@ -19,6 +17,14 @@ class DouyinPublishDriver(SAUPublishDriverBase):
 
     # 登录后抓取昵称：访问创作者中心首页
     _nickname_url = "https://creator.douyin.com/creator-micro/home"
+    # 抖音创作者平台用户信息接口（Cookie 鉴权，返回 {user: {nickname, ...}}）
+    _nickname_api = ("https://creator.douyin.com/web/api/media/user/info/", "GET", None)
+    _nickname_paths = [
+        ["user", "nickname"],
+        ["data", "user", "nickname"],
+        ["nickname"],
+    ]
+    _sniff_keywords = ["user/info", "user_info", "creator-micro/home"]
     _nickname_selectors = [
         "span.creator-name",
         ".creator-info .name",
@@ -32,6 +38,9 @@ class DouyinPublishDriver(SAUPublishDriverBase):
         """调用 SAU douyin_cookie_gen 执行扫码登录"""
         from uploader.douyin_uploader.main import douyin_cookie_gen
 
+        from app.core.config import get_settings
+        headless = get_settings().publish_browser_headless
+
         session_data = self._login_sessions.get(ticket)
         if not session_data:
             return
@@ -43,21 +52,23 @@ class DouyinPublishDriver(SAUPublishDriverBase):
             result = await douyin_cookie_gen(
                 account_file,
                 qrcode_callback=qrcode_callback,
-                headless=True,
+                headless=headless,
                 poll_interval=3,
                 max_checks=100,
             )
             if result.get("success"):
-                session_data["status"] = "success"
-                # 抓取真实昵称
+                # 先抓取真实昵称，再标记成功（避免轮询在昵称就绪前命中 success 拿到兜底名）
                 nickname = await self._extract_nickname(account_file)
-                session_data["nickname"] = nickname or "抖音账号"
+                session_data["nickname"] = nickname or f"抖音账号-{ticket[-4:]}"
+                session_data["status"] = "success"
                 logger.info("douyin_login_success", ticket=ticket, nickname=nickname)
             else:
                 session_data["status"] = "failed"
+                session_data["error"] = result.get("message", "抖音登录失败")
                 logger.warning("douyin_login_failed", ticket=ticket, msg=result.get("message", ""))
         except Exception as e:
             session_data["status"] = "failed"
+            session_data["error"] = str(e)[:200]
             logger.error("douyin_login_error", ticket=ticket, error=str(e)[:200])
 
     async def _do_publish(self, cookie_file: str, video_path: str, title: str,
