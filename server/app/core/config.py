@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口
     # （有头窗口易被用户扫完码后顺手关闭，导致后端轮询页面失效、登录判失败）
     publish_browser_headless: bool = True
+    publish_browser_executable_path: str = ""  # 留空时自动探测本机 Chrome / Edge
     publish_max_concurrency: int = 2  # 浏览器并发槽位数
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
     # 仅列出已经用真实账号验收通过的平台；未列出平台只提供完整人工发布包。

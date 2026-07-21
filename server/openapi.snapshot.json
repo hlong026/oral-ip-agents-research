@@ -7787,6 +7787,17 @@
               }
             ],
             "title": "Qrcodeurl"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
           }
         },
         "type": "object",

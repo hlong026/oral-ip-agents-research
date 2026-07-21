@@ -161,7 +161,7 @@ async def qrcode_poll(db: AsyncSession, user_id: str, platform: str, ticket: str
         return QrcodePollOut(status="waiting", qrcodeUrl=session.get("qrcode_url") or None)
     # 登录失败：返回 expired 状态告知前端
     if session.get("_failed"):
-        return QrcodePollOut(status="expired")
+        return QrcodePollOut(status="expired", message=session.get("message") or "登录失败，请重新发起")
     account = await repo.create_account(
         db,
         user_id=user_id,

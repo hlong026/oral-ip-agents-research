@@ -30,6 +30,15 @@ XIAOHONGSHU_PUBLISH_STRATEGY_IMMEDIATE = "immediate"
 XIAOHONGSHU_PUBLISH_STRATEGY_SCHEDULED = "scheduled"
 
 
+def _build_launch_kwargs(headless: bool) -> dict:
+    launch_kwargs = {"headless": headless}
+    if LOCAL_CHROME_PATH:
+        launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+    else:
+        launch_kwargs["channel"] = "msedge"
+    return launch_kwargs
+
+
 def _build_xhs_creator_url(path: str) -> str:
     base_url = os.getenv(
         XHS_CREATOR_BASE_URL_ENV,
@@ -159,10 +168,7 @@ async def cookie_auth(account_file):
         return False
 
     async with async_playwright() as playwright:
-        if LOCAL_CHROME_PATH:
-            browser = await playwright.chromium.launch(headless=True, executable_path=LOCAL_CHROME_PATH)
-        else:
-            browser = await playwright.chromium.launch(headless=True, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=True))
         try:
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
@@ -233,7 +239,7 @@ async def xiaohongshu_cookie_gen(
     account_path.parent.mkdir(parents=True, exist_ok=True)
 
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=headless, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=headless))
         context = await browser.new_context()
         context = await set_init_script(context)
         qrcode_path = None
@@ -619,7 +625,7 @@ class XiaoHongShuVideo(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、视频文件、封面和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
         context = await browser.new_context(
             permissions=["geolocation"],
             storage_state=self.account_file,
@@ -742,7 +748,7 @@ class XiaoHongShuNote(XiaoHongShuBaseUploader):
         xiaohongshu_logger.info(_msg("🧍", "小人先检查 cookie、图片和发布时间"))
         await self.validate_upload_args()
         xiaohongshu_logger.info(_msg("🥳", "图文上传前检查通过"))
-        browser = await playwright.chromium.launch(headless=self.headless, channel="msedge")
+        browser = await playwright.chromium.launch(**_build_launch_kwargs(headless=self.headless))
         context = await browser.new_context(
             permissions=["geolocation"],
             storage_state=self.account_file,

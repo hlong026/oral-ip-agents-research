@@ -20,7 +20,7 @@ from .cookie_manager import (
     file_to_session,
     session_to_file,
 )
-from .sau_conf import setup_sau
+from .sau_conf import LOCAL_CHROME_PATH, setup_sau
 
 logger = get_logger("oral.publish.driver")
 
@@ -218,11 +218,15 @@ class SAUPublishDriverBase:
             headless = get_settings().publish_browser_headless
 
             async with async_playwright() as pw:
-                browser = await pw.chromium.launch(
-                    headless=headless,
-                    channel="msedge",
-                    args=["--disable-blink-features=AutomationControlled"],
-                )
+                launch_kwargs: dict[str, Any] = {
+                    "headless": headless,
+                    "args": ["--disable-blink-features=AutomationControlled"],
+                }
+                if LOCAL_CHROME_PATH:
+                    launch_kwargs["executable_path"] = LOCAL_CHROME_PATH
+                else:
+                    launch_kwargs["channel"] = "msedge"
+                browser = await pw.chromium.launch(**launch_kwargs)
                 context = await browser.new_context(storage_state=account_file)
                 page = await context.new_page()
 
