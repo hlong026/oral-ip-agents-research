@@ -1,12 +1,11 @@
 """im 业务编排（私信收发 + 自动回复策略引擎）"""
 
-import asyncio
 import json
 import logging
 import random
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -464,47 +463,53 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
     if not reply_text:
         return
 
-    # #4 拆分为独立 Task：延迟 + 发送 + 落库（不占用当前 DB Session）
+    # Persist the reply before publishing the delayed Dramatiq message.
     delay = random.uniform(max(0, matched_rule.delay_min), max(matched_rule.delay_min, matched_rule.delay_max))
-    asyncio.create_task(
-        _delayed_reply(
-            user_id=conv.user_id,
-            conversation_id=conv.id,
-            reply_text=reply_text,
-            rule_id=matched_rule.id,
-            delay=delay,
-        )
+    reply_message = await repo.create_message(
+        db,
+        conversation_id=conv.id,
+        user_id=conv.user_id,
+        direction="out",
+        msg_type=7,
+        content=json.dumps({"text": reply_text}, ensure_ascii=False),
+        auto_replied=True,
+        rule_id=matched_rule.id,
+        send_status="scheduled",
+        scheduled_at=datetime.now(UTC) + timedelta(seconds=delay),
     )
+    try:
+        reply_message.queue_message_id = _schedule_auto_reply(reply_message.id, round(delay * 1000))
+        await repo.save_message(db, reply_message)
+    except Exception as error:  # noqa: BLE001
+        reply_message.send_status = "failed"
+        reply_message.send_error = error.__class__.__name__[:256]
+        await repo.save_message(db, reply_message)
+        logger.error("IM auto reply queue dispatch failed: message=%s", reply_message.id[:8])
 
 
-async def _delayed_reply(
-    *,
-    user_id: str,
-    conversation_id: str,
-    reply_text: str,
-    rule_id: str,
-    delay: float,
-) -> None:
-    """Delay, persist the attempt, then send without ever fabricating success."""
-    await asyncio.sleep(delay)
+def _schedule_auto_reply(message_id: str, delay_ms: int) -> str:
+    from app.workers.tasks import run_im_auto_reply
+
+    queued = run_im_auto_reply.send_with_options(args=(message_id,), delay=max(0, delay_ms))
+    return queued.message_id
+
+
+async def run_scheduled_reply(message_id: str) -> None:
+    """Resume a durable auto reply using only its persisted message ID."""
     async with _session() as db:
-        conv = await repo.get_conversation(db, conversation_id, user_id)
-        if conv is None:
-            logger.warning("auto reply conversation missing: %s", conversation_id[:8])
+        reply_msg = await repo.get_message_by_id(db, message_id)
+        if reply_msg is None or reply_msg.send_status != "scheduled" or reply_msg.manual_takeover:
             return
-        reply_msg = await repo.create_message(
-            db,
-            conversation_id=conversation_id,
-            user_id=user_id,
-            direction="out",
-            msg_type=7,
-            content=json.dumps({"text": reply_text}, ensure_ascii=False),
-            auto_replied=True,
-            rule_id=rule_id,
-            send_status="pending",
-        )
+        conv = await repo.get_conversation(db, reply_msg.conversation_id, reply_msg.user_id)
+        if conv is None:
+            reply_msg.send_status = "failed"
+            reply_msg.send_error = "ConversationNotFound"
+            await repo.save_message(db, reply_msg)
+            return
+        reply_msg.send_status = "pending"
+        await repo.save_message(db, reply_msg)
         try:
-            await _send_existing_message(db, conv, reply_msg, reply_text)
+            await _send_existing_message(db, conv, reply_msg, _message_text(reply_msg))
         except Exception:  # noqa: BLE001
             return
 
@@ -513,9 +518,9 @@ async def _delayed_reply(
         CHANNEL_IM,
         {
             "kind": EV_AUTO_REPLIED,
-            "userId": user_id,
-            "conversationId": conversation_id,
-            "reply": reply_text,
+            "userId": reply_msg.user_id,
+            "conversationId": reply_msg.conversation_id,
+            "reply": _message_text(reply_msg),
             "messageId": reply_msg.id,
         },
     )

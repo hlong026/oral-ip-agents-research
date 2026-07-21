@@ -120,13 +120,20 @@ async def test_auto_reply_failure_is_also_persisted(client: AsyncClient, monkeyp
     monkeypatch.setattr(service.registry, "im_driver", lambda _platform: _Provider([False]))
     monkeypatch.setattr(service, "_load_account_session", _fake_session)
 
-    await service._delayed_reply(
-        user_id=user_id,
-        conversation_id=conversation.id,
-        reply_text="自动回复失败",
-        rule_id="rule-1",
-        delay=0,
-    )
+    async with SessionLocal() as db:
+        queued = await service.repo.create_message(
+            db,
+            conversation_id=conversation.id,
+            user_id=user_id,
+            direction="out",
+            msg_type=7,
+            content='{"text":"自动回复失败"}',
+            auto_replied=True,
+            rule_id="rule-1",
+            send_status="scheduled",
+        )
+
+    await service.run_scheduled_reply(queued.id)
 
     async with SessionLocal() as db:
         message = (

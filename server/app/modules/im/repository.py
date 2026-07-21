@@ -83,6 +83,10 @@ async def get_message(db: AsyncSession, message_id: str, user_id: str) -> IMMess
     return result.scalar_one_or_none()
 
 
+async def get_message_by_id(db: AsyncSession, message_id: str) -> IMMessage | None:
+    return (await db.execute(select(IMMessage).where(IMMessage.id == message_id))).scalar_one_or_none()
+
+
 async def save_message(db: AsyncSession, message: IMMessage) -> None:
     await db.commit()
     await db.refresh(message)

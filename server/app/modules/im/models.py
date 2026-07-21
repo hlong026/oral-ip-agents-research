@@ -63,6 +63,8 @@ class IMMessage(Base):
     send_error: Mapped[str] = mapped_column(String(256), default="")
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
     manual_takeover: Mapped[bool] = mapped_column(Boolean, default=False)
+    queue_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
