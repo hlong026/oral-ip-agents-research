@@ -28,6 +28,27 @@ setup_logging(settings.app_env)  # 初始化 structlog（必须在其他模块�
 logger = get_logger("oral")
 
 
+# Tauri 2 production WebView 的前端来源：macOS/Linux 使用 tauri://localhost；
+# Windows 默认使用 http://tauri.localhost，也兼容显式启用 HTTPS scheme 的桌面包。
+_TAURI_DESKTOP_ORIGINS = (
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+)
+
+
+def _cors_origins(app_env: str, configured_origins: str) -> list[str]:
+    """Return explicit browser origins; production stays opt-in through env."""
+    if app_env == "dev":
+        return [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:3000",
+            *_TAURI_DESKTOP_ORIGINS,
+        ]
+    return [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     validate_runtime_security(settings)
@@ -69,11 +90,7 @@ app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
 
 # TraceMiddleware 必须在 CORS 之前添加（确保 trace_id 注入）
 app.add_middleware(TraceMiddleware)
-_allowed_origins = (
-    ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
-    if settings.app_env == "dev"
-    else [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
-)
+_allowed_origins = _cors_origins(settings.app_env, os.environ.get("CORS_ORIGINS", ""))
 if not _allowed_origins and settings.app_env not in {"dev", "test"}:
     import warnings
 

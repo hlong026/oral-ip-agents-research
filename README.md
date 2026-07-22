@@ -76,6 +76,23 @@ pnpm e2e:container
 管理端使用 `VITE_ADMIN_API_BASE`。示例分别见 `apps/web/.env.example` 和
 `apps/admin/.env.example`。
 
+### 桌面端真实登录
+
+桌面端是 Tauri 壳，内置用户端 Web 构建产物，但登录、令牌刷新和用户资料都只会
+调用后端容器 API。打包前把可公开访问的 HTTPS API 写入本机忽略的环境文件：
+
+```bash
+cp apps/web/.env.desktop.example apps/web/.env.local
+# 编辑 apps/web/.env.local：替换为 https://你的域名/api/v1
+pnpm --filter @oral/desktop tauri:build
+```
+
+后端 `CORS_ORIGINS` 必须同时保留你的浏览器前端域名及
+`tauri://localhost,http://tauri.localhost,https://tauri.localhost`；这些分别覆盖
+Tauri 2 的 macOS/Linux、Windows 默认协议和 Windows HTTPS 协议。首次用户需先
+通过激活码注册，之后桌面端会用真实 PostgreSQL 中的账号、密码哈希和 JWT 双令牌
+完成登录及自动刷新。
+
 价格目录首次启动会从旧流水线固定扣费生成 `legacy-v1` 已发布版本，保证迁移前后扣费口径一致。后续价格变更必须新建并发布版本，已报价或已冻结的任务继续使用原价格快照。
 
 包年套餐首月积分在激活时发放，后续按 30 天周期在用户查询余额或订阅时幂等补发，且不超过套餐到期日。积分以带到期日的批次保存，冻结时优先消耗最早到期批次，取消或失败时按原批次恢复。管理员赠送或扣减积分只能通过带原因的调整流水完成，不能直接改余额。

@@ -22,6 +22,7 @@ venv/
 .env
 .env.*
 !.env.example
+!apps/web/.env.desktop.example
 !server/.env.test.example
 !server/.env.stage2.example
 
