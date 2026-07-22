@@ -3,6 +3,7 @@
 """
 
 from datetime import UTC
+from typing import Literal, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -123,4 +124,5 @@ def to_out(user: User) -> UserOut:
         planType=getattr(user, "plan_type", "none") or "none",
         planExpiresAt=plan_expires_at.astimezone(UTC).isoformat() if plan_expires_at else None,
         activatedAt=activated_at.astimezone(UTC).isoformat() if activated_at else None,
+        role=cast(Literal["user", "admin"], user.role),
     )

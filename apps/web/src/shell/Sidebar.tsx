@@ -1,5 +1,5 @@
 import { pipelineApi, publishApi } from "@oral/api-client";
-import { useIp, useQuota } from "@oral/stores";
+import { useIp, useQuota, useSession } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
@@ -135,34 +135,40 @@ function IpSwitcher() {
 
 function QuotaCard() {
   const quota = useQuota((s) => s.quota);
+  const user = useSession((s) => s.user);
+  const isAdmin = user?.role === "admin";
   const balance = quota?.balance ?? 0;
   const total = quota?.total || 1;
   const pct = Math.min(100, Math.round((balance / total) * 100));
   return (
     <div className="glass px-3.5 py-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-text-2">☁ 云端算力 · 额度</span>
+        <span className="text-xs text-text-2">
+          {isAdmin ? "☁ 管理员创作空间" : "☁ 云端算力 · 额度"}
+        </span>
         <NavLink
           to="/pricing"
           title="套餐与积分"
           className="text-xs text-brand-to hover:underline"
         >
-          套餐
+          {isAdmin ? "免积分" : "套餐"}
         </NavLink>
       </div>
       <div className="mt-1 text-grad text-sm font-bold">
-        {balance.toLocaleString()}
+        {isAdmin ? "创作不扣积分" : balance.toLocaleString()}
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/5">
-        <div
-          className="h-full rounded-full bg-brand-grad-x transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      {!isAdmin && (
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/5">
+          <div
+            className="h-full rounded-full bg-brand-grad-x transition-all"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
       <div className="mt-1.5 flex items-center justify-between text-[11px] text-text-3">
-        <span>剩余 {pct}%</span>
+        <span>{isAdmin ? "仅限管理员自己的内容" : `剩余 ${pct}%`}</span>
         <NavLink to="/pricing" className="text-brand-to hover:underline">
-          充值/续费
+          {isAdmin ? "套餐说明" : "充值/续费"}
         </NavLink>
       </div>
     </div>

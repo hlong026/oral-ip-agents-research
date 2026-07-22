@@ -1,5 +1,7 @@
 """auth 模块 Pydantic 出入参"""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -34,3 +36,4 @@ class UserOut(BaseModel):
     planType: str = "none"
     planExpiresAt: str | None = None
     activatedAt: str | None = None
+    role: Literal["user", "admin"]

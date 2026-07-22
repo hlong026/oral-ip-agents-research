@@ -10,7 +10,7 @@
 
 - 用户端 `apps/web`：内容创作、套餐展示、激活码兑换、积分报价与任务执行。
 - 管理端 `apps/admin`：套餐 SKU、价格版本、激活码、用户、Provider、成本与审计。
-- 后端：用户数据面 `/api/v1/*`，管理控制面 `/api/admin/v1/*`。两类 JWT 使用不同 audience，不能跨端复用。
+- 后端：用户数据面 `/api/v1/*`，管理控制面 `/api/admin/v1/*`。管理员账号可用同一手机号密码分别登录自己的创作空间和管理控制台；两类 JWT 使用不同 audience，不能跨端复用。
 
 ## 本地启动
 
@@ -73,8 +73,10 @@ pnpm e2e:container
 
 前端部署到其他电脑或域名时，在构建用户端前设置 `VITE_API_BASE`；
 `VITE_WS_BASE` 可省略，客户端会从 API 域名自动推导 `ws://`/`wss://` 地址。
-管理端使用 `VITE_ADMIN_API_BASE`。示例分别见 `apps/web/.env.example` 和
-`apps/admin/.env.example`。
+管理端使用 `VITE_ADMIN_API_BASE`。管理员双入口还需要配置用户端的
+`VITE_ADMIN_APP_URL` 与管理端的 `VITE_CREATOR_APP_URL`，使两端能相互跳转；这两个
+变量只保存公开页面地址。两端令牌仍分别登录和保存，不能通过 URL 或构建变量传递。
+示例分别见 `apps/web/.env.example` 和 `apps/admin/.env.example`。
 
 ### 桌面端真实登录
 

@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T16:08:41.209Z
+ * API 版本：1.0.0 · 生成时间：2026-07-22T02:13:10.589Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -826,6 +826,7 @@ export interface UserOut {
   planType?: string;
   planExpiresAt?: string | null;
   activatedAt?: string | null;
+  role: "user" | "admin";
 }
 
 export interface UserUpdateIn {

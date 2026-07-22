@@ -31,6 +31,10 @@ describe("admin app routing", () => {
     );
 
     expect(screen.getByText("管理控制台")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "我的创作空间" })).toHaveAttribute(
+      "href",
+      "http://localhost:5173",
+    );
     expect(screen.getByRole("link", { name: "套餐 SKU" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "用户管理" })).toBeInTheDocument();
     expect(

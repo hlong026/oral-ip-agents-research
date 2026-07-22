@@ -488,6 +488,19 @@ async def test_admin_role_with_user_audience_cannot_access_admin_control_plane(c
     assert response.status_code == 403
 
 
+async def test_admin_can_identify_its_creator_space_from_user_profile(client: AsyncClient):
+    """管理员在用户端创作时，前端需要知道可显示管理控制台入口。"""
+    tokens = await _user_login_for_role(client, role="admin")
+
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {tokens['accessToken']}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["role"] == "admin"
+
+
 async def test_admin_audience_token_cannot_access_user_data_plane(client: AsyncClient):
     headers = await _login(client, role="admin")
 

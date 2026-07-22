@@ -9285,10 +9285,22 @@
               }
             ],
             "title": "Activatedat"
+          },
+          "role": {
+            "type": "string",
+            "enum": ["user", "admin"],
+            "title": "Role"
           }
         },
         "type": "object",
-        "required": ["id", "phone", "nickname", "avatarChar", "createdAt"],
+        "required": [
+          "id",
+          "phone",
+          "nickname",
+          "avatarChar",
+          "createdAt",
+          "role"
+        ],
         "title": "UserOut"
       },
       "UserUpdateIn": {
