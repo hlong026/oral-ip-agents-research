@@ -1,11 +1,14 @@
 /**
  * WebSocket 任务进度通道（06 文档 §6.2：WS 网关 + Redis Pub/Sub，推送延迟 ≤2s）
- * 自动重连（指数退避）。消息与后端事件总线三频道对齐：
+ * 自动重连（指数退避）。消息与后端事件总线四频道对齐：
  *   CHANNEL_TASKS → task_updated / publish_updated / provider_fallback
  *   CHANNEL_FEED  → feed
  *   CHANNEL_ALERT → alert
+ *   CHANNEL_IM    → im_new_message / im_auto_replied / im_listener_status
  */
 import type { FeedEvent } from "@oral/types";
+
+import type { IMMessage } from "./api";
 
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
@@ -23,6 +26,26 @@ export type TaskEvent =
       level: "info" | "warn" | "error";
       message: string;
       body?: string;
+    }
+  | {
+      kind: "im_new_message";
+      conversationId: string;
+      userId?: string;
+      message?: IMMessage;
+    }
+  | {
+      kind: "im_auto_replied";
+      conversationId: string;
+      messageId: string;
+      reply?: string;
+      userId?: string;
+    }
+  | {
+      kind: "im_listener_status";
+      accountId: string;
+      status: string;
+      errorMsg?: string;
+      userId?: string;
     }
   | { kind: "ping" };
 
