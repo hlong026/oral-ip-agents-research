@@ -1,6 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { adminApi } from "../lib/adminHttp";
+import { adminApi, type AdminRole } from "../lib/adminHttp";
+
+// 与服务端 CREDIT_CONFIRM_THRESHOLD 对齐：扣减或 |points| 达到该值需二次确认
+const CREDIT_CONFIRM_THRESHOLD = 10_000;
+
+// 角色变更仅超管可执行（服务端 403 保护）；user 为纯数据面角色，无管理面权限
+const ROLE_OPTIONS: { value: AdminRole; label: string }[] = [
+  { value: "user", label: "user · 普通用户" },
+  { value: "ops", label: "ops · 运营" },
+  { value: "finance", label: "finance · 财务" },
+  { value: "auditor", label: "auditor · 审计" },
+  { value: "admin", label: "admin · 超管" },
+];
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
@@ -14,7 +26,7 @@ export default function UsersPage() {
       body,
     }: {
       id: string;
-      body: { role?: "user" | "admin"; isActive?: boolean };
+      body: { role?: AdminRole; isActive?: boolean };
     }) => adminApi.updateUser(id, body),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
@@ -25,16 +37,30 @@ export default function UsersPage() {
     reason: "",
   });
   const adjust = useMutation({
-    mutationFn: () =>
+    mutationFn: (confirm: boolean) =>
       adminApi.adjustUserCredits(adjustment.userId, {
         points: adjustment.points,
         reason: adjustment.reason,
+        confirm,
       }),
     onSuccess: async () => {
       setAdjustment({ userId: "", points: 0, reason: "" });
       await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     },
   });
+  const needsConfirm =
+    adjustment.points < 0 ||
+    Math.abs(adjustment.points) >= CREDIT_CONFIRM_THRESHOLD;
+  const submitAdjustment = () => {
+    if (needsConfirm) {
+      const message =
+        adjustment.points < 0
+          ? `确认扣减该用户 ${Math.abs(adjustment.points)} 积分？操作将写入不可变流水。`
+          : `确认发放 ${adjustment.points} 大额积分？操作将写入不可变流水。`;
+      if (!window.confirm(message)) return;
+    }
+    adjust.mutate(needsConfirm);
+  };
 
   return (
     <div className="space-y-5">
@@ -95,9 +121,9 @@ export default function UsersPage() {
             adjustment.reason.length < 3 ||
             adjust.isPending
           }
-          onClick={() => adjust.mutate()}
+          onClick={submitAdjustment}
         >
-          提交调整
+          {needsConfirm ? "提交调整（需确认）" : "提交调整"}
         </button>
         {adjust.error instanceof Error && (
           <p className="text-sm text-danger md:col-span-4">
@@ -146,13 +172,16 @@ export default function UsersPage() {
                         update.mutate({
                           id: user.id,
                           body: {
-                            role: event.target.value as "user" | "admin",
+                            role: event.target.value as AdminRole,
                           },
                         })
                       }
                     >
-                      <option value="user">user</option>
-                      <option value="admin">admin</option>
+                      {ROLE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </td>
                   <td className="px-4 py-3">

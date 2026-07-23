@@ -8,12 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit
 from app.core.db import get_db
-from app.core.deps import require_admin
+from app.core.deps import require_permission
 
 from .models import ProviderConfig
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 provider_router = APIRouter(prefix="/providers", tags=["admin-providers"])
+
+# Provider 密钥/接入点管理为最高敏感操作，仅超管（admin "*" 通配）可执行
+_REQUIRE_PROVIDERS_MANAGE = require_permission("providers.manage")
 
 # 前端可配置的 key 白名单
 ALLOWED_KEYS = {
@@ -104,7 +107,7 @@ async def _read_settings(db: AsyncSession) -> dict[str, str]:
 
 @router.get("", response_model=SettingsOut)
 async def get_settings_api(
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(_REQUIRE_PROVIDERS_MANAGE),
     db: AsyncSession = Depends(get_db),
 ):
     """读取全部 Provider 配置（敏感字段脱敏，合并 .env 回退值）"""
@@ -114,7 +117,7 @@ async def get_settings_api(
 @router.put("", response_model=SettingsOut)
 async def save_settings_api(
     body: SettingsIn,
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(_REQUIRE_PROVIDERS_MANAGE),
     db: AsyncSession = Depends(get_db),
 ):
     """保存 Provider 配置（前端设置页提交）"""
@@ -154,7 +157,7 @@ async def save_settings_api(
 
 @provider_router.get("", response_model=SettingsOut)
 async def get_providers_api(
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(_REQUIRE_PROVIDERS_MANAGE),
     db: AsyncSession = Depends(get_db),
 ):
     return SettingsOut(settings=await _read_settings(db))
@@ -163,7 +166,7 @@ async def get_providers_api(
 @provider_router.put("", response_model=SettingsOut)
 async def save_providers_api(
     body: SettingsIn,
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(_REQUIRE_PROVIDERS_MANAGE),
     db: AsyncSession = Depends(get_db),
 ):
     return await save_settings_api(body, _admin_id, db)

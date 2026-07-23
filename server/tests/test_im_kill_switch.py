@@ -172,7 +172,8 @@ async def test_global_kill_switch_requires_admin_audience(client: AsyncClient) -
         json={"stopped": True},
     )
 
-    assert user_response.status_code == 403
+    # 用户面令牌由用户面密钥签发，在管理面密钥验证阶段即失败（401）
+    assert user_response.status_code == 401
     assert admin_response.status_code == 200
     assert admin_response.json()["stopped"] is True
 

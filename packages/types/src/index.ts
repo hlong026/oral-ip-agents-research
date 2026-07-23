@@ -81,7 +81,7 @@ export interface User {
   planType?: string;
   planExpiresAt?: string | null;
   activatedAt?: string | null;
-  role?: "user" | "admin";
+  role?: "user" | "admin" | "ops" | "finance" | "auditor";
 }
 
 export interface AuthTokens {

@@ -20,7 +20,7 @@ from app.core.config import get_settings, validate_runtime_security
 from app.core.db import SessionLocal, init_models, verify_migrations_current
 from app.core.events import init_redis
 from app.core.logging import get_logger, setup_logging
-from app.core.middleware import TraceMiddleware
+from app.core.middleware import AdminApiAllowlistMiddleware, TraceMiddleware
 from app.providers.base import ProviderError
 
 settings = get_settings()
@@ -88,6 +88,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
 
+# 管理控制面 IP 白名单（空名单时中间件自动放行）
+app.add_middleware(
+    AdminApiAllowlistMiddleware,
+    allowed_networks=[item for item in settings.admin_api_allowed_ips.split(",") if item.strip()],
+)
 # TraceMiddleware 必须在 CORS 之前添加（确保 trace_id 注入）
 app.add_middleware(TraceMiddleware)
 _allowed_origins = _cors_origins(settings.app_env, os.environ.get("CORS_ORIGINS", ""))

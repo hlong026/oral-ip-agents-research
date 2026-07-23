@@ -52,4 +52,4 @@ class UserOut(BaseModel):
     planType: str = "none"
     planExpiresAt: str | None = None
     activatedAt: str | None = None
-    role: Literal["user", "admin"]
+    role: Literal["user", "admin", "ops", "finance", "auditor"]

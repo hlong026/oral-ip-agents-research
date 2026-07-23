@@ -16,6 +16,8 @@ os.environ["REDIS_URL"] = "redis://127.0.0.1:1/9"  # 不可达 → 降级进程�
 os.environ["APP_SECRET"] = "test-app-secret-at-least-32-characters"
 os.environ["CONFIG_ENCRYPTION_KEY"] = "test-config-encryption-key"
 os.environ["IM_GRAY_MAX_ACCOUNTS"] = "1000"
+# ASGI 测试直连（127.0.0.1）视为受信代理：X-Forwarded-For 测试逻辑保持有效
+os.environ["TRUSTED_PROXY_IPS"] = "127.0.0.1"
 # 确保所有 Provider 凭据为空 → 快速降级到 Mock
 os.environ.setdefault("DEEPSEEK_API_KEY", "")
 os.environ.setdefault("DOUYIDOU_APP_ID", "")

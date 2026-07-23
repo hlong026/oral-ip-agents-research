@@ -129,6 +129,7 @@
       "post": {
         "tags": ["auth"],
         "summary": "Api Login",
+        "description": "手机号 + 密码登录（仅限已通过激活码激活的用户）",
         "operationId": "api_login_api_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -215,6 +216,89 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/change-password": {
+      "post": {
+        "tags": ["auth"],
+        "summary": "Api Change Password",
+        "description": "修改密码（修改后所有设备需重新登录）",
+        "operationId": "api_change_password_api_v1_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/phone": {
+      "put": {
+        "tags": ["auth"],
+        "summary": "Api Update Phone",
+        "description": "换绑手机号（需验证当前密码）",
+        "operationId": "api_update_phone_api_v1_auth_phone_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePhoneIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -356,7 +440,7 @@
       "get": {
         "tags": ["activation"],
         "summary": "Api Subscription",
-        "description": "查询当前订阅状态",
+        "description": "查询当前订阅状态（自动检查到期）",
         "operationId": "api_subscription_api_v1_activation_subscription_get",
         "responses": {
           "200": {
@@ -628,6 +712,187 @@
                 }
               ],
               "title": "Export"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/ledger": {
+      "get": {
+        "tags": ["billing"],
+        "summary": "Api Ledger",
+        "description": "用户端消费明细：按日/周/月查看积分流水。",
+        "operationId": "api_ledger_api_v1_billing_ledger_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "eventType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "事件类型: grant/reserve/settle/release/expire/adjustment",
+              "title": "Eventtype"
+            },
+            "description": "事件类型: grant/reserve/settle/release/expire/adjustment"
+          },
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "开始日期 ISO 格式",
+              "title": "Startdate"
+            },
+            "description": "开始日期 ISO 格式"
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束日期 ISO 格式",
+              "title": "Enddate"
+            },
+            "description": "结束日期 ISO 格式"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/billing/ledger/export": {
+      "get": {
+        "tags": ["billing"],
+        "summary": "Api Ledger Export",
+        "description": "导出消费明细 CSV。",
+        "operationId": "api_ledger_export_api_v1_billing_ledger_export_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Startdate"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enddate"
             }
           }
         ],
@@ -1109,6 +1374,45 @@
             }
           }
         },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voices/{voice_id}": {
+      "delete": {
+        "tags": ["voice"],
+        "summary": "Api Delete",
+        "description": "删除声音",
+        "operationId": "api_delete_api_v1_voices__voice_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Voice Id"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -3887,6 +4191,7 @@
       "post": {
         "tags": ["admin-auth"],
         "summary": "Api Admin Login",
+        "description": "管理控制台登录：允许任一管理角色（admin/ops/finance/auditor），签发 admin audience 令牌。",
         "operationId": "api_admin_login_api_admin_v1_auth_login_post",
         "requestBody": {
           "content": {
@@ -4935,6 +5240,29 @@
         ]
       }
     },
+    "/api/admin/v1/overview": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "Admin Overview",
+        "description": "运营总览聚合指标（只读，ops/finance/auditor/admin 均可访问）",
+        "operationId": "admin_overview_api_admin_v1_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/admin/v1/audit": {
       "get": {
         "tags": ["admin"],
@@ -5792,6 +6120,26 @@
         "type": "object",
         "title": "Body_api_parse_api_v1_content_parse_post"
       },
+      "ChangePasswordIn": {
+        "properties": {
+          "oldPassword": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 6,
+            "title": "Oldpassword"
+          },
+          "newPassword": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 6,
+            "title": "Newpassword"
+          }
+        },
+        "type": "object",
+        "required": ["oldPassword", "newPassword"],
+        "title": "ChangePasswordIn",
+        "description": "修改密码（需已登录）"
+      },
       "CloneStatusOut": {
         "properties": {
           "id": {
@@ -6107,6 +6455,11 @@
               }
             ],
             "title": "Expiresat"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "default": false
           }
         },
         "type": "object",
@@ -6375,6 +6728,92 @@
         "required": ["stopped"],
         "title": "KillSwitchOut"
       },
+      "LedgerItemOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "eventType": {
+            "type": "string",
+            "title": "Eventtype"
+          },
+          "pointsDelta": {
+            "type": "integer",
+            "title": "Pointsdelta"
+          },
+          "referenceType": {
+            "type": "string",
+            "title": "Referencetype"
+          },
+          "referenceId": {
+            "type": "string",
+            "title": "Referenceid"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid",
+            "default": ""
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "createdBy": {
+            "type": "string",
+            "title": "Createdby",
+            "default": "system"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "eventType",
+          "pointsDelta",
+          "referenceType",
+          "referenceId",
+          "createdAt"
+        ],
+        "title": "LedgerItemOut"
+      },
+      "LedgerPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": ["items", "total", "page", "pageSize"],
+        "title": "LedgerPageOut"
+      },
       "ListenerControlIn": {
         "properties": {
           "accountId": {
@@ -6442,10 +6881,14 @@
         "properties": {
           "phone": {
             "type": "string",
+            "maxLength": 20,
+            "minLength": 5,
             "title": "Phone"
           },
           "password": {
             "type": "string",
+            "maxLength": 64,
+            "minLength": 6,
             "title": "Password"
           },
           "deviceId": {
@@ -6462,7 +6905,8 @@
         },
         "type": "object",
         "required": ["phone", "password"],
-        "title": "LoginIn"
+        "title": "LoginIn",
+        "description": "手机号 + 密码登录（仅限已激活用户）"
       },
       "MessageOut": {
         "properties": {
@@ -7983,12 +8427,22 @@
             "type": "number",
             "title": "Newbalance",
             "default": 0
+          },
+          "isUpgrade": {
+            "type": "boolean",
+            "title": "Isupgrade",
+            "default": false
+          },
+          "previousPlanType": {
+            "type": "string",
+            "title": "Previousplantype",
+            "default": ""
           }
         },
         "type": "object",
         "required": ["planType"],
         "title": "RedeemOut",
-        "description": "兑换返回"
+        "description": "兑换返回（续费/升级）"
       },
       "RefreshIn": {
         "properties": {
@@ -9237,6 +9691,27 @@
         "required": ["count"],
         "title": "UnreadOut"
       },
+      "UpdatePhoneIn": {
+        "properties": {
+          "newPhone": {
+            "type": "string",
+            "maxLength": 20,
+            "minLength": 5,
+            "title": "Newphone"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 6,
+            "title": "Password",
+            "description": "当前密码，用于身份确认"
+          }
+        },
+        "type": "object",
+        "required": ["newPhone", "password"],
+        "title": "UpdatePhoneIn",
+        "description": "换绑手机号（需已登录 + 验证新手机号未被占用）"
+      },
       "UserOut": {
         "properties": {
           "id": {
@@ -9288,7 +9763,7 @@
           },
           "role": {
             "type": "string",
-            "enum": ["user", "admin"],
+            "enum": ["user", "admin", "ops", "finance", "auditor"],
             "title": "Role"
           }
         },
@@ -9309,7 +9784,7 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": ["user", "admin"]
+                "enum": ["user", "admin", "ops", "finance", "auditor"]
               },
               {
                 "type": "null"

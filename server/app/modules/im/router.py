@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit
 from app.core.db import get_db
-from app.core.deps import get_current_user_id, require_admin
+from app.core.deps import get_current_user_id, require_permission
 
 from . import service
 from .schemas import (
@@ -179,7 +179,7 @@ async def disable_automation(
 async def set_kill_switch(
     inp: KillSwitchIn,
     db: AsyncSession = Depends(get_db),
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("im.manage")),
 ):
     canceled = await service.set_global_kill_switch(db, stopped=inp.stopped)
     await write_audit(
@@ -193,7 +193,7 @@ async def set_kill_switch(
 @admin_router.get("/kill-switch", response_model=KillSwitchOut)
 async def get_kill_switch(
     db: AsyncSession = Depends(get_db),
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("im.manage")),
 ):
     stopped = await service.get_global_kill_switch(db)
     return KillSwitchOut(stopped=stopped)
@@ -202,7 +202,7 @@ async def get_kill_switch(
 @admin_router.get("/gray/accounts", response_model=list[GrayAccountOut])
 async def list_gray_accounts(
     db: AsyncSession = Depends(get_db),
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("im.manage")),
 ):
     return await service.list_gray_accounts(db)
 
@@ -211,7 +211,7 @@ async def list_gray_accounts(
 async def approve_gray_account(
     account_id: str,
     db: AsyncSession = Depends(get_db),
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("im.manage")),
 ):
     gray = await service.approve_gray_account(db, account_id, admin_id)
     await write_audit("im_gray_account_approved", user_id=admin_id, detail=f"account_id={account_id}")
@@ -222,7 +222,7 @@ async def approve_gray_account(
 async def remove_gray_account(
     account_id: str,
     db: AsyncSession = Depends(get_db),
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("im.manage")),
 ):
     removed = await service.remove_gray_account(db, account_id)
     await write_audit(
@@ -237,7 +237,7 @@ async def remove_gray_account(
 async def monitoring_summary(
     hours: int = Query(24, ge=1, le=24 * 30),
     db: AsyncSession = Depends(get_db),
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("im.manage")),
 ):
     return await service.get_monitoring_summary(db, hours=hours)
 
@@ -246,7 +246,7 @@ async def monitoring_summary(
 async def record_monitoring_incident(
     inp: MonitoringIncidentIn,
     db: AsyncSession = Depends(get_db),
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("im.manage")),
 ):
     await service.record_risk_control_incident(db, inp)
     await write_audit(

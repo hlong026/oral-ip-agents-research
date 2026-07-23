@@ -10,14 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import AuditLog, add_audit
 from app.core.db import get_db
-from app.core.deps import require_permission
+from app.core.deps import ADMIN_ROLES, require_permission
 from app.modules.auth.models import User
 from app.modules.billing.models import QuotaAccount
 from app.modules.catalog import repository as catalog_repo
 
 router = APIRouter(tags=["admin"])
 
-# 资金类操作二次确认阈值：扣减（负数）或单次 |points| 达到该值必须 confirm=true
+# 资金类操作二次确认阈值：扣减（负数）或单次 |points| 达到该值必须 confirm=true。
+# 设计认知：该控制是防手滑的 UI 摩擦，不防分次拆分绕过（如多次 9,999）；滥用防护依赖审计追溯。
 CREDIT_CONFIRM_THRESHOLD = 10_000
 
 
@@ -92,14 +93,17 @@ async def update_user(
             status.HTTP_409_CONFLICT,
             detail={"code": "SELF_LOCKOUT", "message": "不能停用或降级当前管理员"},
         )
-    # 角色变更属于提权操作，仅超管可执行（ops 仅可停用/启用账号）
-    if body.role is not None:
+    # 角色变更或停用/启用「管理账号」均属于提权操作，仅超管可执行
+    # （M2 修复：ops 拥有 users.write 但不得停用其他管理账号，防止管理面自锁）
+    needs_super_admin = body.role is not None or (body.isActive is not None and user.role in ADMIN_ROLES)
+    if needs_super_admin:
         operator = await db.get(User, admin_id)
         if operator is None or operator.role != "admin":
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                detail={"code": "FORBIDDEN", "message": "仅超级管理员可变更用户角色"},
+                detail={"code": "FORBIDDEN", "message": "仅超级管理员可变更管理账号角色或状态"},
             )
+    if body.role is not None:
         user.role = body.role
     if body.isActive is not None:
         user.is_active = body.isActive

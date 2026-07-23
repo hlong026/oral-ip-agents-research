@@ -59,6 +59,7 @@ def test_production_rejects_reused_security_secrets() -> None:
     settings = Settings(
         app_env="production",
         app_secret=reused,
+        admin_jwt_secret="j" * 32,
         config_encryption_key=reused,
         activation_secret="a" * 32,
         publish_session_encryption_key="p" * 32,
@@ -73,6 +74,42 @@ def test_runtime_rejects_unapproved_jwt_algorithm() -> None:
     settings = Settings(app_env="test", jwt_algorithm="none")
 
     with pytest.raises(RuntimeError, match="JWT_ALGORITHM"):
+        validate_runtime_security(settings)
+
+
+def _production_settings(**overrides: object) -> Settings:
+    base = {
+        "app_env": "production",
+        "app_secret": "a" * 32,
+        "admin_jwt_secret": "j" * 32,
+        "config_encryption_key": "c" * 32,
+        "activation_secret": "b" * 32,
+        "publish_session_encryption_key": "p" * 32,
+        "feiying_webhook_secret": "w" * 32,
+        "admin_api_allowed_ips": "10.0.0.0/8",
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
+
+
+def test_production_requires_admin_jwt_secret() -> None:
+    settings = _production_settings(admin_jwt_secret="")
+
+    with pytest.raises(RuntimeError, match="ADMIN_JWT_SECRET"):
+        validate_runtime_security(settings)
+
+
+def test_production_requires_admin_api_allowed_ips() -> None:
+    settings = _production_settings(admin_api_allowed_ips="")
+
+    with pytest.raises(RuntimeError, match="ADMIN_API_ALLOWED_IPS"):
+        validate_runtime_security(settings)
+
+
+def test_production_rejects_invalid_admin_api_allowed_ips_entry() -> None:
+    settings = _production_settings(admin_api_allowed_ips="not-an-ip")
+
+    with pytest.raises(RuntimeError, match="无效条目"):
         validate_runtime_security(settings)
 
 

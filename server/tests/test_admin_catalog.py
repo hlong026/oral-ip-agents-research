@@ -476,8 +476,9 @@ async def test_user_cannot_access_admin_control_plane(client: AsyncClient):
     plans = await client.get("/api/admin/v1/plans", headers=headers)
     providers = await client.get("/api/admin/v1/providers", headers=headers)
 
-    assert plans.status_code == 403
-    assert providers.status_code == 403
+    # 双密钥隔离：用户面令牌在管理面密钥验证阶段即失败（401，而非进入鉴权后的 403）
+    assert plans.status_code == 401
+    assert providers.status_code == 401
 
 
 async def test_admin_role_with_user_audience_cannot_access_admin_control_plane(client: AsyncClient):
@@ -486,7 +487,8 @@ async def test_admin_role_with_user_audience_cannot_access_admin_control_plane(c
         "/api/admin/v1/plans",
         headers={"Authorization": f"Bearer {tokens['accessToken']}"},
     )
-    assert response.status_code == 403
+    # aud=user 令牌由用户面密钥签发，无法通过管理面密钥验证
+    assert response.status_code == 401
 
 
 async def test_admin_can_identify_its_creator_space_from_user_profile(client: AsyncClient):
@@ -507,7 +509,8 @@ async def test_admin_audience_token_cannot_access_user_data_plane(client: AsyncC
 
     response = await client.get("/api/v1/billing/balance", headers=headers)
 
-    assert response.status_code == 403
+    # aud=admin 令牌由管理面密钥签发，无法通过用户面密钥验证
+    assert response.status_code == 401
 
 
 async def test_disabled_user_access_token_stops_working_immediately(client: AsyncClient):
@@ -542,7 +545,7 @@ async def test_admin_credit_adjustment_uses_ledger_instead_of_raw_balance_edit(c
     deducted = await client.post(
         f"/api/admin/v1/users/{user_id}/credits/adjust",
         headers=admin_headers,
-        json={"points": -30, "reason": "纠正重复发放"},
+        json={"points": -30, "reason": "纠正重复发放", "confirm": True},  # 扣减类调整需二次确认
     )
 
     assert granted.status_code == 200, granted.text

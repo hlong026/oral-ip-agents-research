@@ -54,10 +54,14 @@ async def login(
     phone: str,
     password: str,
     device_id: str | None,
-    required_role: str | None = None,
+    required_roles: frozenset[str] | None = None,
     audience: str = "user",
 ) -> TokensOut:
-    """手机号 + 密码登录（仅限已通过激活码激活的用户）"""
+    """手机号 + 密码登录（仅限已通过激活码激活的用户）
+
+    required_roles：管理面登录时传入允许的角色集合（ADMIN_ROLES），
+    普通用户登录留空即可。
+    """
     user = await repo.get_by_phone(db, phone)
     if not user or not verify_password(password, user.password_hash):
         logger.warning("login_failed", phone=phone, reason="BAD_CREDENTIALS")
@@ -75,7 +79,7 @@ async def login(
             status.HTTP_403_FORBIDDEN,
             detail={"code": "NOT_ACTIVATED", "message": "账号未激活，请先使用激活码激活"},
         )
-    if required_role and user.role != required_role:
+    if required_roles and user.role not in required_roles:
         logger.warning("login_failed", phone=phone, user_id=user.id, reason="ROLE_FORBIDDEN")
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "FORBIDDEN", "message": "账号无管理权限"})
     device = device_id or "web"
@@ -168,5 +172,5 @@ def to_out(user: User) -> UserOut:
         planType=getattr(user, "plan_type", "none") or "none",
         planExpiresAt=plan_expires_at.astimezone(UTC).isoformat() if plan_expires_at else None,
         activatedAt=activated_at.astimezone(UTC).isoformat() if activated_at else None,
-        role=cast(Literal["user", "admin"], user.role),
+        role=cast(Literal["user", "admin", "ops", "finance", "auditor"], user.role),
     )
