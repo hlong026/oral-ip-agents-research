@@ -217,6 +217,19 @@ export const avatarApi = {
     if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
+  cloneByImage: (name: string, consentToken: string, file: File, quoteId?: string) => {
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("consentToken", consentToken);
+    fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
+    return http.post<Avatar>("/avatars/create-by-image", fd);
+  },
+  status: (avatarId: string) =>
+    http.get<{ id: string; status: string; progress: number }>(
+      `/avatars/${avatarId}/status`,
+    ),
+  delete: (avatarId: string) => http.delete<void>(`/avatars/${avatarId}`),
 };
 
 // ---------- pipeline（F-405/406） ----------
