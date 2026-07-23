@@ -102,10 +102,17 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
 
         persona = await ipasset_repo.get(db, inp.ipId, user_id)
         task_for_quote = inp.model_dump()
-        task_for_quote["_targetDurationSeconds"] = max(
-            1,
-            persona.video_duration if persona else 60,
-        )
+        # 优先使用 persona 时长；无 persona 时尝试探测链接真实时长，拒绝固定 60s
+        target_duration = persona.video_duration if persona else 0
+        if not target_duration and inp.sourceUrl:
+            from app.modules.content.service import probe_url_duration
+
+            try:
+                probed = await probe_url_duration(inp.sourceUrl, required=False)
+                target_duration = probed or 0
+            except Exception:  # noqa: BLE001
+                logger.warning("pipeline_duration_probe_failed", url=inp.sourceUrl[:120])
+        task_for_quote["_targetDurationSeconds"] = max(1, int(target_duration or 60))
 
         reservation_batch = await reserve_quote(
             db,
@@ -389,6 +396,16 @@ async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
     from app.modules.ipasset import repository as ipasset_repo
 
     persona = await ipasset_repo.get(db, task.ip_id, task.user_id)
+    # 优先使用 persona 时长；无 persona 时尝试探测链接真实时长
+    target_duration = persona.video_duration if persona else 0
+    if not target_duration and task.source_url:
+        from app.modules.content.service import probe_url_duration
+
+        try:
+            probed = await probe_url_duration(task.source_url, required=False)
+            target_duration = probed or 0
+        except Exception:  # noqa: BLE001
+            logger.warning("retry_duration_probe_failed", url=task.source_url[:120])
     return {
         "ipId": task.ip_id,
         "sourceUrl": task.source_url,
@@ -397,7 +414,7 @@ async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
         "voiceId": task.voice_id,
         "avatarId": task.avatar_id,
         "platforms": json.loads(task.platforms_json or "[]"),
-        "_targetDurationSeconds": max(1, persona.video_duration if persona else 60),
+        "_targetDurationSeconds": max(1, int(target_duration or 60)),
     }
 
 

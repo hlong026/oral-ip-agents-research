@@ -26,6 +26,25 @@ class UsagePageOut(BaseModel):
     pageSize: int
 
 
+class LedgerItemOut(BaseModel):
+    id: str
+    eventType: str
+    pointsDelta: int
+    referenceType: str
+    referenceId: str
+    taskId: str = ""
+    detail: dict | None = None
+    createdBy: str = "system"
+    createdAt: str
+
+
+class LedgerPageOut(BaseModel):
+    items: list[LedgerItemOut]
+    total: int
+    page: int
+    pageSize: int
+
+
 class PricePreviewItemIn(BaseModel):
     module: str
     quantity: int = Field(gt=0)
