@@ -307,6 +307,7 @@ async def _create_user(*, role: str) -> str:
                 password_hash=hash_password("Test@12345"),
                 nickname="灰度监控测试",
                 role=role,
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

@@ -98,8 +98,8 @@ async def api_subscription(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询当前订阅状态"""
-    return await service.get_subscription(db, user_id)
+    """查询当前订阅状态（自动检查到期）"""
+    return await service.get_subscription_with_expiry_check(db, user_id)
 
 
 @subscription_router.get("/subscription", response_model=SubscriptionOut)
@@ -107,7 +107,7 @@ async def api_current_subscription(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.get_subscription(db, user_id)
+    return await service.get_subscription_with_expiry_check(db, user_id)
 
 
 # ---------- 管理侧 ----------

@@ -27,6 +27,7 @@ async def _reserved_task() -> tuple[str, str, str]:
                 password_hash=hash_password("Test@12345"),
                 nickname="计费回归用户",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

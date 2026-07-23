@@ -1,6 +1,7 @@
 """S3-11 explicit automation consent and emergency kill switches."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -200,6 +201,7 @@ async def _create_user(*, role: str) -> str:
                 password_hash=hash_password("Test@12345"),
                 nickname="授权测试",
                 role=role,
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

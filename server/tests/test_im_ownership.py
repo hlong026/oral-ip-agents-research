@@ -1,6 +1,7 @@
 """IM account ownership boundaries."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -25,6 +26,7 @@ async def _create_user_and_login(client: AsyncClient) -> tuple[str, dict[str, st
                 password_hash=hash_password(password),
                 nickname="归属测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

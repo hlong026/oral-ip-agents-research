@@ -51,13 +51,15 @@ class ActivateOut(BaseModel):
 
 
 class RedeemOut(BaseModel):
-    """兑换返回"""
+    """兑换返回（续费/升级）"""
 
     planType: str
     planSkuCode: str = ""
     planExpiresAt: str | None = None
     quotaGranted: float = 0
     newBalance: float = 0
+    isUpgrade: bool = False
+    previousPlanType: str = ""
 
 
 class SubscriptionOut(BaseModel):

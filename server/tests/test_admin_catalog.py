@@ -30,6 +30,7 @@ async def _create_user(*, role: str) -> tuple[str, str]:
             role=role,
             plan_type="trial" if role == "user" else "none",
             plan_expires_at=datetime.now(UTC) + timedelta(days=30) if role == "user" else None,
+            activated_at=datetime.now(UTC),
         )
         db.add(user)
         await db.commit()

@@ -39,6 +39,10 @@ export const authApi = {
   login: (phone: string, password: string, deviceId?: string) =>
     http.post<AuthTokens>("/auth/login", { phone, password, deviceId }),
   me: () => http.get<User>("/auth/me"),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http.post<void>("/auth/change-password", { oldPassword, newPassword }),
+  updatePhone: (newPhone: string, password: string) =>
+    http.put<User>("/auth/phone", { newPhone, password }),
 };
 
 // ---------- activation（激活码） ----------
@@ -64,6 +68,8 @@ export interface RedeemResult {
   planExpiresAt: string | null;
   quotaGranted: number;
   newBalance: number;
+  isUpgrade: boolean;
+  previousPlanType: string;
 }
 
 function activationDeviceFingerprint(): string {

@@ -33,6 +33,7 @@ async def _register(client: AsyncClient, phone: str, role: str = "user") -> dict
             role=role,
             plan_type="trial",
             plan_expires_at=datetime.now(UTC) + timedelta(days=30),
+            activated_at=datetime.now(UTC),
         )
         db.add(user)
         await db.flush()

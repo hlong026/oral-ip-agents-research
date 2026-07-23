@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -29,6 +30,7 @@ async def _create_conversation() -> tuple[str, IMConversation]:
                 password_hash=hash_password("Test@12345"),
                 nickname="发送测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

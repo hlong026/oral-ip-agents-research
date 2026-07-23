@@ -32,6 +32,27 @@ async def create_user(db: AsyncSession, phone: str, password_hash: str, nickname
     return user
 
 
+async def update_password(db: AsyncSession, user_id: str, new_password_hash: str) -> None:
+    """更新用户密码哈希"""
+    await db.execute(update(User).where(User.id == user_id).values(password_hash=new_password_hash))
+    await db.commit()
+
+
+async def update_password_and_revoke_sessions(db: AsyncSession, user_id: str, new_password_hash: str) -> None:
+    """同一事务内更新密码并吊销所有刷新会话（消除安全窗口）"""
+    await db.execute(update(User).where(User.id == user_id).values(password_hash=new_password_hash))
+    await db.execute(
+        update(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False)).values(revoked=True)
+    )
+    await db.commit()
+
+
+async def update_phone(db: AsyncSession, user_id: str, new_phone: str) -> None:
+    """换绑手机号"""
+    await db.execute(update(User).where(User.id == user_id).values(phone=new_phone))
+    await db.commit()
+
+
 async def save_session(db: AsyncSession, user_id: str, device_id: str, jti: str) -> None:
     db.add(RefreshSession(user_id=user_id, device_id=device_id, refresh_jti=jti))
     await db.commit()
@@ -49,6 +70,14 @@ async def revoke_device_sessions(db: AsyncSession, user_id: str, device_id: str)
         update(RefreshSession)
         .where(RefreshSession.user_id == user_id, RefreshSession.device_id == device_id)
         .values(revoked=True)
+    )
+    await db.commit()
+
+
+async def revoke_all_sessions(db: AsyncSession, user_id: str) -> None:
+    """吊销用户所有刷新会话（修改密码后强制重新登录）"""
+    await db.execute(
+        update(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False)).values(revoked=True)
     )
     await db.commit()
 

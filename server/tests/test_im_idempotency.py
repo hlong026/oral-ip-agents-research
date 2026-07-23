@@ -1,6 +1,7 @@
 """S3-05 IM message idempotency and ownership boundaries."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
@@ -25,6 +26,7 @@ async def _create_user() -> str:
                 password_hash=hash_password("Test@12345"),
                 nickname="幂等测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()
