@@ -73,11 +73,13 @@ export interface ProviderConfig {
   apiKey?: string;
 }
 
+export type AdminRole = "user" | "admin" | "ops" | "finance" | "auditor";
+
 export interface AdminUser {
   id: string;
   phone: string;
   nickname: string;
-  role: "user" | "admin";
+  role: AdminRole;
   isActive: boolean;
   planType: string;
   planSkuCode: string;
@@ -93,6 +95,19 @@ export interface CostAnalysisItem {
   internalCostCentsPerUnit: number;
   targetMarginBps: number;
   enabled: boolean;
+}
+
+/** 运营总览聚合指标（GET /admin/overview） */
+export interface AdminOverview {
+  totalUsers: number;
+  newUsersToday: number;
+  totalTasks: number;
+  doneTasksToday: number;
+  totalCodes: number;
+  usedCodes: number;
+  totalGranted: number;
+  totalConsumed: number;
+  expiringSubscriptions: number;
 }
 
 export interface AuditItem {
@@ -300,16 +315,20 @@ export const adminApi = {
   listUsers: () => adminFetch<{ items: AdminUser[]; total: number }>("/users"),
   updateUser: (
     id: string,
-    body: { role?: "user" | "admin"; isActive?: boolean },
+    body: { role?: AdminRole; isActive?: boolean },
   ) =>
-    adminFetch<{ id: string; role: "user" | "admin"; isActive: boolean }>(
+    adminFetch<{ id: string; role: AdminRole; isActive: boolean }>(
       `/users/${id}`,
       {
         method: "PATCH",
         body: JSON.stringify(body),
       },
     ),
-  adjustUserCredits: (id: string, body: { points: number; reason: string }) =>
+  // 扣减或大额（|points|>=10000）调整必须 confirm=true（服务端二次确认）
+  adjustUserCredits: (
+    id: string,
+    body: { points: number; reason: string; confirm?: boolean },
+  ) =>
     adminFetch<{ balance: number }>(`/users/${id}/credits/adjust`, {
       method: "POST",
       body: JSON.stringify(body),
@@ -318,6 +337,7 @@ export const adminApi = {
     adminFetch<{ priceVersion: string | null; items: CostAnalysisItem[] }>(
       "/cost-analysis",
     ),
+  overview: () => adminFetch<AdminOverview>("/overview"),
   audit: () => adminFetch<{ items: AuditItem[]; total: number }>("/audit"),
   imKillSwitch: () => adminFetch<ImKillSwitchStatus>("/im/kill-switch"),
   setImKillSwitch: (stopped: boolean) =>

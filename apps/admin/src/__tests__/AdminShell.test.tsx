@@ -1,8 +1,16 @@
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ADMIN_TOKEN_KEY } from "../lib/adminHttp";
 import App from "../App";
+
+/** 测试用 QueryClient：关闭重试，避免无网络环境下挂起 */
+function createTestQueryClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
 
 describe("admin app routing", () => {
   beforeEach(() => {
@@ -11,9 +19,11 @@ describe("admin app routing", () => {
 
   it("redirects anonymous visitors to admin login", () => {
     render(
-      <MemoryRouter initialEntries={["/plans"]}>
-        <App />
-      </MemoryRouter>,
+      <QueryClientProvider client={createTestQueryClient()}>
+        <MemoryRouter initialEntries={["/plans"]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(
@@ -25,9 +35,11 @@ describe("admin app routing", () => {
     localStorage.setItem(ADMIN_TOKEN_KEY, "test-token");
 
     render(
-      <MemoryRouter initialEntries={["/"]}>
-        <App />
-      </MemoryRouter>,
+      <QueryClientProvider client={createTestQueryClient()}>
+        <MemoryRouter initialEntries={["/"]}>
+          <App />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     expect(screen.getByText("管理控制台")).toBeInTheDocument();
