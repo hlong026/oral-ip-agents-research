@@ -17,6 +17,7 @@ from .schemas import CloneStatusOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, V
 from .service import (
     clone_voice,
     confirm_voice,
+    delete_voice,
     edit_voice_params,
     get_clone_status,
     list_voices,
@@ -98,6 +99,17 @@ async def api_edit(
 ):
     """调整语速/音量/语调"""
     await edit_voice_params(db, user_id, voice_id, body.rate, body.volume, body.pitch)
+    return Response(status_code=204)
+
+
+@router.delete("/{voice_id}", status_code=204)
+async def api_delete(
+    voice_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除声音"""
+    await delete_voice(db, user_id, voice_id)
     return Response(status_code=204)
 
 

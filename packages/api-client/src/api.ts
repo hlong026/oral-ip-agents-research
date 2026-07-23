@@ -204,6 +204,7 @@ export const voiceApi = {
       "/voices/synthesize",
       { voiceId, text, speed, quoteId },
     ),
+  delete: (voiceId: string) => http.delete<void>(`/voices/${voiceId}`),
 };
 
 export const avatarApi = {

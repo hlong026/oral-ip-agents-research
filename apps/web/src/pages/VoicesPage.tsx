@@ -250,6 +250,31 @@ export default function VoicesPage() {
     }
   };
 
+  const handleDelete = async (voice: Voice) => {
+    const isBound = current?.voiceId === voice.id;
+    const hint =
+      voice.status === "training"
+        ? `确定删除声音「${voice.name}」？训练中的声音将被取消，冻结额度自动退还。`
+        : isBound
+          ? `确定删除声音「${voice.name}」？该声音是当前 IP 的默认声音，删除后需重新绑定。`
+          : `确定删除声音「${voice.name}」？此操作不可撤销。`;
+    if (!window.confirm(hint)) return;
+    setActionId(voice.id);
+    setActionError("");
+    try {
+      await voiceApi.delete(voice.id);
+      queryClient.setQueryData<Voice[]>(["voices"], (currentVoices = []) =>
+        currentVoices.filter((item) => item.id !== voice.id),
+      );
+    } catch (error) {
+      setActionError(
+        error instanceof HttpError ? error.body.message : "删除失败，请重试",
+      );
+    } finally {
+      setActionId(null);
+    }
+  };
+
   // 卡内试听：全局单例 Audio，切换卡片自动停上一段
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -436,6 +461,15 @@ export default function VoicesPage() {
                     {current?.voiceId === v.id && (
                       <span className="text-xs text-success">当前默认</span>
                     )}
+                    {v.status !== "ready" || current?.voiceId !== v.id ? (
+                      <button
+                        className="btn-ghost px-2 py-0.5 text-[11px] text-danger/70 hover:text-danger"
+                        disabled={actionId === v.id}
+                        onClick={() => void handleDelete(v)}
+                      >
+                        删除
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               );

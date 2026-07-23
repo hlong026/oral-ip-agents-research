@@ -25,3 +25,8 @@ async def create(db: AsyncSession, **fields) -> Voice:
     await db.commit()
     await db.refresh(v)
     return v
+
+
+async def delete(db: AsyncSession, voice: Voice) -> None:
+    await db.delete(voice)
+    await db.commit()
