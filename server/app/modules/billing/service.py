@@ -278,6 +278,39 @@ async def reserve_quote(
             detail={"code": "QUOTE_ALREADY_USED", "message": "报价已使用"},
         )
 
+    if await _is_billing_exempt_admin(db, user_id):
+        reservations = [
+            CreditReservation(
+                user_id=user_id,
+                quote_id=quote.id,
+                reserved_points=0,
+            )
+            for _ in range(count)
+        ]
+        db.add_all(reservations)
+        await db.flush()
+        if commit:
+            await db.commit()
+        account = await repo.get_account(db, user_id)
+        logger.info(
+            "admin_quota_exempt_reservation",
+            user_id=user_id,
+            quote_id=quote.id,
+            count=count,
+        )
+        return ReservationBatchOut(
+            items=[
+                ReservationItemOut(
+                    id=item.id,
+                    quoteId=item.quote_id,
+                    reservedPoints=0,
+                    status=item.status,
+                )
+                for item in reservations
+            ],
+            availablePoints=account.balance if account else 0,
+        )
+
     await repo.ensure_account(db, user_id)
     total = quote.estimated_points * count
     grants = list(
@@ -403,6 +436,14 @@ async def reserve_quote(
         ],
         availablePoints=account.balance if account else 0,
     )
+
+
+async def _is_billing_exempt_admin(db: AsyncSession, user_id: str) -> bool:
+    """管理员仍需通过报价校验，但不进入用户积分账本。"""
+    from app.modules.auth import repository as auth_repo
+
+    user = await auth_repo.get_by_id(db, user_id)
+    return bool(user and user.role == "admin")
 
 
 def pipeline_quote_quantities(task: dict, module_units: dict[str, str]) -> dict[str, int]:
@@ -593,8 +634,10 @@ async def settle_reservation(
     reservation = (
         await db.execute(select(CreditReservation).where(CreditReservation.id == reservation_id))
     ).scalar_one_or_none()
-    if reservation is None or reservation.status == "settled":
-        return reservation.actual_points if reservation else 0
+    if reservation is None:
+        return 0
+    if reservation.status == "settled":
+        return reservation.actual_points or 1
     if reservation.status != "reserved":
         return 0
     quote = await db.get(PriceQuote, reservation.quote_id)
@@ -612,7 +655,10 @@ async def settle_reservation(
     if int(getattr(result, "rowcount", 0) or 0) != 1:
         await db.rollback()
         current = await db.get(CreditReservation, reservation_id)
-        return current.actual_points if current and current.status == "settled" else 0
+        return (current.actual_points or 1) if current and current.status == "settled" else 0
+    if reservation.reserved_points == 0:
+        await db.commit()
+        return 1
     await db.execute(
         update(QuotaAccount)
         .where(QuotaAccount.user_id == reservation.user_id)
@@ -670,6 +716,17 @@ async def release_reservation(
             .values(status="released", settled_at=datetime.now(UTC))
         )
         if int(getattr(result, "rowcount", 0) or 0) == 1:
+            if reservation.reserved_points == 0:
+                await db.commit()
+                reservation.status = "released"
+                account = await repo.get_account(db, reservation.user_id)
+                return ReservationStateOut(
+                    id=reservation.id,
+                    status=reservation.status,
+                    reservedPoints=0,
+                    actualPoints=0,
+                    availablePoints=account.balance if account else 0,
+                )
             allocations = json.loads(reservation.allocations_json or "[]")
             if allocations:
                 for allocation in allocations:

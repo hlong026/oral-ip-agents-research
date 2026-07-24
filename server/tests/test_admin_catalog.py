@@ -955,6 +955,56 @@ async def test_quote_reservation_freezes_and_idempotently_releases_points(client
     assert repeated.json()["availablePoints"] == 500
 
 
+async def test_admin_reservation_is_zero_cost_and_does_not_write_billing_usage(client: AsyncClient):
+    admin_tokens = await _user_login_for_role(client, role="admin")
+    admin_headers = {"Authorization": f"Bearer {admin_tokens['accessToken']}"}
+    admin_id = str(decode_token(admin_tokens["accessToken"])["sub"])
+
+    quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=admin_headers,
+        json={"items": [{"module": "tts", "quantity": 1}]},
+    )
+    assert quote.status_code == 200, quote.text
+
+    reserved = await client.post(
+        "/api/v1/billing/reservations",
+        headers=admin_headers,
+        json={"quoteId": quote.json()["quoteId"]},
+    )
+    assert reserved.status_code == 201, reserved.text
+    reservation_id = reserved.json()["items"][0]["id"]
+    assert reserved.json()["items"][0]["reservedPoints"] == 0
+
+    from sqlalchemy import func, select
+
+    from app.modules.billing.models import (
+        CreditLedger,
+        CreditReservation,
+        QuotaAccount,
+        QuotaUsage,
+    )
+    from app.modules.billing.service import settle_reservation
+
+    async with SessionLocal() as db:
+        reservation = await db.get(CreditReservation, reservation_id)
+        assert reservation is not None and reservation.reserved_points == 0
+        assert await settle_reservation(db, reservation_id, "admin-task") == 1
+        account_count = await db.scalar(
+            select(func.count(QuotaAccount.id)).where(QuotaAccount.user_id == admin_id)
+        )
+        ledger_count = await db.scalar(
+            select(func.count(CreditLedger.id)).where(CreditLedger.user_id == admin_id)
+        )
+        usage_count = await db.scalar(
+            select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == admin_id)
+        )
+
+    assert account_count == 0
+    assert ledger_count == 0
+    assert usage_count == 0
+
+
 async def test_same_quote_can_only_be_reserved_once_under_concurrency(client: AsyncClient):
     admin_headers = await _login(client, role="admin")
     user_headers = await _login(client, role="user")
