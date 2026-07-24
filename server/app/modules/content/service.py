@@ -13,8 +13,9 @@ from datetime import UTC
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.core.storage import save_bytes
+from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import probe_duration
 from app.providers.registry import registry
@@ -35,6 +36,7 @@ from .schemas import (
 )
 
 logger = get_logger("oral.content")
+settings = get_settings()
 
 
 async def parse_url(
@@ -241,8 +243,18 @@ async def parse_upload(
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
     key = await save_bytes("uploads", filename, data)
+    try:
+        file_url = await get_accessible_url(
+            key,
+            require_public=not settings.provider_mock_fallback_enabled,
+        )
+    except StorageConfigurationError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "MEDIA_PUBLIC_URL_REQUIRED", "message": str(exc)},
+        ) from exc
     tr, _ = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", key, duration_sec=duration_seconds
+        "asr", registry.asr_chain, "transcribe", file_url, duration_sec=duration_seconds
     )
     script = await _create_script_with_source_version(
         db,

@@ -1,5 +1,6 @@
 """第二阶段内容输入与文案资产回归测试。"""
 
+import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 
@@ -228,6 +229,45 @@ async def test_development_provider_switch_disables_real_provider(monkeypatch) -
 
     assert await provider_registry.provider_enabled("deepseek-v3") is False
     assert await provider_registry.provider_enabled("mock-llm") is True
+
+
+async def test_upload_passes_accessible_url_to_asr(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import TranscriptResult
+
+    captured_urls: list[str] = []
+
+    async def stored(_prefix: str, _filename: str, _data: bytes) -> str:
+        return "uploads/source video.mp4"
+
+    async def accessible(key: str, *, require_public: bool = False) -> str:
+        assert key == "uploads/source video.mp4"
+        assert require_public is False
+        return "https://media.example.test/media/uploads/source%20video.mp4"
+
+    async def transcribed(_kind: str, _chain, _method: str, file_url: str, **_kwargs):
+        captured_urls.append(file_url)
+        return TranscriptResult(text="真实转写", words=[], duration=3), "dashscope-asr"
+
+    monkeypatch.setattr(service, "save_bytes", stored)
+    monkeypatch.setattr(service, "get_accessible_url", accessible)
+    monkeypatch.setattr(service.registry, "run_with_fallback", transcribed)
+
+    async with SessionLocal() as db:
+        result = await service.parse_upload(db, "media-url-user", "source video.mp4", b"video", None, 3)
+
+    assert captured_urls == ["https://media.example.test/media/uploads/source%20video.mp4"]
+    assert result.transcript is not None
+    assert result.transcript.text == "真实转写"
+
+
+async def test_real_acceptance_requires_public_media_base_url(monkeypatch) -> None:
+    from app.core import storage
+
+    monkeypatch.setattr(storage.settings, "media_public_base_url", "")
+
+    with pytest.raises(storage.StorageConfigurationError, match="MEDIA_PUBLIC_BASE_URL"):
+        await storage.get_accessible_url("uploads/source.mp4", require_public=True)
 
 
 async def test_similarity_compares_rewrite_with_source_text() -> None:

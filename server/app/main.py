@@ -5,15 +5,16 @@
 - 日志：structlog 结构化输出（§10.6）
 """
 
+import mimetypes
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, Response
 
+from app.core import storage
 from app.core.config import get_settings, validate_runtime_security
 from app.core.db import SessionLocal, init_models, verify_migrations_current
 from app.core.events import init_redis
@@ -169,6 +170,13 @@ for r in admin_routers:
     app.include_router(r, prefix="/api/admin/v1")
 app.include_router(ws_router)
 
-# ---- 媒体文件（本地存储驱动）----
-os.makedirs(settings.local_storage_dir, exist_ok=True)
-app.mount("/media", StaticFiles(directory=settings.local_storage_dir), name="media")
+
+# ---- 媒体文件（统一读取 local / s3 存储驱动）----
+@app.get("/media/{key:path}", name="media")
+async def media_file(key: str) -> Response:
+    try:
+        content = await storage.read_bytes(key)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "媒体文件不存在") from exc
+    content_type = mimetypes.guess_type(key)[0] or "application/octet-stream"
+    return Response(content=content, media_type=content_type)

@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # 存储
     storage_driver: str = "local"  # local | s3
     local_storage_dir: str = "./storage"
+    media_public_base_url: str = ""  # 真实云端 ASR 回源地址，例如 https://api.example.com
     s3_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "oral"
     s3_secret_key: str = "oral_dev_minio"
