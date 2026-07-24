@@ -56,6 +56,7 @@ export class TaskSocket {
     }
     this.ws.onopen = () => {
       this.retries = 0;
+      if (this.closedByUser) this.ws?.close();
     };
     this.ws.onmessage = (msg) => {
       try {
@@ -87,6 +88,6 @@ export class TaskSocket {
 
   close() {
     this.closedByUser = true;
-    this.ws?.close();
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.close();
   }
 }
