@@ -67,6 +67,7 @@ export interface ProviderConfig {
   displayName: string;
   enabled: boolean;
   baseUrl: string;
+  appId?: string;
   model?: string;
   priority?: number;
   apiKeyConfigured?: boolean;
@@ -172,6 +173,7 @@ const providerDefinitions = [
   {
     provider: "douyidou",
     displayName: "Douyidou 视频解析",
+    appId: "douyidou_app_id",
     key: "douyidou_app_secret",
     baseUrl: "douyidou_base_url",
     enabled: "douyidou_enabled",
@@ -184,7 +186,9 @@ function providerFromSettings(
   settings: Record<string, string>,
 ): ProviderConfig {
   const baseUrlKey = "baseUrl" in definition ? definition.baseUrl : undefined;
+  const appIdKey = "appId" in definition ? definition.appId : undefined;
   const modelKey = "model" in definition ? definition.model : undefined;
+  const appId = (appIdKey && settings[appIdKey]) || "";
   return {
     provider: definition.provider,
     displayName: definition.displayName,
@@ -192,9 +196,12 @@ function providerFromSettings(
     baseUrl:
       (baseUrlKey && settings[baseUrlKey]) ||
       ("defaultBaseUrl" in definition ? definition.defaultBaseUrl : ""),
+    appId,
     model: (modelKey && settings[modelKey]) || "",
     priority: Number(settings[definition.priority] || 0),
-    apiKeyConfigured: settings[definition.key] === "configured",
+    apiKeyConfigured:
+      settings[definition.key] === "configured" &&
+      (!appIdKey || Boolean(appId)),
   };
 }
 
@@ -360,6 +367,8 @@ export const adminApi = {
       [definition.enabled]: String(body.enabled),
       [definition.priority]: String(body.priority || 0),
     };
+    if ("appId" in definition && body.appId)
+      settings[definition.appId] = body.appId;
     if (body.apiKey) settings[definition.key] = body.apiKey;
     if ("baseUrl" in definition && body.baseUrl)
       settings[definition.baseUrl] = body.baseUrl;

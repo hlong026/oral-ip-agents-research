@@ -112,6 +112,13 @@ export default function ProvidersPage() {
               value={provider.baseUrl}
               onChange={(baseUrl) => update(index, { baseUrl })}
             />
+            {provider.provider === "douyidou" && (
+              <Field
+                label="App ID"
+                value={provider.appId || ""}
+                onChange={(appId) => update(index, { appId })}
+              />
+            )}
             <Field
               label="模型"
               value={provider.model || ""}
@@ -119,9 +126,13 @@ export default function ProvidersPage() {
             />
             <Field
               label={
-                provider.apiKeyConfigured
-                  ? "API Key（已配置，留空不覆盖）"
-                  : "API Key"
+                provider.provider === "douyidou"
+                  ? provider.apiKeyConfigured
+                    ? "App Secret（已配置，留空不覆盖）"
+                    : "App Secret"
+                  : provider.apiKeyConfigured
+                    ? "API Key（已配置，留空不覆盖）"
+                    : "API Key"
               }
               type="password"
               value={provider.apiKey || ""}
