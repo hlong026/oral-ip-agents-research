@@ -177,6 +177,7 @@ class DeepSeekLLM:
             word_count=word_count,
             cta_style=constraints.get("cta_style", "关注收藏"),
             taboo_words=constraints.get("taboo_words", "无"),
+            extra_prompt=constraints.get("extra_prompt", "") or "无",
         )
         return await self._chat(SCRIPT_GENERATION_SYSTEM, user)
 

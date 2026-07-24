@@ -70,9 +70,7 @@ _probe_result_cache: dict[str, tuple[float, DouyidouParseResult]] = {}
 def _cache_probe_result(url: str, result: DouyidouParseResult) -> None:
     now = time.monotonic()
     expired = [
-        key
-        for key, (cached_at, _) in _probe_result_cache.items()
-        if now - cached_at > _PROBE_RESULT_TTL_SECONDS
+        key for key, (cached_at, _) in _probe_result_cache.items() if now - cached_at > _PROBE_RESULT_TTL_SECONDS
     ]
     for key in expired:
         _probe_result_cache.pop(key, None)
@@ -341,9 +339,7 @@ async def parse_upload(
         if duration_seconds is not None and duration_seconds <= threshold:
             accessible_url = await get_accessible_url(key, require_public=False)
             media_input = (
-                accessible_url
-                if _is_public_media_url(accessible_url)
-                else await _embedded_asr_input(filename, data)
+                accessible_url if _is_public_media_url(accessible_url) else await _embedded_asr_input(filename, data)
             )
         else:
             media_input = await get_accessible_url(key, require_public=True)
@@ -474,14 +470,18 @@ async def rewrite(
     taboo_words = "、".join(json.loads(persona.taboo_words or "[]")) if persona else "无"
     cta_style = persona.cta_style if persona else "关注收藏"
     avoid_topics = json.loads(persona.avoid_topics or "[]") if persona else []
+    custom_prompt = (prompt or "").strip()
 
     # ---- Light 模式：单步人设润色 ----
     if intensity == "light":
         if persona_ctx:
-            result = await llm.polish_light(text, persona_ctx)
+            light_persona_ctx = persona_ctx
+            if custom_prompt:
+                light_persona_ctx += f"\n\n【用户自定义改写要求】\n{custom_prompt}"
+            result = await llm.polish_light(text, light_persona_ctx)
         else:
             result, provider_name = await registry.run_with_fallback(
-                "llm", registry.llm_chain, "rewrite", text, "light", prompt
+                "llm", registry.llm_chain, "rewrite", text, "light", custom_prompt or None
             )
         # 禁忌词校验
         result, passed = _validate_taboo(result, taboo_words, avoid_topics)
@@ -500,7 +500,8 @@ async def rewrite(
     constraints = {
         "duration": duration,
         "cta_style": cta_style or "关注收藏",
-        "taboo_words": taboo_words,
+        "taboo_words": taboo_words or "无",
+        "extra_prompt": custom_prompt,
     }
     result = await llm.generate_script(outline, persona_ctx, constraints)
 
