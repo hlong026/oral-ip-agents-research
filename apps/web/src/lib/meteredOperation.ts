@@ -66,12 +66,12 @@ export function operationQuantity(
   return Math.max(1, Math.ceil(values[unit]));
 }
 
-/** 获取当前价目并让用户确认，返回只可使用一次的报价 ID。 */
+/** 获取当前价目并返回只可使用一次的报价 ID；费用信息由页面内联展示。 */
 export async function confirmMeteredOperation(
   module: string,
   label: string,
   usage: OperationUsage,
-): Promise<string | null> {
+): Promise<string> {
   const catalog = await catalogApi.modulePrices();
   const price = catalog.items.find((item) => item.module === module);
   if (!price) throw new Error(`${label}当前未配置积分价格，暂不可用`);
@@ -84,8 +84,5 @@ export async function confirmMeteredOperation(
       },
     ],
   });
-  const confirmed = window.confirm(
-    `${label}预计消耗 ${quote.estimatedPoints} 积分，当前可用 ${quote.availablePoints} 积分。是否继续？`,
-  );
-  return confirmed ? quote.quoteId : null;
+  return quote.quoteId;
 }

@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { operationQuantity, textOperationUsage } from "../lib/meteredOperation";
+import { billingApi, catalogApi } from "@oral/api-client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  confirmMeteredOperation,
+  operationQuantity,
+  textOperationUsage,
+} from "../lib/meteredOperation";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("operationQuantity", () => {
   const usage = {
@@ -30,5 +39,38 @@ describe("operationQuantity", () => {
       tokens: 2,
       assets: 1,
     });
+  });
+
+  it("creates a one-time quote without showing a deduction confirmation popup", async () => {
+    vi.spyOn(catalogApi, "modulePrices").mockResolvedValue({
+      version: "test",
+      items: [
+        {
+          module: "asr",
+          displayName: "语音转写",
+          billingUnit: "per_action",
+          unitSize: 1,
+          pointsPerUnit: 2,
+          minimumPoints: 2,
+        },
+      ],
+    });
+    vi.spyOn(billingApi, "pricePreview").mockResolvedValue({
+      quoteId: "quote-test",
+      priceVersion: "test",
+      estimatedPoints: 2,
+      availablePoints: 100,
+      expiresAt: "2026-07-24T12:00:00Z",
+      items: [],
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await expect(
+      confirmMeteredOperation("asr", "上传转写", {
+        seconds: 60,
+        assets: 1,
+      }),
+    ).resolves.toBe("quote-test");
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
