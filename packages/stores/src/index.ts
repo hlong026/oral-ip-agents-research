@@ -4,7 +4,13 @@
  */
 import { create } from "zustand";
 import type { Persona, PipelineTask, Quota, User } from "@oral/types";
-import { authApi, billingApi, personaApi, setTokens } from "@oral/api-client";
+import {
+  authApi,
+  billingApi,
+  personaApi,
+  restoreSession,
+  setTokens,
+} from "@oral/api-client";
 
 // ---------- 会话 ----------
 interface SessionState {
@@ -31,6 +37,10 @@ export const useSession = create<SessionState>((set) => ({
   },
   async bootstrap() {
     try {
+      if (!(await restoreSession())) {
+        set({ user: null, ready: true });
+        return;
+      }
       const user = await authApi.me();
       set({ user, ready: true });
     } catch {
