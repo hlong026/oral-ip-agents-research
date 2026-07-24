@@ -3193,12 +3193,12 @@
         }
       }
     },
-    "/api/v1/webhooks/hifly": {
+    "/api/v1/webhooks/provider-callback": {
       "post": {
         "tags": ["webhook"],
-        "summary": "Webhook Hifly",
+        "summary": "Webhook Provider Callback",
         "description": "供应商任务完成回调统一入口\n按 type 分发：1=创作 2=数字人克隆 3=声音克隆\n幂等处理：event_id + task_id 双重去重\n安全：生产环境强制 HMAC-SHA256 验签",
-        "operationId": "webhook_hifly_api_v1_webhooks_hifly_post",
+        "operationId": "webhook_provider_callback_api_v1_webhooks_provider_callback_post",
         "responses": {
           "200": {
             "description": "Successful Response",

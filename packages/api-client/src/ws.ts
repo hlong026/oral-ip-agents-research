@@ -21,7 +21,6 @@ export type TaskEvent =
   | {
       kind: "provider_fallback";
       provider_kind?: string;
-      to?: string;
       taskId?: string;
       message?: string;
     }

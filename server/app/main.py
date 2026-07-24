@@ -20,6 +20,7 @@ from app.core.db import SessionLocal, init_models, verify_migrations_current
 from app.core.events import init_redis
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import TraceMiddleware
+from app.core.white_label import PUBLIC_PROVIDER_UNAVAILABLE, public_text
 from app.providers.base import ProviderError
 
 settings = get_settings()
@@ -97,9 +98,24 @@ async def provider_exc(request: Request, exc: ProviderError) -> JSONResponse:
         content={
             "detail": {
                 "code": "PROVIDER_UNAVAILABLE",
-                "message": str(exc)[:200] or "外部服务暂不可用，请稍后重试",
+                "message": PUBLIC_PROVIDER_UNAVAILABLE,
             }
         },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exc(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    if not request.url.path.startswith("/api/admin/v1"):
+        if isinstance(detail, dict) and "message" in detail:
+            detail = {**detail, "message": public_text(detail["message"])}
+        elif isinstance(detail, str):
+            detail = public_text(detail)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": detail},
+        headers=exc.headers,
     )
 
 
@@ -107,7 +123,7 @@ async def provider_exc(request: Request, exc: ProviderError) -> JSONResponse:
 async def unhandled_exc(request: Request, exc: Exception) -> JSONResponse:
     logger.exception(f"unhandled: {request.method} {request.url.path}")
     # 生产环境不向客户端泄露内部错误详情
-    msg = str(exc)[:200] if settings.app_env == "dev" else "服务器内部错误"
+    msg = public_text(exc, "服务器内部错误") if settings.app_env == "dev" else "服务器内部错误"
     return JSONResponse(status_code=500, content={"detail": {"code": "INTERNAL", "message": msg}})
 
 

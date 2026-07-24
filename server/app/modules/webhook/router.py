@@ -16,8 +16,9 @@ router = APIRouter(prefix="/webhooks", tags=["webhook"])
 _settings = get_settings()
 
 
-@router.post("/hifly")
-async def webhook_hifly(request: Request, db: AsyncSession = Depends(get_db)):
+@router.post("/provider-callback")
+@router.post("/hifly", include_in_schema=False)
+async def webhook_provider_callback(request: Request, db: AsyncSession = Depends(get_db)):
     """
     供应商任务完成回调统一入口
     按 type 分发：1=创作 2=数字人克隆 3=声音克隆

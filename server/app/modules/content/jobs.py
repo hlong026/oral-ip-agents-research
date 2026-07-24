@@ -12,6 +12,7 @@ from app.core.db import SessionLocal
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
 from app.core.storage import read_bytes, save_bytes
+from app.core.white_label import public_error_message, public_metadata
 from app.modules.billing.service import (
     attach_reservation,
     quote_operation_unit,
@@ -20,6 +21,7 @@ from app.modules.billing.service import (
     reserve_metered_operation,
     settle_reservation,
 )
+from app.providers.base import ProviderError
 from app.providers.duration_probe import probe_media_bytes
 
 from . import repository
@@ -205,7 +207,7 @@ async def _create_and_schedule(
     except BaseException as exc:
         logger.exception("content_job_enqueue_failed", job_id=job.id, kind=kind)
         job.status = "failed"
-        job.error = f"任务入队失败：{exc}"[:500]
+        job.error = "后台任务暂时不可用，请稍后重试"
         await db.commit()
         await release_reservation(db, reservation_id, user_id)
         raise HTTPException(
@@ -361,16 +363,13 @@ def _billing_step(kind: str) -> str:
 
 
 def _error_message(exc: BaseException) -> str:
-    if isinstance(exc, HTTPException):
-        detail = exc.detail
-        if isinstance(detail, dict):
-            return str(detail.get("message") or detail.get("code") or "处理失败")[:500]
-        return str(detail)[:500]
-    return str(exc)[:500] or type(exc).__name__
+    if not isinstance(exc, (HTTPException, ProviderError)):
+        return str(exc)[:500] or type(exc).__name__
+    return public_error_message(exc)
 
 
 def to_out(job: ContentJob) -> ContentJobOut:
-    result = json.loads(job.result_json or "{}")
+    result = public_metadata(json.loads(job.result_json or "{}"))
     return ContentJobOut(
         id=job.id,
         kind=job.kind,
@@ -378,7 +377,7 @@ def to_out(job: ContentJob) -> ContentJobOut:
         progress=job.progress,
         stage=job.stage,
         result=result or None,
-        error=job.error,
+        error="处理失败，请稍后重试" if job.error else "",
         createdAt=job.created_at.astimezone(UTC).isoformat(),
         updatedAt=job.updated_at.astimezone(UTC).isoformat(),
     )

@@ -47,9 +47,7 @@ function CloneForm({ onDone }: { onDone: () => void }) {
     <div className="glass-strong space-y-3 p-5" id="clone">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">克隆一个新声音</h2>
-        <span className="text-xs text-text-3">
-          MiniMax Speech-02 · 约 10 分钟
-        </span>
+        <span className="text-xs text-text-3">安全训练 · 约 10 分钟</span>
       </div>
       <div>
         <label className="label">声音名称</label>
@@ -289,11 +287,6 @@ export default function VoicesPage() {
                 默认声音
               </span>
             )}
-            {boundVoice && (
-              <span className="chip border-info/40 text-info">
-                {boundVoice.provider}
-              </span>
-            )}
           </div>
           <div className="mt-1.5 text-sm text-text-3">
             {boundVoice
@@ -420,7 +413,7 @@ export default function VoicesPage() {
                       {ip ? (
                         <span className="chip text-[11px]">{ip.name}</span>
                       ) : (
-                        v.provider
+                        "暂未绑定 IP"
                       )}
                     </span>
                     {v.status === "ready" &&

@@ -22,6 +22,7 @@ from app.core.config import get_settings
 from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
 from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
+from app.core.white_label import public_model_name
 from app.providers.base import ProviderError
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
@@ -348,7 +349,10 @@ async def parse_upload(
     except StorageConfigurationError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "MEDIA_PUBLIC_URL_REQUIRED", "message": str(exc)},
+            detail={
+                "code": "MEDIA_PUBLIC_URL_REQUIRED",
+                "message": "媒体处理服务暂不可用，请联系管理员检查存储配置",
+            },
         ) from exc
     except MediaProcessingError as exc:
         logger.warning("upload_audio_extraction_failed", filename=filename, error=str(exc)[:300])
@@ -654,7 +658,7 @@ async def batch_rewrite(
         "extra_prompt": prompt or "",
     }
 
-    items: list[BatchRewriteItemOut] = []
+    candidates: list[tuple[BatchRewriteItemOut, str]] = []
     for strategy, temperature in _VARIANT_STRATEGIES[:count]:
         candidate, provider_name = await registry.run_with_fallback(
             "llm",
@@ -673,19 +677,23 @@ async def batch_rewrite(
             candidate,
             text,
         )
-        items.append(
-            BatchRewriteItemOut(
-                text=candidate,
-                similarity=similarity_result.score,
-                strategy=strategy,
-                providerName=provider_name,
+        candidates.append(
+            (
+                BatchRewriteItemOut(
+                    text=candidate,
+                    similarity=similarity_result.score,
+                    strategy=strategy,
+                    providerName=public_model_name(provider_name),
+                ),
+                provider_name,
             )
         )
 
-    items.sort(key=lambda item: item.similarity)
-    if script_id and items:
-        best = items[0]
-        await _append_generated_version(db, user_id, script_id, best.text, best.providerName, best.similarity)
+    candidates.sort(key=lambda candidate: candidate[0].similarity)
+    items = [item for item, _provider_name in candidates]
+    if script_id and candidates:
+        best, best_provider_name = candidates[0]
+        await _append_generated_version(db, user_id, script_id, best.text, best_provider_name, best.similarity)
     logger.info(
         "batch_rewrite_done",
         user_id=user_id,
@@ -797,7 +805,7 @@ def to_out(s: Script) -> ScriptOut:
         rewrittenText=s.rewritten_text,
         similarityScore=s.similarity_score,
         currentVersion=s.current_version,
-        modelName=s.model_name,
+        modelName=public_model_name(s.model_name),
         promptVersion=s.prompt_version,
         status=s.status,
         createdAt=s.created_at.astimezone(UTC).isoformat(),
@@ -810,7 +818,7 @@ def version_to_out(version: ScriptVersion) -> ScriptVersionOut:
         version=version.version,
         kind=version.kind,
         text=version.text,
-        modelName=version.model_name,
+        modelName=public_model_name(version.model_name),
         promptVersion=version.prompt_version,
         createdAt=version.created_at.astimezone(UTC).isoformat(),
     )

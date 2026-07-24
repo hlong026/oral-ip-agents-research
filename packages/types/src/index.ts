@@ -222,7 +222,6 @@ export interface Voice {
   id: string;
   name: string;
   source: "clone" | "builtin";
-  provider: string;
   gender: string;
   emotion: string;
   sampleUrl?: string | null;
@@ -235,7 +234,6 @@ export interface Avatar {
   id: string;
   name: string;
   source: "clone" | "public";
-  provider: string;
   style?: string;
   coverUrl?: string | null;
   previewUrl?: string | null;

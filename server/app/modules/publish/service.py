@@ -21,6 +21,7 @@ from app.core.events import CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
 from app.core.logging import get_logger
 from app.core.storage import read_bytes, save_bytes
+from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.registry import registry
 
@@ -69,7 +70,7 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
         title=j.title,
         status=j.status,
         scheduledAt=j.scheduled_at or None,
-        error=j.error,
+        error="发布失败，请稍后重试" if j.error else "",
         postId=j.post_id,
         videoUrl=f"/media/{j.video_key}" if j.video_key else None,
         packageUrl=f"/media/{j.export_key}" if j.export_key else None,
@@ -539,15 +540,16 @@ async def _run_job(job_id: str) -> None:
                 user_id=job.user_id,
                 detail=f"job_id={job_id},platform={job.platform},error={str(e)[:200]}",
             )
+            safe_error = public_error_message(e, "发布失败，请稍后重试")
             job.status = "failed"
-            job.error = str(e)[:300]
+            job.error = safe_error
             await repo.save_job(db, job)
             await notify_user(
                 db,
                 job.user_id,
                 "error",
                 f"{PLATFORM_NAMES.get(job.platform)}发布失败",
-                f"{str(e)[:160]}。可重试或导出完整人工发布包。",
+                f"{safe_error}。可重试或导出完整人工发布包。",
             )
             await emit(
                 CHANNEL_TASKS, {"kind": "publish_updated", "jobId": job.id, "userId": job.user_id, "status": "failed"}

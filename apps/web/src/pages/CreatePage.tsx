@@ -895,8 +895,8 @@ function StepCompose({
       </div>
 
       <div className="rounded-xl border border-stroke bg-white/[0.02] p-4 text-xs text-text-3">
-        合成内核：FFmpeg 云端 Worker · 字幕双模式（TTS 字级时间戳优先，ASR
-        校准兜底）· BGM 自动闪避 · 1080p
+        云端智能合成 · 字幕双模式（语音时间戳优先，自动校准兜底）·
+        背景音乐自动闪避 · 1080p
       </div>
     </div>
   );

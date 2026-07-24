@@ -151,10 +151,9 @@ class ProviderRegistry:
                         {
                             "kind": "provider_fallback",
                             "provider_kind": kind,
-                            "to": provider.name,
                             "taskId": task_id,
                             "traceId": trace_id,
-                            "message": f"{kind} 已降级到 {provider.name}",
+                            "message": "服务已自动切换备用通道",
                         },
                     )
                 return result, provider.name
