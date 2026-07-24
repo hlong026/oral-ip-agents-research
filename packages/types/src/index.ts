@@ -294,6 +294,18 @@ export interface BatchRewriteResult {
   outline: string;
 }
 
+export interface ContentJob<TResult = Record<string, unknown>> {
+  id: string;
+  kind: "parse_url" | "parse_upload" | "rewrite" | "similarity";
+  status: "pending" | "running" | "done" | "failed";
+  progress: number;
+  stage: string;
+  result?: TResult | null;
+  error: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 文案资产（文案工坊） */
 export interface Script {
   id: string;

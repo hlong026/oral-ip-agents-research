@@ -60,6 +60,18 @@ class RewriteOut(BaseModel):
     validationPassed: bool = True  # 校验是否通过
 
 
+class ContentJobOut(BaseModel):
+    id: str
+    kind: str
+    status: str
+    progress: int
+    stage: str
+    result: dict | None = None
+    error: str = ""
+    createdAt: str
+    updatedAt: str
+
+
 class BatchRewriteIn(BaseModel):
     text: str = Field(min_length=1, max_length=50_000)
     intensity: str = "structure"

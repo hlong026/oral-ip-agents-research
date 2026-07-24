@@ -11,9 +11,11 @@ from app.core.deps import get_current_active_persona_id, get_current_user_id
 from app.modules.billing.service import metered_operation, quote_operation_unit
 from app.providers.duration_probe import probe_media_bytes
 
+from . import jobs
 from .schemas import (
     BatchRewriteIn,
     BatchRewriteOut,
+    ContentJobOut,
     ParseIn,
     ParseOut,
     ProbeUrlIn,
@@ -134,6 +136,45 @@ async def api_parse(
         return await parse_url(db, user_id, target, persona_id, duration)
 
 
+@router.post(
+    "/jobs/parse",
+    response_model=ContentJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def api_submit_parse_job(
+    url: str | None = Form(None),
+    quoteId: str | None = Form(None),
+    file: UploadFile | None = File(None),
+    user_id: str = Depends(get_current_user_id),
+    persona_id: str | None = Depends(get_current_active_persona_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContentJobOut:
+    if file is not None:
+        filename = file.filename or ""
+        data = await file.read(_MAX_UPLOAD_BYTES + 1)
+        _validate_upload(filename, data)
+        return await jobs.submit_parse_upload(
+            db,
+            user_id=user_id,
+            persona_id=persona_id,
+            filename=filename,
+            data=data,
+            quote_id=quoteId,
+        )
+    if not url:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INPUT_REQUIRED", "message": "请提供链接或上传文件"},
+        )
+    return await jobs.submit_parse_url(
+        db,
+        user_id=user_id,
+        persona_id=persona_id,
+        url=url,
+        quote_id=quoteId,
+    )
+
+
 @router.post("/parse/json", response_model=ParseOut)
 async def api_parse_json(
     body: ParseIn,
@@ -182,6 +223,27 @@ async def api_rewrite(body: RewriteIn, user_id: str = Depends(get_current_user_i
         return await rewrite(db, user_id, body.text, body.intensity, body.prompt, body.scriptId)
 
 
+@router.post(
+    "/jobs/rewrite",
+    response_model=ContentJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def api_submit_rewrite_job(
+    body: RewriteIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContentJobOut:
+    return await jobs.submit_rewrite(
+        db,
+        user_id=user_id,
+        text=body.text,
+        intensity=body.intensity,
+        prompt=body.prompt,
+        script_id=body.scriptId,
+        quote_id=body.quoteId,
+    )
+
+
 @router.post("/rewrite/batch", response_model=BatchRewriteOut)
 async def api_batch_rewrite(
     body: BatchRewriteIn,
@@ -222,6 +284,33 @@ async def api_similarity(
         {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
     ):
         return await similarity(body.text)
+
+
+@router.post(
+    "/jobs/similarity",
+    response_model=ContentJobOut,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def api_submit_similarity_job(
+    body: SimilarityIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContentJobOut:
+    return await jobs.submit_similarity(
+        db,
+        user_id=user_id,
+        text=body.text,
+        quote_id=body.quoteId,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=ContentJobOut)
+async def api_content_job(
+    job_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> ContentJobOut:
+    return await jobs.get_job(db, user_id, job_id)
 
 
 @router.post("/topics", response_model=TopicsOut)

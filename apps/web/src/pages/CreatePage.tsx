@@ -200,8 +200,13 @@ function StepLink({
         seconds,
         assets: 1,
       });
-      setProgress({ value: 55, label: "正在识别音频，较长视频需要一些时间" });
-      const res = await contentApi.parse(undefined, file, quoteId);
+      const res = await contentApi.parse(undefined, file, quoteId, (job) =>
+        setProgress({
+          value: job.progress,
+          label: job.stage,
+          ariaLabel: "视频转写真实进度",
+        }),
+      );
       if (res.transcript) {
         setWiz({
           ...wiz,
@@ -358,34 +363,6 @@ function StepScript({
   const loadQuota = useQuota((state) => state.load);
   const currentIp = useIp((state) => state.current);
 
-  useEffect(() => {
-    if (operation !== "rewrite") return;
-    const hint =
-      "预计进度：模型将依次完成结构分析、IP 大纲和完整改写，通常需要 1–2 分钟。";
-    const progressBase = {
-      ariaLabel: "IP 改写预计进度",
-      hint,
-    };
-    setProgress({
-      ...progressBase,
-      value: 12,
-      label: "正在校验 IP 与改写要求",
-    });
-    const stages = [
-      [15_000, 32, "正在拆解原文结构"],
-      [35_000, 55, "正在生成 IP 化大纲"],
-      [60_000, 78, "正在生成完整改写文案"],
-      [90_000, 92, "正在完成去重与质量检查"],
-    ] as const;
-    const timers = stages.map(([delay, value, label]) =>
-      window.setTimeout(
-        () => setProgress({ ...progressBase, value, label }),
-        delay,
-      ),
-    );
-    return () => timers.forEach(window.clearTimeout);
-  }, [operation]);
-
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
     if (wiz.scriptText || (!wiz.sourceUrl && !wiz.topic)) return;
@@ -415,6 +392,12 @@ function StepScript({
             wiz.sourceUrl,
             undefined,
             parseQuoteId,
+            (job) =>
+              setProgress({
+                value: job.progress,
+                label: job.stage,
+                ariaLabel: "视频转写真实进度",
+              }),
           );
           if (res.degraded) setDegraded(true);
           const text = res.transcript?.text ?? "";
@@ -445,6 +428,12 @@ function StepScript({
             undefined,
             undefined,
             quoteId,
+            (job) =>
+              setProgress({
+                value: job.progress,
+                label: job.stage,
+                ariaLabel: "文案生成真实进度",
+              }),
           );
           setWiz({
             ...wiz,
@@ -497,6 +486,13 @@ function StepScript({
         requirement || undefined,
         wiz.scriptId || undefined,
         quoteId,
+        (job) =>
+          setProgress({
+            value: job.progress,
+            label: job.stage,
+            ariaLabel: "IP 改写真实进度",
+            hint: "结构分析、IP 大纲、完整改写与质量校验均在后台执行。",
+          }),
       );
       setWiz({
         ...wiz,
@@ -510,7 +506,7 @@ function StepScript({
       setProgress({
         value: 100,
         label: "IP 改写完成",
-        ariaLabel: "IP 改写预计进度",
+        ariaLabel: "IP 改写真实进度",
       });
     } catch (e) {
       setProgress(null);
@@ -536,8 +532,19 @@ function StepScript({
         textOperationUsage(wiz.scriptText),
       );
       if (!quoteId) return;
-      const sim = await contentApi.similarity(wiz.scriptText, quoteId);
+      const sim = await contentApi.similarity(wiz.scriptText, quoteId, (job) =>
+        setProgress({
+          value: job.progress,
+          label: job.stage,
+          ariaLabel: "文案分析真实进度",
+        }),
+      );
       setWiz({ ...wiz, similarity: sim.score });
+      setProgress({
+        value: 100,
+        label: "文案分析完成",
+        ariaLabel: "文案分析真实进度",
+      });
     } finally {
       setLoading(false);
       setOperation(null);

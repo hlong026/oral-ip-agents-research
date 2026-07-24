@@ -9,6 +9,14 @@ import type { FeedEvent } from "@oral/types";
 
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
+  | {
+      kind: "content_job_updated";
+      jobId: string;
+      userId?: string;
+      status: string;
+      progress: number;
+      stage: string;
+    }
   | { kind: "publish_updated"; jobId: string; userId?: string; status: string }
   | {
       kind: "provider_fallback";

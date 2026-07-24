@@ -133,7 +133,15 @@ describe("CreatePage 来源模式切换", () => {
     vi.mocked(mediaDurationSeconds).mockResolvedValue(170);
     vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-upload");
     vi.mocked(contentApi.parse).mockImplementation(
-      () => new Promise(() => undefined),
+      (_url, _file, _quoteId, onProgress) => {
+        onProgress?.({
+          id: "upload-job",
+          status: "running",
+          progress: 55,
+          stage: "正在提取音轨并转写文案",
+        });
+        return new Promise(() => undefined);
+      },
     );
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -157,12 +165,10 @@ describe("CreatePage 来源模式切换", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("progressbar", { name: "视频转写进度" }),
+        screen.getByRole("progressbar", { name: "视频转写真实进度" }),
       ).toHaveAttribute("aria-valuenow", "55"),
     );
-    expect(
-      screen.getByText("正在识别音频，较长视频需要一些时间"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("正在提取音轨并转写文案")).toBeInTheDocument();
   });
 
   it("转写成功后刷新侧栏积分余额", async () => {
@@ -305,6 +311,7 @@ describe("CreatePage 来源模式切换", () => {
         "保留案例，结尾改成邀请私信",
         "script-bound-to-ip",
         "quote-rewrite",
+        expect.any(Function),
       ),
     );
     expect(screen.getByRole("textbox", { name: "提取原文" })).toHaveValue(
@@ -315,7 +322,7 @@ describe("CreatePage 来源模式切换", () => {
     ).toHaveValue("结合IP生成的新文案");
   });
 
-  it("IP改写期间显示分阶段预计进度和长耗时说明", async () => {
+  it("IP改写期间显示后台任务返回的真实阶段进度", async () => {
     vi.mocked(contentApi.probe).mockResolvedValue({ durationSeconds: 170 });
     vi.mocked(confirmMeteredOperation)
       .mockResolvedValueOnce("quote-link")
@@ -331,7 +338,15 @@ describe("CreatePage 来源模式切换", () => {
       scriptId: "script-progress",
     });
     vi.mocked(contentApi.rewrite).mockImplementation(
-      () => new Promise(() => undefined),
+      (_text, _intensity, _prompt, _scriptId, _quoteId, onProgress) => {
+        onProgress?.({
+          id: "rewrite-job",
+          status: "running",
+          progress: 45,
+          stage: "正在生成 IP 化大纲",
+        });
+        return new Promise(() => undefined);
+      },
     );
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -359,13 +374,12 @@ describe("CreatePage 来源模式切换", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole("progressbar", { name: "IP 改写预计进度" }),
-      ).toHaveAttribute("aria-valuenow", "12"),
+        screen.getByRole("progressbar", { name: "IP 改写真实进度" }),
+      ).toHaveAttribute("aria-valuenow", "45"),
     );
+    expect(screen.getByText("正在生成 IP 化大纲")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "预计进度：模型将依次完成结构分析、IP 大纲和完整改写，通常需要 1–2 分钟。",
-      ),
+      screen.getByText("结构分析、IP 大纲、完整改写与质量校验均在后台执行。"),
     ).toBeInTheDocument();
   });
 });

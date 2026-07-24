@@ -51,9 +51,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with SessionLocal() as db:
         await seed_prices(db)
         await seed_initial_price_catalog(db)
+        from app.modules.content.jobs import recover_pending_jobs
         from app.modules.pipeline.service import recover_incomplete_tasks
         from app.modules.publish.service import recover_publish_jobs
 
+        await recover_pending_jobs(db)
         await recover_incomplete_tasks(db)
         await recover_publish_jobs(db)
     # 发布模块：启动 Cookie 心跳检测后台任务

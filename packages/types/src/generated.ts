@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-24T08:31:33.419Z
+ * API 版本：1.0.0 · 生成时间：2026-07-24T13:58:57.419Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -138,6 +138,12 @@ export interface Body_api_parse_api_v1_content_parse_post {
   file?: string | null;
 }
 
+export interface Body_api_submit_parse_job_api_v1_content_jobs_parse_post {
+  url?: string | null;
+  quoteId?: string | null;
+  file?: string | null;
+}
+
 export interface CloneStatusOut {
   id: string;
   status: string;
@@ -158,6 +164,18 @@ export interface CodeStatsOut {
   used?: number;
   expired?: number;
   revoked?: number;
+}
+
+export interface ContentJobOut {
+  id: string;
+  kind: string;
+  status: string;
+  progress: number;
+  stage: string;
+  result?: Record<string, unknown> | null;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ConversationOut {

@@ -10,6 +10,7 @@ import base64
 import ipaddress
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC
 from pathlib import Path
 from urllib.parse import urlparse
@@ -282,9 +283,9 @@ async def parse_by_id(
 async def probe_url_duration(url: str, *, required: bool) -> float | None:
     """在报价前解析直链，并只返回供应商值或 ffprobe 验证值。"""
     resolved = resolve_input(url)
-    result: DouyidouParseResult | None = None
+    result = _recent_probe_result(resolved.url)
     fallback_chain = registry.parse_chain
-    if await registry.provider_enabled("douyidou"):
+    if result is None and await registry.provider_enabled("douyidou"):
         fallback_chain = [provider for provider in registry.parse_chain if provider.name != "douyidou"]
         try:
             result = await DouyidouParser().parse_url_full(resolved.url)
@@ -331,9 +332,10 @@ async def parse_upload(
     data: bytes,
     persona_id: str | None,
     duration_seconds: float | None = None,
+    storage_key: str | None = None,
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
-    key = await save_bytes("uploads", filename, data)
+    key = storage_key or await save_bytes("uploads", filename, data)
     try:
         threshold = await get_config_int("asr_flash_threshold_sec", 300)
         if duration_seconds is not None and duration_seconds <= threshold:
@@ -435,7 +437,13 @@ async def parse_text(
 
 
 async def rewrite(
-    db: AsyncSession, user_id: str, text: str, intensity: str, prompt: str | None, script_id: str | None
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    intensity: str,
+    prompt: str | None,
+    script_id: str | None,
+    progress_callback: Callable[[int, str], Awaitable[None]] | None = None,
 ) -> RewriteOut:
     """三阶段IP仿写引擎：结构拆解 → IP化大纲 → 全文生成+校验闭环"""
     start_time = time.perf_counter()
@@ -474,6 +482,8 @@ async def rewrite(
 
     # ---- Light 模式：单步人设润色 ----
     if intensity == "light":
+        if progress_callback:
+            await progress_callback(35, "正在结合当前 IP 润色文案")
         if persona_ctx:
             light_persona_ctx = persona_ctx
             if custom_prompt:
@@ -490,13 +500,19 @@ async def rewrite(
         return RewriteOut(text=result, validationPassed=passed)
 
     # ---- Stage 1: 结构拆解 ----
+    if progress_callback:
+        await progress_callback(20, "正在分析原文结构")
     mode = "theme" if intensity == "theme" else "full"
     structure = await llm.analyze_structure(text, mode=mode)
 
     # ---- Stage 2: IP化大纲 ----
+    if progress_callback:
+        await progress_callback(45, "正在生成 IP 化大纲")
     outline = await llm.generate_outline(structure, persona_ctx, intensity, duration)
 
     # ---- Stage 3: 全文生成 ----
+    if progress_callback:
+        await progress_callback(65, "正在生成完整改写文案")
     constraints = {
         "duration": duration,
         "cta_style": cta_style or "关注收藏",
@@ -506,6 +522,8 @@ async def rewrite(
     result = await llm.generate_script(outline, persona_ctx, constraints)
 
     # ---- 校验闭环：禁忌词 + 去重检测（最多2轮再改写） ----
+    if progress_callback:
+        await progress_callback(82, "正在执行禁忌词和重复度校验")
     validation_passed = True
     final_score = 0.0
     for _round in range(2):

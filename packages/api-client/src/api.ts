@@ -5,6 +5,7 @@ import type {
   AuthTokens,
   Avatar,
   BatchRewriteResult,
+  ContentJob,
   DashboardOverview,
   FeedEvent,
   ModulePriceCatalog,
@@ -33,7 +34,7 @@ import type {
   Voice,
   WordTimestamp,
 } from "@oral/types";
-import { http } from "./http";
+import { HttpError, http } from "./http";
 
 // ---------- auth ----------
 export const authApi = {
@@ -130,6 +131,42 @@ export const personaApi = {
 };
 
 // ---------- content（文案模块 F-101~F-106） ----------
+export type ContentJobProgress = Pick<
+  ContentJob,
+  "id" | "status" | "progress" | "stage"
+>;
+
+const CONTENT_JOB_POLL_MS = 800;
+const CONTENT_JOB_TIMEOUT_MS = 30 * 60 * 1000;
+
+async function waitForContentJob<TResult>(
+  submitted: ContentJob<TResult>,
+  onProgress?: (progress: ContentJobProgress) => void,
+): Promise<TResult> {
+  const deadline = Date.now() + CONTENT_JOB_TIMEOUT_MS;
+  let job = submitted;
+  while (true) {
+    onProgress?.(job);
+    if (job.status === "done" && job.result) return job.result;
+    if (job.status === "failed") {
+      throw new HttpError(502, {
+        code: "CONTENT_JOB_FAILED",
+        message: job.error || "后台文案任务执行失败",
+      });
+    }
+    if (Date.now() >= deadline) {
+      throw new HttpError(504, {
+        code: "CONTENT_JOB_TIMEOUT",
+        message: "后台任务仍在执行，请稍后重试",
+      });
+    }
+    await new Promise((resolve) =>
+      window.setTimeout(resolve, CONTENT_JOB_POLL_MS),
+    );
+    job = await http.get<ContentJob<TResult>>(`/content/jobs/${job.id}`);
+  }
+}
+
 export const contentApi = {
   probe: (url: string) =>
     http.post<{ durationSeconds: number }>("/content/probe", { url }),
@@ -137,17 +174,21 @@ export const contentApi = {
     url?: string,
     file?: File,
     quoteId?: string,
+    onProgress?: (progress: ContentJobProgress) => void,
   ): Promise<ParseResult> => {
+    let request: Promise<ContentJob<ParseResult>>;
     if (file) {
       const fd = new FormData();
       fd.append("file", file);
       if (quoteId) fd.append("quoteId", quoteId);
-      return http.post<ParseResult>("/content/parse", fd);
+      request = http.post<ContentJob<ParseResult>>("/content/jobs/parse", fd);
+    } else {
+      const fd = new FormData();
+      if (url) fd.append("url", url);
+      if (quoteId) fd.append("quoteId", quoteId);
+      request = http.post<ContentJob<ParseResult>>("/content/jobs/parse", fd);
     }
-    const fd = new FormData();
-    if (url) fd.append("url", url);
-    if (quoteId) fd.append("quoteId", quoteId);
-    return http.post<ParseResult>("/content/parse", fd);
+    return request.then((job) => waitForContentJob(job, onProgress));
   },
   rewrite: (
     text: string,
@@ -155,14 +196,17 @@ export const contentApi = {
     prompt?: string,
     scriptId?: string,
     quoteId?: string,
+    onProgress?: (progress: ContentJobProgress) => void,
   ) =>
-    http.post<RewriteResult>("/content/rewrite", {
-      text,
-      intensity,
-      prompt,
-      scriptId,
-      quoteId,
-    }),
+    http
+      .post<ContentJob<RewriteResult>>("/content/jobs/rewrite", {
+        text,
+        intensity,
+        prompt,
+        scriptId,
+        quoteId,
+      })
+      .then((job) => waitForContentJob(job, onProgress)),
   batchRewrite: (
     text: string,
     intensity: RewriteIntensity,
@@ -179,8 +223,17 @@ export const contentApi = {
       scriptId,
       quoteId,
     }),
-  similarity: (text: string, quoteId?: string) =>
-    http.post<SimilarityResult>("/content/similarity", { text, quoteId }),
+  similarity: (
+    text: string,
+    quoteId?: string,
+    onProgress?: (progress: ContentJobProgress) => void,
+  ) =>
+    http
+      .post<ContentJob<SimilarityResult>>("/content/jobs/similarity", {
+        text,
+        quoteId,
+      })
+      .then((job) => waitForContentJob(job, onProgress)),
   topics: (keyword: string, quoteId?: string) =>
     http.post<{ topics: string[] }>("/content/topics", { keyword, quoteId }),
   scripts: () => http.get<Script[]>("/content/scripts"),

@@ -1362,6 +1362,49 @@
         ]
       }
     },
+    "/api/v1/content/jobs/parse": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Parse Job",
+        "operationId": "api_submit_parse_job_api_v1_content_jobs_parse_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_api_submit_parse_job_api_v1_content_jobs_parse_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/content/parse/json": {
       "post": {
         "tags": ["content"],
@@ -1428,6 +1471,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RewriteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/content/jobs/rewrite": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Rewrite Job",
+        "operationId": "api_submit_rewrite_job_api_v1_content_jobs_rewrite_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewriteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
                 }
               }
             }
@@ -1536,6 +1623,95 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/v1/content/jobs/similarity": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Similarity Job",
+        "operationId": "api_submit_similarity_job_api_v1_content_jobs_similarity_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarityIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/content/jobs/{job_id}": {
+      "get": {
+        "tags": ["content"],
+        "summary": "Api Content Job",
+        "operationId": "api_content_job_api_v1_content_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/content/topics": {
@@ -5947,6 +6123,46 @@
         "type": "object",
         "title": "Body_api_parse_api_v1_content_parse_post"
       },
+      "Body_api_submit_parse_job_api_v1_content_jobs_parse_post": {
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "quoteId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quoteid"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "title": "Body_api_submit_parse_job_api_v1_content_jobs_parse_post"
+      },
       "CloneStatusOut": {
         "properties": {
           "id": {
@@ -6036,6 +6252,66 @@
         "type": "object",
         "title": "CodeStatsOut",
         "description": "码统计"
+      },
+      "ContentJobOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "progress",
+          "stage",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ContentJobOut"
       },
       "ConversationOut": {
         "properties": {

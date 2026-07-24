@@ -14,6 +14,13 @@ def run_pipeline_task(task_id: str, from_step: str | None = None) -> None:
     asyncio.run(run_task(task_id, from_step))
 
 
+@dramatiq.actor(queue_name="content", max_retries=0, time_limit=1_800_000)
+def run_content_job(job_id: str) -> None:
+    from app.modules.content.jobs import run_content_job as run
+
+    asyncio.run(run(job_id))
+
+
 @dramatiq.actor(queue_name="publish", max_retries=0, time_limit=900_000)
 def run_publish_job(job_id: str) -> None:
     from app.modules.publish.service import _run_job
