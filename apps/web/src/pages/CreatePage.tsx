@@ -46,6 +46,7 @@ interface Wizard {
   sourceUrl: string;
   topic: string;
   scriptText: string;
+  scriptId: string;
   similarity: number | null;
   voiceId: string;
   avatarId: string;
@@ -61,6 +62,7 @@ const initialWizard: Wizard = {
   sourceUrl: "",
   topic: "",
   scriptText: "",
+  scriptId: "",
   similarity: null,
   voiceId: "",
   avatarId: "",
@@ -175,6 +177,7 @@ function StepLink({
       sourceUrl: nextTab === "url" ? wiz.sourceUrl : "",
       topic: nextTab === "topic" ? wiz.topic : "",
       scriptText: nextTab === "script" ? wiz.scriptText : "",
+      scriptId: nextTab === "script" ? wiz.scriptId : "",
     });
   };
 
@@ -195,6 +198,7 @@ function StepLink({
         setWiz({
           ...wiz,
           scriptText: res.transcript.text,
+          scriptId: res.scriptId ?? "",
           sourceUrl: "",
           topic: "",
         });
@@ -243,7 +247,13 @@ function StepLink({
           <LinkSourceInput
             value={wiz.sourceUrl}
             onChange={(v) =>
-              setWiz({ ...wiz, sourceUrl: v, topic: "", scriptText: "" })
+              setWiz({
+                ...wiz,
+                sourceUrl: v,
+                topic: "",
+                scriptText: "",
+                scriptId: "",
+              })
             }
             onUpload={(f) => void upload(f)}
             uploading={uploading}
@@ -275,6 +285,7 @@ function StepLink({
                 topic: e.target.value,
                 sourceUrl: "",
                 scriptText: "",
+                scriptId: "",
               })
             }
           />
@@ -292,6 +303,7 @@ function StepLink({
               setWiz({
                 ...wiz,
                 scriptText: e.target.value,
+                scriptId: "",
                 sourceUrl: "",
                 topic: "",
               })
@@ -316,6 +328,7 @@ function StepScript({
   const [error, setError] = useState("");
   const [degraded, setDegraded] = useState(false);
   const [intensity, setIntensity] = useState<RewriteIntensity>("structure");
+  const [customPrompt, setCustomPrompt] = useState("");
   const [structure, setStructure] = useState<Record<string, unknown> | null>(
     null,
   );
@@ -324,6 +337,7 @@ function StepScript({
   const [progress, setProgress] = useState<OperationProgress | null>(null);
   const startedInitialGeneration = useRef(false);
   const loadQuota = useQuota((state) => state.load);
+  const currentIp = useIp((state) => state.current);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
@@ -361,28 +375,13 @@ function StepScript({
             setProgress(null);
             return;
           }
-          setProgress({ value: 75, label: "转写完成，正在生成适配文案" });
-          const rewriteQuoteId = await confirmMeteredOperation(
-            "script_generation",
-            "生成仿写文案",
-            textOperationUsage(text),
-          );
-          setProgress({ value: 88, label: "正在整理结构与表达" });
-          const rw = await contentApi.rewrite(
-            text,
-            "structure",
-            undefined,
-            undefined,
-            rewriteQuoteId,
-          );
           setWiz({
             ...wiz,
-            scriptText: rw.text,
-            similarity: rw.similarity ?? null,
+            scriptText: text,
+            scriptId: res.scriptId ?? "",
+            similarity: null,
           });
-          if (rw.structure) setStructure(rw.structure);
-          if (rw.outline) setOutline(rw.outline);
-          setProgress({ value: 100, label: "文案处理完成" });
+          setProgress({ value: 100, label: "完整原文提取完成" });
         } else {
           const prompt = `请围绕选题「${wiz.topic}」生成 60 秒口播文案`;
           const quoteId = await confirmMeteredOperation(
@@ -423,18 +422,22 @@ function StepScript({
 
   const rewrite = async () => {
     setLoading(true);
+    setError("");
     try {
+      const requirement = customPrompt.trim();
       const quoteId = await confirmMeteredOperation(
         "script_generation",
         "仿写文案",
-        textOperationUsage(wiz.scriptText),
+        textOperationUsage(
+          requirement ? `${wiz.scriptText}\n${requirement}` : wiz.scriptText,
+        ),
       );
       if (!quoteId) return;
       const rw = await contentApi.rewrite(
         wiz.scriptText,
         intensity,
-        undefined,
-        undefined,
+        requirement || undefined,
+        wiz.scriptId || undefined,
         quoteId,
       );
       setWiz({
@@ -444,8 +447,15 @@ function StepScript({
       });
       if (rw.structure) setStructure(rw.structure);
       if (rw.outline) setOutline(rw.outline);
+    } catch (e) {
+      setError(
+        e instanceof HttpError
+          ? e.body.message
+          : "文案改写失败，请检查配置后重试",
+      );
     } finally {
       setLoading(false);
+      void loadQuota();
     }
   };
 
@@ -495,13 +505,6 @@ function StepScript({
           </button>
         ))}
         <div className="flex-1" />
-        <button
-          onClick={rewrite}
-          disabled={loading || !wiz.scriptText}
-          className="btn-ghost px-3 py-1 text-xs"
-        >
-          一键再改写
-        </button>
         <button
           onClick={checkSim}
           disabled={loading || !wiz.scriptText}
@@ -582,16 +585,42 @@ function StepScript({
         </div>
       )}
 
-      <textarea
-        className="input min-h-64 resize-y font-normal leading-relaxed"
-        placeholder={loading ? "AI 正在生成文案…" : "口播文案"}
-        value={wiz.scriptText}
-        onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value })}
-        disabled={loading && !wiz.scriptText}
-      />
+      <div>
+        <label className="label">原文 / 当前文案（可编辑）</label>
+        <textarea
+          className="input min-h-64 resize-y font-normal leading-relaxed"
+          placeholder={loading ? "AI 正在生成文案…" : "口播文案"}
+          value={wiz.scriptText}
+          onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value })}
+          disabled={loading && !wiz.scriptText}
+        />
+      </div>
       <div className="text-right text-xs text-text-3">
         {wiz.scriptText.length} 字 · 约{" "}
         {Math.ceil(wiz.scriptText.length * 0.28)} 秒
+      </div>
+
+      <div className="rounded-xl border border-stroke bg-white/[0.02] p-3">
+        <div className="mb-2 text-xs text-text-2">
+          当前 IP：
+          <span className="font-medium text-text-1">
+            {currentIp?.name ?? "未选择（将使用通用风格）"}
+          </span>
+        </div>
+        <label className="label">自定义改写要求（可选）</label>
+        <textarea
+          className="input min-h-20 resize-y"
+          placeholder="补充改写要求，如：保留案例，语气更克制"
+          value={customPrompt}
+          onChange={(event) => setCustomPrompt(event.target.value)}
+        />
+        <button
+          onClick={rewrite}
+          disabled={loading || !wiz.scriptText}
+          className="btn-primary mt-3 w-full"
+        >
+          {loading ? "正在按 IP 改写…" : "按当前 IP 改写"}
+        </button>
       </div>
     </div>
   );
@@ -903,6 +932,7 @@ export default function CreatePage() {
         setWiz((w) => ({
           ...w,
           scriptText: s.rewrittenText || s.originalText,
+          scriptId: s.id,
         }));
       });
       return;

@@ -19,6 +19,7 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       ...actual.contentApi,
       probe: vi.fn(),
       parse: vi.fn(),
+      rewrite: vi.fn(),
     },
     catalogApi: {
       ...actual.catalogApi,
@@ -41,6 +42,7 @@ describe("CreatePage 来源模式切换", () => {
   beforeEach(() => {
     vi.mocked(contentApi.probe).mockReset();
     vi.mocked(contentApi.parse).mockReset();
+    vi.mocked(contentApi.rewrite).mockReset();
     vi.mocked(confirmMeteredOperation).mockReset();
     vi.mocked(mediaDurationSeconds).mockReset();
     useQuota.setState({ quota: null, load: vi.fn() });
@@ -171,5 +173,110 @@ describe("CreatePage 来源模式切换", () => {
     expect(
       screen.getByRole("progressbar", { name: "视频转写进度" }),
     ).toHaveAttribute("aria-valuenow", "100");
+  });
+
+  it("链接转写完成后先展示原文，不自动调用改写", async () => {
+    vi.mocked(contentApi.probe).mockResolvedValue({ durationSeconds: 170 });
+    vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-link");
+    vi.mocked(contentApi.parse).mockResolvedValue({
+      transcript: {
+        text: "从音频识别出的完整原文",
+        words: [],
+        duration: 170,
+        language: "zh",
+      },
+      degraded: false,
+      scriptId: "script-from-link",
+    });
+    vi.mocked(contentApi.rewrite).mockResolvedValue({
+      text: "不应该自动出现的改写文案",
+      validationPassed: true,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("粘贴抖音 / 小红书视频链接或视频ID…"),
+      {
+        target: {
+          value: "https://www.douyin.com/jingxuan?modal_id=audio-first",
+        },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一步 →" }));
+
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText("口播文案")).toHaveValue(
+        "从音频识别出的完整原文",
+      ),
+    );
+    expect(contentApi.rewrite).not.toHaveBeenCalled();
+    expect(screen.getByText("完整原文提取完成")).toBeInTheDocument();
+  });
+
+  it("用户明确点击后携带自定义要求和文案资产执行IP改写", async () => {
+    vi.mocked(contentApi.probe).mockResolvedValue({ durationSeconds: 170 });
+    vi.mocked(confirmMeteredOperation)
+      .mockResolvedValueOnce("quote-link")
+      .mockResolvedValueOnce("quote-rewrite");
+    vi.mocked(contentApi.parse).mockResolvedValue({
+      transcript: {
+        text: "待改写的完整原文",
+        words: [],
+        duration: 170,
+        language: "zh",
+      },
+      degraded: false,
+      scriptId: "script-bound-to-ip",
+    });
+    vi.mocked(contentApi.rewrite).mockResolvedValue({
+      text: "结合IP生成的新文案",
+      validationPassed: true,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("粘贴抖音 / 小红书视频链接或视频ID…"),
+      {
+        target: {
+          value: "https://www.douyin.com/jingxuan?modal_id=custom-rewrite",
+        },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一步 →" }));
+    await screen.findByDisplayValue("待改写的完整原文");
+
+    fireEvent.change(
+      screen.getByPlaceholderText("补充改写要求，如：保留案例，语气更克制"),
+      { target: { value: "保留案例，结尾改成邀请私信" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "按当前 IP 改写" }));
+
+    await waitFor(() =>
+      expect(contentApi.rewrite).toHaveBeenCalledWith(
+        "待改写的完整原文",
+        "structure",
+        "保留案例，结尾改成邀请私信",
+        "script-bound-to-ip",
+        "quote-rewrite",
+      ),
+    );
   });
 });
