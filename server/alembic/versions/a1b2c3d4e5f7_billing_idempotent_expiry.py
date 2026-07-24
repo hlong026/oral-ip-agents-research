@@ -20,9 +20,7 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     # P0: CreditReservation 新增 settled_by 字段，追踪结算发起方
     with op.batch_alter_table("credit_reservations", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("settled_by", sa.String(64), nullable=False, server_default="")
-        )
+        batch_op.add_column(sa.Column("settled_by", sa.String(64), nullable=False, server_default=""))
     op.create_index("ix_credit_reservations_settled_by", "credit_reservations", ["settled_by"])
 
     # P0: 结算流水幂等唯一索引（同一 reservation 只允许一条 settle 记录）
@@ -37,12 +35,8 @@ def upgrade() -> None:
 
     # P1: CreditGrant 新增 status / expired_at 字段支持过期清零
     with op.batch_alter_table("credit_grants", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("status", sa.String(16), nullable=False, server_default="active")
-        )
-        batch_op.add_column(
-            sa.Column("expired_at", sa.DateTime(timezone=True), nullable=True)
-        )
+        batch_op.add_column(sa.Column("status", sa.String(16), nullable=False, server_default="active"))
+        batch_op.add_column(sa.Column("expired_at", sa.DateTime(timezone=True), nullable=True))
     op.create_index("ix_credit_grants_status", "credit_grants", ["status"])
 
     # P2: CreditLedger 用户+时间复合索引，加速消费明细分页查询

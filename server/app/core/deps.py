@@ -23,9 +23,7 @@ ADMIN_ROLES: frozenset[str] = frozenset({"admin", "ops", "finance", "auditor"})
 # - auditor: 只读审计（列表/审计日志/成本查看，无任何写操作）
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "admin": frozenset({"*"}),
-    "ops": frozenset(
-        {"users.read", "users.write", "activation.read", "activation.manage", "im.manage", "audit.read"}
-    ),
+    "ops": frozenset({"users.read", "users.write", "activation.read", "activation.manage", "im.manage", "audit.read"}),
     "finance": frozenset({"users.read", "billing.adjust", "catalog.read", "catalog.manage", "cost.read", "audit.read"}),
     "auditor": frozenset({"users.read", "activation.read", "catalog.read", "cost.read", "audit.read"}),
 }

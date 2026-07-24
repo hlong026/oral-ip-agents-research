@@ -216,7 +216,9 @@ function TrainForm({ onDone }: { onDone: () => void }) {
         <input
           ref={fileRef}
           type="file"
-          accept={mode === "video" ? "video/*,.mp4,.mov" : "image/*,.jpg,.jpeg,.png"}
+          accept={
+            mode === "video" ? "video/*,.mp4,.mov" : "image/*,.jpg,.jpeg,.png"
+          }
           className="hidden"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />

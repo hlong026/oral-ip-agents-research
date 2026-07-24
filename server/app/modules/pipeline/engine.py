@@ -136,9 +136,7 @@ async def step_asr(task: PipelineTask, ctx: dict) -> dict:
         "asr", registry.asr_chain, "transcribe", video_key, trace_id=task.trace_id, task_id=task.id
     )
     # 记录 ASR 真实时长，供结算审计和后续步骤使用
-    actual_duration = tr.duration if tr.duration > 0 else (
-        tr.words[-1].end if tr.words else 0.0
-    )
+    actual_duration = tr.duration if tr.duration > 0 else (tr.words[-1].end if tr.words else 0.0)
     return {
         "transcript": tr.text,
         "words": [{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],

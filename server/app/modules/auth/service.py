@@ -148,12 +148,12 @@ async def update_phone(db: AsyncSession, user_id: str, new_phone: str, password:
     old_phone = user.phone
     try:
         await repo.update_phone(db, user_id, new_phone)
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "PHONE_TAKEN", "message": "该手机号已被其他账号绑定"},
-        )
+        ) from exc
     logger.info("phone_updated", user_id=user_id, old_phone=old_phone, new_phone=new_phone)
     await write_audit("phone_updated", user_id=user_id, detail=f"old={old_phone},new={new_phone}")
     updated_user = await repo.get_by_id(db, user_id)

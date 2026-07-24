@@ -227,7 +227,7 @@ async def get_clone_status(db: AsyncSession, user_id: str, avatar_id: str) -> Av
 
 
 async def delete_avatar(db: AsyncSession, user_id: str, avatar_id: str) -> None:
-    """删除数字人：训练中则释放冻结额度，并级联解绑引用它的 IP 资产"""
+    """删除数字人：训练中则释放冻结额度，并级联解绑引用它的人设。"""
     a = await repo.get(db, avatar_id, user_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "数字人不存在"})
@@ -235,12 +235,14 @@ async def delete_avatar(db: AsyncSession, user_id: str, avatar_id: str) -> None:
         from app.modules.billing.service import release_reservation
 
         await release_reservation(db, a.reservation_id, user_id)
-    # 级联解绑：清空所有引用该分身的 IP 资产 avatar_id，避免悬空引用
+    # 级联解绑：清空所有引用该分身的人设 avatar_id，避免悬空引用。
     from sqlalchemy import update
 
-    from app.modules.ipasset.models import IpAsset
+    from app.modules.ipasset.models import Persona
 
-    await db.execute(update(IpAsset).where(IpAsset.user_id == user_id, IpAsset.avatar_id == avatar_id).values(avatar_id=None))
+    await db.execute(
+        update(Persona).where(Persona.user_id == user_id, Persona.avatar_id == avatar_id).values(avatar_id=None)
+    )
     await repo.delete(db, a)
 
 

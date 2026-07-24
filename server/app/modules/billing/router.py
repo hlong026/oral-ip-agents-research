@@ -155,16 +155,18 @@ async def api_ledger_export(
     writer = csv.writer(buf)
     writer.writerow(["时间", "事件类型", "积分变动", "引用类型", "引用ID", "任务ID", "操作人", "详情"])
     for item in rows:
-        writer.writerow([
-            item.created_at.isoformat(),
-            item.event_type,
-            item.points_delta,
-            item.reference_type,
-            item.reference_id,
-            item.task_id,
-            item.created_by,
-            item.detail_json or "",
-        ])
+        writer.writerow(
+            [
+                item.created_at.isoformat(),
+                item.event_type,
+                item.points_delta,
+                item.reference_type,
+                item.reference_id,
+                item.task_id,
+                item.created_by,
+                item.detail_json or "",
+            ]
+        )
     buf.seek(0)
     return StreamingResponse(
         iter([buf.getvalue().encode("utf-8-sig")]),

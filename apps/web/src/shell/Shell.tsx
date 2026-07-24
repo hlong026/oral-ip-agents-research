@@ -75,7 +75,9 @@ export default function Shell() {
         void queryClient.invalidateQueries({ queryKey: ["im-conversations"] });
       } else if (ev.kind === "im_listener_status") {
         // 监听状态变化：刷新账号页与规则页的监听状态
-        void queryClient.invalidateQueries({ queryKey: ["im-listener-status"] });
+        void queryClient.invalidateQueries({
+          queryKey: ["im-listener-status"],
+        });
         void queryClient.invalidateQueries({ queryKey: ["im-listeners"] });
         // 登录态失效等错误状态：toast 提醒用户重新绑定（按账号去重，恢复后重置）
         if (ev.status === "error") {
@@ -86,7 +88,10 @@ export default function Shell() {
               ...t,
               { id, level: "error", text: ev.errorMsg || "IM 监听异常" },
             ]);
-            setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
+            setTimeout(
+              () => setToasts((t) => t.filter((x) => x.id !== id)),
+              5000,
+            );
           }
         } else {
           imErrorToasted.current.delete(ev.accountId);

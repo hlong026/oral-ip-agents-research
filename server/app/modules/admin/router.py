@@ -212,7 +212,8 @@ async def admin_overview(
     total_codes = await _count(select(func.count(ActivationCode.id)))
     used_codes = await _count(select(func.count(ActivationCode.id)).where(ActivationCode.status == "used"))
 
-    total_granted = float((await db.execute(select(func.coalesce(func.sum(QuotaAccount.total_granted), 0)))).scalar() or 0)
+    total_granted_result = await db.execute(select(func.coalesce(func.sum(QuotaAccount.total_granted), 0)))
+    total_granted = float(total_granted_result.scalar() or 0)
     # 实际消耗 = 冻结（reserve 负值）净扣除解冻退回（release 正值）；
     # settle 流水的 points_delta 恒为 0，不能直接用于统计
     total_consumed = abs(

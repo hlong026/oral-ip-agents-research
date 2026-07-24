@@ -217,7 +217,12 @@ export const avatarApi = {
     if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
-  cloneByImage: (name: string, consentToken: string, file: File, quoteId?: string) => {
+  cloneByImage: (
+    name: string,
+    consentToken: string,
+    file: File,
+    quoteId?: string,
+  ) => {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("consentToken", consentToken);

@@ -42,7 +42,9 @@ async def update_password_and_revoke_sessions(db: AsyncSession, user_id: str, ne
     """同一事务内更新密码并吊销所有刷新会话（消除安全窗口）"""
     await db.execute(update(User).where(User.id == user_id).values(password_hash=new_password_hash))
     await db.execute(
-        update(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False)).values(revoked=True)
+        update(RefreshSession)
+        .where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False))
+        .values(revoked=True)
     )
     await db.commit()
 
@@ -77,7 +79,9 @@ async def revoke_device_sessions(db: AsyncSession, user_id: str, device_id: str)
 async def revoke_all_sessions(db: AsyncSession, user_id: str) -> None:
     """吊销用户所有刷新会话（修改密码后强制重新登录）"""
     await db.execute(
-        update(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False)).values(revoked=True)
+        update(RefreshSession)
+        .where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False))
+        .values(revoked=True)
     )
     await db.commit()
 

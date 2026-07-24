@@ -973,9 +973,7 @@ async def list_ledger(
     if end_date:
         conditions.append(CreditLedger.created_at <= end_date)
 
-    total = int(
-        (await db.scalar(select(func.count(CreditLedger.id)).where(*conditions))) or 0
-    )
+    total = int((await db.scalar(select(func.count(CreditLedger.id)).where(*conditions))) or 0)
     rows = list(
         (
             await db.execute(
@@ -1006,13 +1004,7 @@ async def all_ledger_for_export(
     if end_date:
         conditions.append(CreditLedger.created_at <= end_date)
     rows = list(
-        (
-            await db.execute(
-                select(CreditLedger)
-                .where(*conditions)
-                .order_by(CreditLedger.created_at.desc())
-            )
-        )
+        (await db.execute(select(CreditLedger).where(*conditions).order_by(CreditLedger.created_at.desc())))
         .scalars()
         .all()
     )

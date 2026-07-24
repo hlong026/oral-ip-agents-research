@@ -71,19 +71,19 @@ async def remind_plan_expiry() -> None:
                 reminder_title = f"套餐即将到期（剩余 {days_before} 天）"
                 already_sent = (
                     await db.execute(
-                        select(Notification.id).where(
+                        select(Notification.id)
+                        .where(
                             Notification.user_id == user.id,
                             Notification.title == reminder_title,
                             Notification.created_at >= today_start,
-                        ).limit(1)
+                        )
+                        .limit(1)
                     )
                 ).scalar_one_or_none()
                 if already_sent:
                     continue
 
-                expires_str = (
-                    user.plan_expires_at.strftime("%Y-%m-%d") if user.plan_expires_at else ""
-                )
+                expires_str = user.plan_expires_at.strftime("%Y-%m-%d") if user.plan_expires_at else ""
                 body = (
                     f"您的套餐将在 {days_before} 天后到期（{expires_str}），"
                     f"到期后相关权益将暂停。请及时续费以保持服务不中断。"

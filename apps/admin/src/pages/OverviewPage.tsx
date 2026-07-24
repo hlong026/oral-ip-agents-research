@@ -17,12 +17,16 @@ export default function OverviewPage() {
     {
       label: "总用户数",
       value: data ? fmt(data.totalUsers) : "-",
-      desc: data ? `今日新增 ${fmt(data.newUsersToday)} 人` : "激活码开户用户总量",
+      desc: data
+        ? `今日新增 ${fmt(data.newUsersToday)} 人`
+        : "激活码开户用户总量",
     },
     {
       label: "任务总量",
       value: data ? fmt(data.totalTasks) : "-",
-      desc: data ? `今日完成 ${fmt(data.doneTasksToday)} 条` : "创作管线任务总数",
+      desc: data
+        ? `今日完成 ${fmt(data.doneTasksToday)} 条`
+        : "创作管线任务总数",
     },
     {
       label: "激活码",
@@ -38,7 +42,9 @@ export default function OverviewPage() {
     {
       label: "积分发放",
       value: data ? fmt(data.totalGranted) : "-",
-      desc: data ? `已消耗 ${fmt(data.totalConsumed)} 积分` : "套餐/充值/调整累计发放",
+      desc: data
+        ? `已消耗 ${fmt(data.totalConsumed)} 积分`
+        : "套餐/充值/调整累计发放",
     },
   ];
 

@@ -313,10 +313,7 @@ export const adminApi = {
     }),
 
   listUsers: () => adminFetch<{ items: AdminUser[]; total: number }>("/users"),
-  updateUser: (
-    id: string,
-    body: { role?: AdminRole; isActive?: boolean },
-  ) =>
+  updateUser: (id: string, body: { role?: AdminRole; isActive?: boolean }) =>
     adminFetch<{ id: string; role: AdminRole; isActive: boolean }>(
       `/users/${id}`,
       {

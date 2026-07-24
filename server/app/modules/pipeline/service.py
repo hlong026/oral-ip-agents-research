@@ -57,9 +57,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
     plan_expires_at = user.plan_expires_at if user else None
     if plan_expires_at and plan_expires_at.tzinfo is None:
         plan_expires_at = plan_expires_at.replace(tzinfo=UTC)
-    if user is None or (
-        user.role != "admin" and (not plan_expires_at or plan_expires_at <= datetime.now(UTC))
-    ):
+    if user is None or (user.role != "admin" and (not plan_expires_at or plan_expires_at <= datetime.now(UTC))):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={"code": "SUBSCRIPTION_REQUIRED", "message": "套餐未开通或已到期，请先激活或续费"},
@@ -103,7 +101,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         persona = await ipasset_repo.get(db, inp.ipId, user_id)
         task_for_quote = inp.model_dump()
         # 优先使用 persona 时长；无 persona 时尝试探测链接真实时长，拒绝固定 60s
-        target_duration = persona.video_duration if persona else 0
+        target_duration: float | int = persona.video_duration if persona else 0
         if not target_duration and inp.sourceUrl:
             from app.modules.content.service import probe_url_duration
 
@@ -397,7 +395,7 @@ async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
 
     persona = await ipasset_repo.get(db, task.ip_id, task.user_id)
     # 优先使用 persona 时长；无 persona 时尝试探测链接真实时长
-    target_duration = persona.video_duration if persona else 0
+    target_duration: float | int = persona.video_duration if persona else 0
     if not target_duration and task.source_url:
         from app.modules.content.service import probe_url_duration
 

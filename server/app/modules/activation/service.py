@@ -383,7 +383,11 @@ async def redeem(db: AsyncSession, user_id: str, raw_code: str) -> RedeemOut:
     await db.commit()
 
     logger.info("redeem_success", user_id=user_id, plan=plan_type, quota=quota_amount, upgrade=upgrade)
-    await write_audit("redeem_success", user_id=user_id, detail=f"plan={plan_type},quota={quota_amount},upgrade={upgrade}")
+    await write_audit(
+        "redeem_success",
+        user_id=user_id,
+        detail=f"plan={plan_type},quota={quota_amount},upgrade={upgrade}",
+    )
 
     return RedeemOut(
         planType=plan_type,
