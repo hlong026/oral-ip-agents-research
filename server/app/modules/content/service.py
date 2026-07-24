@@ -63,6 +63,31 @@ _UPLOAD_MEDIA_TYPES = {
     ".wav": "audio/wav",
 }
 _MAX_ASR_DATA_URI_BYTES = 20 * 1024 * 1024
+_PROBE_RESULT_TTL_SECONDS = 60.0
+_probe_result_cache: dict[str, tuple[float, DouyidouParseResult]] = {}
+
+
+def _cache_probe_result(url: str, result: DouyidouParseResult) -> None:
+    now = time.monotonic()
+    expired = [
+        key
+        for key, (cached_at, _) in _probe_result_cache.items()
+        if now - cached_at > _PROBE_RESULT_TTL_SECONDS
+    ]
+    for key in expired:
+        _probe_result_cache.pop(key, None)
+    _probe_result_cache[url] = (now, result)
+
+
+def _recent_probe_result(url: str) -> DouyidouParseResult | None:
+    cached = _probe_result_cache.get(url)
+    if cached is None:
+        return None
+    cached_at, result = cached
+    if time.monotonic() - cached_at > _PROBE_RESULT_TTL_SECONDS:
+        _probe_result_cache.pop(url, None)
+        return None
+    return result
 
 
 def _is_public_media_url(value: str) -> bool:
@@ -104,8 +129,10 @@ async def parse_url(
     logger.info(f"解析输入: platform={resolved.platform.value}, is_id={resolved.is_id}, url={resolved.url[:80]}")
 
     # 尝试 Douyidou 完整解析（获取文案+视频直链）
-    douyidou_result: DouyidouParseResult | None = None
-    if await registry.provider_enabled("douyidou"):
+    douyidou_result = _recent_probe_result(resolved.url)
+    if douyidou_result is not None:
+        logger.info("复用时长探测阶段的 Douyidou 解析结果，避免重复请求上游")
+    elif await registry.provider_enabled("douyidou"):
         try:
             parser = DouyidouParser()
             douyidou_result = await parser.parse_url_full(resolved.url)
@@ -283,6 +310,8 @@ async def probe_url_duration(url: str, *, required: bool) -> float | None:
                 "message": "无法验证链接媒体时长，请上传本地文件后重试",
             },
         )
+    if result is not None:
+        _cache_probe_result(resolved.url, result)
     return duration
 
 

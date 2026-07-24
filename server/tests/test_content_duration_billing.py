@@ -96,3 +96,65 @@ async def test_url_parse_freezes_verified_duration(monkeypatch) -> None:
     )
 
     assert captured == {"seconds": 74, "assets": 1, "parse_duration": 73.2}
+
+
+async def test_url_parse_reuses_successful_duration_probe_result(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.modules.content.schemas import ParseOut, TranscriptOut
+    from app.providers.douyidou import DouyidouParser, DouyidouParseResult
+
+    calls = 0
+    source_url = "https://www.douyin.com/jingxuan?modal_id=cache-once"
+
+    async def fake_enabled(_provider_name: str) -> bool:
+        return True
+
+    async def fake_parse(self, _url: str, is_title: int = 0) -> DouyidouParseResult:
+        nonlocal calls
+        del self, is_title
+        calls += 1
+        return DouyidouParseResult(
+            platform="douyin",
+            title="缓存复用",
+            video_url="https://cdn.example.com/video.mp4",
+            text="探测阶段已经取得的完整文案",
+            duration_sec=170,
+        )
+
+    async def fake_probe_duration(
+        _video_url: str,
+        *,
+        platform: str,
+        known_duration: float | None,
+    ) -> float:
+        assert platform == "douyin"
+        assert known_duration == 170
+        return 170
+
+    async def fake_save(_db, _user_id, _persona_id, _source_url, result) -> ParseOut:
+        return ParseOut(
+            transcript=TranscriptOut(
+                text=result.text or "",
+                words=[],
+                duration=result.duration_sec or 0,
+            ),
+            degraded=False,
+        )
+
+    monkeypatch.setattr(service.registry, "provider_enabled", fake_enabled)
+    monkeypatch.setattr(DouyidouParser, "parse_url_full", fake_parse)
+    monkeypatch.setattr(service, "probe_duration", fake_probe_duration)
+    monkeypatch.setattr(service, "_save_text_result", fake_save)
+
+    assert await service.probe_url_duration(source_url, required=True) == 170
+    parsed = await service.parse_url(
+        None,  # type: ignore[arg-type]
+        "probe-cache-user",
+        source_url,
+        None,
+        170,
+    )
+
+    assert calls == 1
+    assert parsed.transcript is not None
+    assert parsed.transcript.text == "探测阶段已经取得的完整文案"
