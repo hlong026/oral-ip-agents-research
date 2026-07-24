@@ -307,5 +307,11 @@ describe("CreatePage 来源模式切换", () => {
         "quote-rewrite",
       ),
     );
+    expect(
+      screen.getByRole("textbox", { name: "提取原文" }),
+    ).toHaveValue("待改写的完整原文");
+    expect(
+      await screen.findByRole("textbox", { name: "IP 改写结果" }),
+    ).toHaveValue("结合IP生成的新文案");
   });
 });

@@ -45,6 +45,8 @@ type StepKey = (typeof STEPS)[number]["key"];
 interface Wizard {
   sourceUrl: string;
   topic: string;
+  originalText: string;
+  rewrittenText: string;
   scriptText: string;
   scriptId: string;
   similarity: number | null;
@@ -61,6 +63,8 @@ interface Wizard {
 const initialWizard: Wizard = {
   sourceUrl: "",
   topic: "",
+  originalText: "",
+  rewrittenText: "",
   scriptText: "",
   scriptId: "",
   similarity: null,
@@ -176,6 +180,8 @@ function StepLink({
       ...wiz,
       sourceUrl: nextTab === "url" ? wiz.sourceUrl : "",
       topic: nextTab === "topic" ? wiz.topic : "",
+      originalText: nextTab === "script" ? wiz.originalText : "",
+      rewrittenText: nextTab === "script" ? wiz.rewrittenText : "",
       scriptText: nextTab === "script" ? wiz.scriptText : "",
       scriptId: nextTab === "script" ? wiz.scriptId : "",
     });
@@ -197,6 +203,8 @@ function StepLink({
       if (res.transcript) {
         setWiz({
           ...wiz,
+          originalText: res.transcript.text,
+          rewrittenText: "",
           scriptText: res.transcript.text,
           scriptId: res.scriptId ?? "",
           sourceUrl: "",
@@ -251,6 +259,8 @@ function StepLink({
                 ...wiz,
                 sourceUrl: v,
                 topic: "",
+                originalText: "",
+                rewrittenText: "",
                 scriptText: "",
                 scriptId: "",
               })
@@ -284,6 +294,8 @@ function StepLink({
                 ...wiz,
                 topic: e.target.value,
                 sourceUrl: "",
+                originalText: "",
+                rewrittenText: "",
                 scriptText: "",
                 scriptId: "",
               })
@@ -302,6 +314,8 @@ function StepLink({
             onChange={(e) =>
               setWiz({
                 ...wiz,
+                originalText: e.target.value,
+                rewrittenText: "",
                 scriptText: e.target.value,
                 scriptId: "",
                 sourceUrl: "",
@@ -381,6 +395,8 @@ function StepScript({
           }
           setWiz({
             ...wiz,
+            originalText: text,
+            rewrittenText: "",
             scriptText: text,
             scriptId: res.scriptId ?? "",
             similarity: null,
@@ -402,6 +418,8 @@ function StepScript({
           );
           setWiz({
             ...wiz,
+            originalText: rw.text,
+            rewrittenText: "",
             scriptText: rw.text,
             similarity: rw.similarity ?? null,
           });
@@ -431,16 +449,17 @@ function StepScript({
     setError("");
     try {
       const requirement = customPrompt.trim();
+      const sourceText = wiz.originalText || wiz.scriptText;
       const quoteId = await confirmMeteredOperation(
         "script_generation",
         "仿写文案",
         textOperationUsage(
-          requirement ? `${wiz.scriptText}\n${requirement}` : wiz.scriptText,
+          requirement ? `${sourceText}\n${requirement}` : sourceText,
         ),
       );
       if (!quoteId) return;
       const rw = await contentApi.rewrite(
-        wiz.scriptText,
+        sourceText,
         intensity,
         requirement || undefined,
         wiz.scriptId || undefined,
@@ -448,6 +467,8 @@ function StepScript({
       );
       setWiz({
         ...wiz,
+        originalText: sourceText,
+        rewrittenText: rw.text,
         scriptText: rw.text,
         similarity: rw.similarity ?? null,
       });
@@ -595,15 +616,40 @@ function StepScript({
       )}
 
       <div>
-        <label className="label">原文 / 当前文案（可编辑）</label>
+        <label className="label">提取原文（保留，可编辑）</label>
         <textarea
+          aria-label="提取原文"
           className="input min-h-64 resize-y font-normal leading-relaxed"
           placeholder={loading ? "AI 正在生成文案…" : "口播文案"}
-          value={wiz.scriptText}
-          onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value })}
-          disabled={loading && !wiz.scriptText}
+          value={wiz.originalText || wiz.scriptText}
+          onChange={(e) => {
+            const originalText = e.target.value;
+            setWiz({
+              ...wiz,
+              originalText,
+              scriptText: wiz.rewrittenText ? wiz.scriptText : originalText,
+            });
+          }}
+          disabled={loading && !wiz.originalText && !wiz.scriptText}
         />
       </div>
+      {wiz.rewrittenText && (
+        <div className="rounded-xl border border-brand-to/30 bg-brand-to/5 p-3">
+          <label className="label">IP 改写结果（后续成片使用）</label>
+          <textarea
+            aria-label="IP 改写结果"
+            className="input min-h-64 resize-y font-normal leading-relaxed"
+            value={wiz.rewrittenText}
+            onChange={(event) =>
+              setWiz({
+                ...wiz,
+                rewrittenText: event.target.value,
+                scriptText: event.target.value,
+              })
+            }
+          />
+        </div>
+      )}
       <div className="text-right text-xs text-text-3">
         {wiz.scriptText.length} 字 · 约{" "}
         {Math.ceil(wiz.scriptText.length * 0.28)} 秒
@@ -948,6 +994,8 @@ export default function CreatePage() {
       void contentApi.script(scriptId).then((s) => {
         setWiz((w) => ({
           ...w,
+          originalText: s.originalText,
+          rewrittenText: s.rewrittenText || "",
           scriptText: s.rewrittenText || s.originalText,
           scriptId: s.id,
         }));
