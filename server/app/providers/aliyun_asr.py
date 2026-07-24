@@ -289,6 +289,18 @@ class AliyunASR:
     @staticmethod
     def _guess_format(url: str) -> str:
         """从URL推断音频格式"""
+        if url.startswith("data:"):
+            media_type = url[5:].split(";", 1)[0]
+            return {
+                "audio/aac": "aac",
+                "audio/mp4": "m4a",
+                "audio/mpeg": "mp3",
+                "audio/wav": "wav",
+                "video/quicktime": "mov",
+                "video/x-matroska": "mkv",
+                "video/x-msvideo": "avi",
+                "video/mp4": "mp4",
+            }.get(media_type, "mp4")
         ext_map = {
             ".mp4": "mp4",
             ".mp3": "mp3",

@@ -143,6 +143,13 @@ async def test_asr_routes_by_verified_duration(monkeypatch) -> None:
     assert calls == ["flash", "async"]
 
 
+def test_asr_detects_format_from_embedded_media() -> None:
+    from app.providers.aliyun_asr import AliyunASR
+
+    assert AliyunASR._guess_format("data:video/mp4;base64,AAAA") == "mp4"
+    assert AliyunASR._guess_format("data:audio/mpeg;base64,AAAA") == "mp3"
+
+
 async def test_asr_poll_limits_come_from_runtime_config(monkeypatch) -> None:
     from app.providers import aliyun_asr
 
@@ -277,6 +284,103 @@ async def test_upload_passes_accessible_url_to_asr(monkeypatch) -> None:
     assert captured_urls == ["https://media.example.test/media/uploads/source%20video.mp4"]
     assert result.transcript is not None
     assert result.transcript.text == "真实转写"
+
+
+async def test_short_upload_embeds_media_when_only_local_url_is_available(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import TranscriptResult
+
+    captured_inputs: list[str] = []
+
+    async def stored(_prefix: str, _filename: str, _data: bytes) -> str:
+        return "uploads/source.mp4"
+
+    async def local_url(_key: str, *, require_public: bool = False) -> str:
+        assert require_public is False
+        return "http://127.0.0.1:8000/media/uploads/source.mp4"
+
+    async def threshold(_key: str, _default: int) -> int:
+        return 300
+
+    async def transcribed(_kind: str, _chain, _method: str, media_input: str, **_kwargs):
+        captured_inputs.append(media_input)
+        return TranscriptResult(text="本地短视频转写", words=[], duration=3), "dashscope-asr"
+
+    monkeypatch.setattr(service, "save_bytes", stored)
+    monkeypatch.setattr(service, "get_accessible_url", local_url)
+    monkeypatch.setattr(service, "get_config_int", threshold, raising=False)
+    monkeypatch.setattr(service.registry, "run_with_fallback", transcribed)
+
+    async with SessionLocal() as db:
+        result = await service.parse_upload(db, "local-media-user", "source.mp4", b"video", None, 3)
+
+    assert captured_inputs == ["data:video/mp4;base64,dmlkZW8="]
+    assert result.transcript is not None
+    assert result.transcript.text == "本地短视频转写"
+
+
+async def test_short_upload_extracts_audio_when_embedded_video_exceeds_provider_limit(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import TranscriptResult
+
+    captured_inputs: list[str] = []
+
+    async def stored(_prefix: str, _filename: str, _data: bytes) -> str:
+        return "uploads/source.mp4"
+
+    async def local_url(_key: str, *, require_public: bool = False) -> str:
+        return "http://127.0.0.1:8000/media/uploads/source.mp4"
+
+    async def threshold(_key: str, _default: int) -> int:
+        return 300
+
+    async def extracted(_data: bytes, _suffix: str) -> bytes:
+        return b"audio"
+
+    async def transcribed(_kind: str, _chain, _method: str, media_input: str, **_kwargs):
+        captured_inputs.append(media_input)
+        return TranscriptResult(text="压缩音轨转写", words=[], duration=3), "dashscope-asr"
+
+    monkeypatch.setattr(service, "save_bytes", stored)
+    monkeypatch.setattr(service, "get_accessible_url", local_url)
+    monkeypatch.setattr(service, "get_config_int", threshold)
+    monkeypatch.setattr(service, "extract_audio_bytes", extracted, raising=False)
+    monkeypatch.setattr(service, "_MAX_ASR_DATA_URI_BYTES", 8, raising=False)
+    monkeypatch.setattr(service.registry, "run_with_fallback", transcribed)
+
+    async with SessionLocal() as db:
+        result = await service.parse_upload(db, "large-local-media-user", "source.mp4", b"video", None, 3)
+
+    assert captured_inputs == ["data:audio/mpeg;base64,YXVkaW8="]
+    assert result.transcript is not None
+    assert result.transcript.text == "压缩音轨转写"
+
+
+async def test_long_upload_requires_public_media_url(monkeypatch) -> None:
+    from app.core.storage import StorageConfigurationError
+    from app.modules.content import service
+
+    async def stored(_prefix: str, _filename: str, _data: bytes) -> str:
+        return "uploads/source.mp4"
+
+    async def inaccessible(_key: str, *, require_public: bool = False) -> str:
+        if require_public:
+            raise StorageConfigurationError("需要公网媒体地址")
+        return "http://127.0.0.1:8000/media/uploads/source.mp4"
+
+    async def threshold(_key: str, _default: int) -> int:
+        return 300
+
+    monkeypatch.setattr(service, "save_bytes", stored)
+    monkeypatch.setattr(service, "get_accessible_url", inaccessible)
+    monkeypatch.setattr(service, "get_config_int", threshold, raising=False)
+
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            await service.parse_upload(db, "long-media-user", "source.mp4", b"video", None, 301)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail["code"] == "MEDIA_PUBLIC_URL_REQUIRED"
 
 
 async def test_real_acceptance_requires_public_media_base_url(monkeypatch) -> None:

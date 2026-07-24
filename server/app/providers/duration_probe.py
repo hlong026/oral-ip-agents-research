@@ -8,6 +8,53 @@ from pathlib import Path
 logger = logging.getLogger("oral.providers.duration_probe")
 
 
+class MediaProcessingError(RuntimeError):
+    """上传媒体无法转换为云端 ASR 可接受的音频。"""
+
+
+async def extract_audio_bytes(data: bytes, suffix: str) -> bytes:
+    """将上传媒体转为单声道 16kHz MP3，避免 Base64 请求超过 Provider 限制。"""
+    if not data:
+        raise MediaProcessingError("上传媒体为空")
+    with tempfile.TemporaryDirectory(prefix="oral-asr-audio-") as directory:
+        source = Path(directory) / f"source{suffix or '.bin'}"
+        output = Path(directory) / "audio.mp3"
+        await asyncio.to_thread(source.write_bytes, data)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                str(source),
+                "-vn",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-b:a",
+                "64k",
+                str(output),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=90)
+        except FileNotFoundError as exc:
+            raise MediaProcessingError("FFmpeg 未安装或不可执行") from exc
+        except TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise MediaProcessingError("提取音轨超时") from exc
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace")[-500:]
+            raise MediaProcessingError(f"提取音轨失败(exit={process.returncode}): {detail}")
+        audio = await asyncio.to_thread(output.read_bytes)
+        if not audio:
+            raise MediaProcessingError("未提取到有效音轨")
+        return audio
+
+
 async def probe_media_bytes(data: bytes, suffix: str = ".bin") -> float | None:
     """用 ffprobe 读取上传媒体的真实时长；无法验证时返回 None。"""
     if not data:

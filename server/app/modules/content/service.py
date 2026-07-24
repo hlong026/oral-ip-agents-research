@@ -6,19 +6,24 @@ ASR 智能分流：短音频(≤5min)走Flash同步 / 长音频走异步轮询
 日志：LLM 调用完成（§10.6.8-B #3）
 """
 
+import base64
+import ipaddress
 import json
 import time
 from datetime import UTC
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
 from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
 from app.providers.base import ProviderError
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
-from app.providers.duration_probe import probe_duration
+from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
 from app.providers.registry import registry
 from app.providers.url_resolver import resolve_input
 
@@ -47,6 +52,42 @@ _VARIANT_STRATEGIES = (
     ("强化案例与细节，减少抽象表述", 0.8),
     ("压缩冗余内容，突出行动引导", 1.0),
 )
+_UPLOAD_MEDIA_TYPES = {
+    ".aac": "audio/aac",
+    ".avi": "video/x-msvideo",
+    ".m4a": "audio/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".wav": "audio/wav",
+}
+_MAX_ASR_DATA_URI_BYTES = 20 * 1024 * 1024
+
+
+def _is_public_media_url(value: str) -> bool:
+    parsed = urlparse(value)
+    hostname = parsed.hostname or ""
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        return False
+    try:
+        return ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        return hostname != "localhost" and not hostname.endswith((".local", ".internal"))
+
+
+def _media_data_uri(filename: str, data: bytes) -> str:
+    media_type = _UPLOAD_MEDIA_TYPES.get(Path(filename).suffix.lower(), "application/octet-stream")
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{media_type};base64,{encoded}"
+
+
+async def _embedded_asr_input(filename: str, data: bytes) -> str:
+    media_input = _media_data_uri(filename, data)
+    if len(media_input) <= _MAX_ASR_DATA_URI_BYTES:
+        return media_input
+    audio = await extract_audio_bytes(data, Path(filename).suffix.lower())
+    return _media_data_uri("audio.mp3", audio)
 
 
 async def parse_url(
@@ -256,18 +297,33 @@ async def parse_upload(
     """手动上传降级（视频号等平台，C2 兖底）"""
     key = await save_bytes("uploads", filename, data)
     try:
-        file_url = await get_accessible_url(
-            key,
-            require_public=not settings.provider_mock_fallback_enabled,
-        )
+        threshold = await get_config_int("asr_flash_threshold_sec", 300)
+        if duration_seconds is not None and duration_seconds <= threshold:
+            accessible_url = await get_accessible_url(key, require_public=False)
+            media_input = (
+                accessible_url
+                if _is_public_media_url(accessible_url)
+                else await _embedded_asr_input(filename, data)
+            )
+        else:
+            media_input = await get_accessible_url(key, require_public=True)
     except StorageConfigurationError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MEDIA_PUBLIC_URL_REQUIRED", "message": str(exc)},
         ) from exc
+    except MediaProcessingError as exc:
+        logger.warning("upload_audio_extraction_failed", filename=filename, error=str(exc)[:300])
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_AUDIO_EXTRACTION_FAILED",
+                "message": "无法从上传文件提取有效音轨，请检查文件后重试",
+            },
+        ) from exc
     try:
         tr, _ = await registry.run_with_fallback(
-            "asr", registry.asr_chain, "transcribe", file_url, duration_sec=duration_seconds
+            "asr", registry.asr_chain, "transcribe", media_input, duration_sec=duration_seconds
         )
     except ProviderError as exc:
         logger.warning(
