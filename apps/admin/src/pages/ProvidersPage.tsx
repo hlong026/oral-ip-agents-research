@@ -84,7 +84,7 @@ export default function ProvidersPage() {
       <div>
         <h1 className="text-2xl font-semibold">Provider 配置</h1>
         <p className="mt-2 text-sm text-text-3">
-          密钥由管理员维护；用户端只消费业务能力，不接触供应商凭据。
+          密钥会加密保存在本地数据库；用户端只消费业务能力，不接触供应商凭据。
         </p>
       </div>
       {isLoading && <p className="text-sm text-text-3">加载中...</p>}
@@ -146,18 +146,12 @@ export default function ProvidersPage() {
                 onChange={(model) => update(index, { model })}
               />
             )}
-            <Field
+            <SecretField
               label={
-                provider.provider === "douyidou"
-                  ? provider.apiKeyConfigured
-                    ? "App Secret（已配置，留空不覆盖）"
-                    : "App Secret"
-                  : provider.apiKeyConfigured
-                    ? "API Key（已配置，留空不覆盖）"
-                    : "API Key"
+                provider.provider === "douyidou" ? "App Secret" : "API Key"
               }
-              type="password"
               value={provider.apiKey || ""}
+              configured={Boolean(provider.apiKeyConfigured)}
               onChange={(apiKey) => update(index, { apiKey })}
             />
             {provider.provider === "dashscope_asr" && (
@@ -223,6 +217,54 @@ export default function ProvidersPage() {
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+function SecretField({
+  label,
+  value,
+  configured,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  configured: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const accessibleLabel = configured
+    ? `${label}（已保存，输入新密钥可替换）`
+    : label;
+
+  return (
+    <div>
+      <label className="block">
+        <span className="label">{accessibleLabel}</span>
+        <div className="flex gap-2">
+          <input
+            className="input"
+            type={revealed ? "text" : "password"}
+            value={value}
+            placeholder={configured ? "••••••••••••••••" : undefined}
+            autoComplete="new-password"
+            onChange={(event) => onChange(event.target.value)}
+          />
+          <button
+            type="button"
+            className="btn-ghost shrink-0"
+            disabled={!value}
+            onClick={() => setRevealed((current) => !current)}
+          >
+            {revealed ? "隐藏密钥" : "显示密钥"}
+          </button>
+        </div>
+      </label>
+      {configured && !value && (
+        <p className="mt-2 text-xs text-success">
+          密钥已安全保存，服务端不会回传明文。
+        </p>
+      )}
     </div>
   );
 }

@@ -69,15 +69,27 @@ describe("provider configuration page", () => {
     await waitFor(() => {
       expect(appId).toHaveValue("existing-app-id");
       expect(
-        form.getByLabelText("App Secret（已配置，留空不覆盖）"),
+        form.getByLabelText("App Secret（已保存，输入新密钥可替换）"),
       ).toHaveValue("");
     });
+    expect(
+      form.getByLabelText("App Secret（已保存，输入新密钥可替换）"),
+    ).toHaveAttribute("placeholder", "••••••••••••••••");
+    expect(
+      form.getByText("密钥已安全保存，服务端不会回传明文。"),
+    ).toBeVisible();
     expect(form.queryByLabelText("优先级")).not.toBeInTheDocument();
 
     fireEvent.change(appId, { target: { value: "new-app-id" } });
-    fireEvent.change(form.getByLabelText("App Secret（已配置，留空不覆盖）"), {
-      target: { value: "new-app-secret" },
-    });
+    const appSecret = form.getByLabelText(
+      "App Secret（已保存，输入新密钥可替换）",
+    );
+    fireEvent.change(appSecret, { target: { value: "new-app-secret" } });
+    expect(appSecret).toHaveAttribute("type", "password");
+    fireEvent.click(form.getByRole("button", { name: "显示密钥" }));
+    expect(appSecret).toHaveAttribute("type", "text");
+    fireEvent.click(form.getByRole("button", { name: "隐藏密钥" }));
+    expect(appSecret).toHaveAttribute("type", "password");
     fireEvent.click(form.getByRole("button", { name: "保存配置" }));
 
     await waitFor(() => {
