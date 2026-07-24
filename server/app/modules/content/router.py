@@ -45,6 +45,29 @@ from .service import (
 
 router = APIRouter(prefix="/content", tags=["content"])
 
+_ALLOWED_UPLOAD_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".mp3", ".wav", ".m4a"}
+_MAX_UPLOAD_BYTES = 500 * 1024 * 1024
+
+
+def _validate_upload(filename: str, data: bytes) -> None:
+    suffix = Path(filename).suffix.lower()
+    if suffix not in _ALLOWED_UPLOAD_SUFFIXES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "UNSUPPORTED_FORMAT",
+                "message": "仅支持 MP4、MOV、AVI、MKV、MP3、WAV、M4A 文件",
+            },
+        )
+    if len(data) > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "FILE_TOO_LARGE",
+                "message": f"上传文件不能超过 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+            },
+        )
+
 
 @router.post("/probe", response_model=ProbeUrlOut)
 async def api_probe_url(
@@ -66,7 +89,9 @@ async def api_parse(
     db: AsyncSession = Depends(get_db),
 ):
     if file is not None:
-        data = await file.read()
+        filename = file.filename or ""
+        data = await file.read(_MAX_UPLOAD_BYTES + 1)
+        _validate_upload(filename, data)
         unit = await quote_operation_unit(db, user_id, quoteId, "asr")
         duration = await probe_media_bytes(data, Path(file.filename or "").suffix)
         if unit in {"per_minute", "per_second"} and duration is None:
@@ -85,7 +110,7 @@ async def api_parse(
             return await parse_upload(
                 db,
                 user_id,
-                file.filename or "upload.mp4",
+                filename,
                 data,
                 persona_id,
                 duration,

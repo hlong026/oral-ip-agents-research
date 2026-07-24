@@ -288,6 +288,28 @@ async def test_upload_asr_failure_returns_actionable_fallback(monkeypatch) -> No
     assert exc_info.value.detail["fallbacks"] == ["paste_text", "retry_upload"]
 
 
+def test_upload_validation_rejects_unsupported_format() -> None:
+    from app.modules.content.router import _validate_upload
+
+    with pytest.raises(HTTPException) as exc_info:
+        _validate_upload("payload.exe", b"data")
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "UNSUPPORTED_FORMAT"
+
+
+def test_upload_validation_rejects_oversized_payload(monkeypatch) -> None:
+    from app.modules.content import router
+
+    monkeypatch.setattr(router, "_MAX_UPLOAD_BYTES", 4)
+
+    with pytest.raises(HTTPException) as exc_info:
+        router._validate_upload("source.mp4", b"12345")
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail["code"] == "FILE_TOO_LARGE"
+
+
 async def test_similarity_compares_rewrite_with_source_text() -> None:
     from app.providers.real import DeepSeekLLM
 
