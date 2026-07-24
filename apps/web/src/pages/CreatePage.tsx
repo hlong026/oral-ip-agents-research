@@ -8,7 +8,7 @@ import {
   publishApi,
   voiceApi,
 } from "@oral/api-client";
-import { useIp } from "@oral/stores";
+import { useIp, useQuota } from "@oral/stores";
 import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
@@ -166,6 +166,7 @@ function StepLink({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<OperationProgress | null>(null);
+  const loadQuota = useQuota((state) => state.load);
 
   const selectTab = (nextTab: "url" | "topic" | "script") => {
     setTab(nextTab);
@@ -213,6 +214,7 @@ function StepLink({
       );
     } finally {
       setUploading(false);
+      void loadQuota();
     }
   };
 
@@ -321,6 +323,7 @@ function StepScript({
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [progress, setProgress] = useState<OperationProgress | null>(null);
   const startedInitialGeneration = useRef(false);
+  const loadQuota = useQuota((state) => state.load);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
@@ -411,6 +414,7 @@ function StepScript({
         );
       } finally {
         setLoading(false);
+        void loadQuota();
       }
     };
     void run();

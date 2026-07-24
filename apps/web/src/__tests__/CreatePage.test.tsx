@@ -1,4 +1,5 @@
 import { contentApi } from "@oral/api-client";
+import { useQuota } from "@oral/stores";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
@@ -42,6 +43,7 @@ describe("CreatePage 来源模式切换", () => {
     vi.mocked(contentApi.parse).mockReset();
     vi.mocked(confirmMeteredOperation).mockReset();
     vi.mocked(mediaDurationSeconds).mockReset();
+    useQuota.setState({ quota: null, load: vi.fn() });
   });
 
   it("切换模式时清除已放弃的来源，避免用旧输入继续下一步", async () => {
@@ -130,5 +132,44 @@ describe("CreatePage 来源模式切换", () => {
     expect(
       screen.getByText("正在识别音频，较长视频需要一些时间"),
     ).toBeInTheDocument();
+  });
+
+  it("转写成功后刷新侧栏积分余额", async () => {
+    vi.mocked(mediaDurationSeconds).mockResolvedValue(170);
+    vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-upload");
+    vi.mocked(contentApi.parse).mockResolvedValue({
+      transcript: {
+        text: "真实转写文案",
+        words: [],
+        duration: 170,
+        language: "zh",
+      },
+      degraded: false,
+    });
+    const loadQuota = vi.fn().mockResolvedValue(undefined);
+    useQuota.setState({ load: loadQuota });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const fileInput =
+      container.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(["video"], "sample.mp4", { type: "video/mp4" })],
+      },
+    });
+
+    await waitFor(() => expect(loadQuota).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole("progressbar", { name: "视频转写进度" }),
+    ).toHaveAttribute("aria-valuenow", "100");
   });
 });
