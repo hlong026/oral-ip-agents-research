@@ -6,6 +6,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -27,9 +28,10 @@ async def tasks_ws(ws: WebSocket) -> None:
         await ws.close(code=4401)
         return
     await ws.accept(subprotocol="access-token")
-    subs = [await subscribe(ch) for ch in (CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM)]
-    getters = [s[0] for s in subs]
-    unsubscribers = [s[1] for s in subs]
+    getters: list[Callable[[], Awaitable[dict | None]]] = []
+    unsubscribers: list[Callable[[], Awaitable[None]]] = []
+    pump_task: asyncio.Task | None = None
+    hb_task: asyncio.Task | None = None
 
     async def pump() -> None:
         while True:
@@ -50,18 +52,25 @@ async def tasks_ws(ws: WebSocket) -> None:
             await asyncio.sleep(PING_INTERVAL)
             await ws.send_text(json.dumps({"kind": "ping"}))
 
-    pump_task = asyncio.create_task(pump())
-    hb_task = asyncio.create_task(heartbeat())
     try:
+        for channel in (CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM):
+            get_message, unsubscribe = await subscribe(channel)
+            getters.append(get_message)
+            unsubscribers.append(unsubscribe)
+        pump_task = asyncio.create_task(pump())
+        hb_task = asyncio.create_task(heartbeat())
         while True:
             # 接收客户端消息（目前仅作保活；预留订阅控制）
             await ws.receive_text()
     except WebSocketDisconnect:
         pass
     except Exception:  # noqa: BLE001
-        pass
+        logger.exception("task websocket failed")
     finally:
-        pump_task.cancel()
-        hb_task.cancel()
-        for unsub in unsubscribers:
-            unsub()
+        background_tasks = [task for task in (pump_task, hb_task) if task is not None]
+        for task in background_tasks:
+            task.cancel()
+        if background_tasks:
+            await asyncio.gather(*background_tasks, return_exceptions=True)
+        if unsubscribers:
+            await asyncio.gather(*(unsubscribe() for unsubscribe in unsubscribers), return_exceptions=True)

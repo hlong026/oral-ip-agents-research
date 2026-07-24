@@ -1,9 +1,11 @@
 """第二阶段站内信、实时通知和账号巡检回归测试。"""
 
+import pytest
 import pytest_asyncio
+from fastapi import WebSocketDisconnect
 
 from app.core.db import SessionLocal, init_models
-from app.core.events import CHANNEL_ALERT, subscribe
+from app.core.events import CHANNEL_ALERT, CHANNEL_FEED, CHANNEL_IM, CHANNEL_TASKS, subscribe
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -21,7 +23,7 @@ async def test_notify_user_persists_and_emits_frontend_alert() -> None:
             stored = await service.list_notifications(db, "notify-user")
         message = await get_message()
     finally:
-        unsubscribe()
+        await unsubscribe()
 
     assert len(stored) == 1
     assert stored[0].title == "登录态失效"
@@ -66,7 +68,7 @@ async def test_account_heartbeat_persists_and_emits_expiry_notice(monkeypatch) -
         await heartbeat.check_all_accounts()
         message = await get_message()
     finally:
-        unsubscribe()
+        await unsubscribe()
 
     async with SessionLocal() as db:
         stored_account = await publish_repo.get_account(db, account.id, "heartbeat-user")
@@ -79,3 +81,126 @@ async def test_account_heartbeat_persists_and_emits_expiry_notice(monkeypatch) -
     assert message is not None
     assert message["kind"] == "alert"
     assert message["userId"] == "heartbeat-user"
+
+
+async def test_tasks_websocket_waits_for_all_subscription_cleanup(monkeypatch) -> None:
+    from app.modules.notify import ws as ws_module
+
+    cleaned_channels: list[str] = []
+
+    async def fake_subscribe(channel: str):
+        async def get_message():
+            return None
+
+        async def unsubscribe() -> None:
+            cleaned_channels.append(channel)
+
+        return get_message, unsubscribe
+
+    class FakeWebSocket:
+        headers = {"sec-websocket-protocol": "access-token, test-token"}
+
+        async def accept(self, subprotocol: str) -> None:
+            assert subprotocol == "access-token"
+
+        async def receive_text(self) -> str:
+            raise WebSocketDisconnect
+
+        async def send_text(self, _payload: str) -> None:
+            return None
+
+    monkeypatch.setattr(ws_module, "verify_ws_token", lambda _token: "notify-user")
+    monkeypatch.setattr(ws_module, "subscribe", fake_subscribe)
+
+    await ws_module.tasks_ws(FakeWebSocket())
+
+    assert cleaned_channels == [CHANNEL_TASKS, CHANNEL_FEED, CHANNEL_ALERT, CHANNEL_IM]
+
+
+async def test_redis_subscription_releases_pubsub_connection(monkeypatch) -> None:
+    from app.core import events
+
+    class FakePubSub:
+        subscribed_channel = ""
+        unsubscribed_channel = ""
+        closed = False
+
+        async def subscribe(self, channel: str) -> None:
+            self.subscribed_channel = channel
+
+        async def unsubscribe(self, channel: str) -> None:
+            self.unsubscribed_channel = channel
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    pubsub = FakePubSub()
+
+    class FakeRedis:
+        def pubsub(self) -> FakePubSub:
+            return pubsub
+
+    monkeypatch.setattr(events, "_redis", FakeRedis())
+
+    _, unsubscribe = await events.subscribe(CHANNEL_ALERT)
+    await unsubscribe()
+
+    assert pubsub.subscribed_channel == CHANNEL_ALERT
+    assert pubsub.unsubscribed_channel == CHANNEL_ALERT
+    assert pubsub.closed is True
+
+
+async def test_redis_subscription_failure_releases_pubsub_connection(monkeypatch) -> None:
+    from app.core import events
+
+    class FailingPubSub:
+        closed = False
+
+        async def subscribe(self, _channel: str) -> None:
+            raise RuntimeError("connection exhausted")
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    pubsub = FailingPubSub()
+
+    class FakeRedis:
+        def pubsub(self) -> FailingPubSub:
+            return pubsub
+
+    monkeypatch.setattr(events, "_redis", FakeRedis())
+
+    with pytest.raises(RuntimeError, match="connection exhausted"):
+        await events.subscribe(CHANNEL_ALERT)
+
+    assert pubsub.closed is True
+
+
+async def test_redis_unsubscribe_failure_still_releases_pubsub_connection(monkeypatch) -> None:
+    from app.core import events
+
+    class FailingPubSub:
+        closed = False
+
+        async def subscribe(self, _channel: str) -> None:
+            return None
+
+        async def unsubscribe(self, _channel: str) -> None:
+            raise RuntimeError("connection lost")
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    pubsub = FailingPubSub()
+
+    class FakeRedis:
+        def pubsub(self) -> FailingPubSub:
+            return pubsub
+
+    monkeypatch.setattr(events, "_redis", FakeRedis())
+    _, unsubscribe = await events.subscribe(CHANNEL_ALERT)
+
+    with pytest.raises(RuntimeError, match="connection lost"):
+        await unsubscribe()
+
+    assert pubsub.closed is True
