@@ -325,6 +325,9 @@ function StepScript({
   setWiz: (w: Wizard) => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [operation, setOperation] = useState<
+    "initial" | "rewrite" | "similarity" | null
+  >(null);
   const [error, setError] = useState("");
   const [degraded, setDegraded] = useState(false);
   const [intensity, setIntensity] = useState<RewriteIntensity>("structure");
@@ -345,6 +348,7 @@ function StepScript({
     if (startedInitialGeneration.current) return;
     startedInitialGeneration.current = true;
     setLoading(true);
+    setOperation("initial");
     setError("");
     setDegraded(false);
     const run = async () => {
@@ -413,6 +417,7 @@ function StepScript({
         );
       } finally {
         setLoading(false);
+        setOperation(null);
         void loadQuota();
       }
     };
@@ -422,6 +427,7 @@ function StepScript({
 
   const rewrite = async () => {
     setLoading(true);
+    setOperation("rewrite");
     setError("");
     try {
       const requirement = customPrompt.trim();
@@ -455,12 +461,14 @@ function StepScript({
       );
     } finally {
       setLoading(false);
+      setOperation(null);
       void loadQuota();
     }
   };
 
   const checkSim = async () => {
     setLoading(true);
+    setOperation("similarity");
     try {
       const quoteId = await confirmMeteredOperation(
         "script_generation",
@@ -472,6 +480,7 @@ function StepScript({
       setWiz({ ...wiz, similarity: sim.score });
     } finally {
       setLoading(false);
+      setOperation(null);
     }
   };
 
@@ -619,7 +628,15 @@ function StepScript({
           disabled={loading || !wiz.scriptText}
           className="btn-primary mt-3 w-full"
         >
-          {loading ? "正在按 IP 改写…" : "按当前 IP 改写"}
+          {operation === "initial"
+            ? wiz.sourceUrl
+              ? "等待原文提取完成"
+              : "等待初稿生成完成"
+            : operation === "rewrite"
+              ? "正在按 IP 改写…"
+              : operation === "similarity"
+                ? "等待去重检测完成"
+                : "按当前 IP 改写"}
         </button>
       </div>
     </div>

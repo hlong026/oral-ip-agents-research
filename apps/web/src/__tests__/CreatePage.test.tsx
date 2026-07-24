@@ -100,6 +100,35 @@ describe("CreatePage 来源模式切换", () => {
     expect(contentApi.probe).toHaveBeenCalledTimes(1);
   });
 
+  it("链接解析期间明确提示等待原文，不误导为正在IP改写", async () => {
+    vi.mocked(contentApi.probe).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("粘贴抖音 / 小红书视频链接或视频ID…"),
+      { target: { value: "https://www.douyin.com/jingxuan?modal_id=waiting" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一步 →" }));
+
+    expect(
+      await screen.findByRole("button", { name: "等待原文提取完成" }),
+    ).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "正在按 IP 改写…" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("上传视频转写期间显示阶段进度且不会静默等待", async () => {
     vi.mocked(mediaDurationSeconds).mockResolvedValue(170);
     vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-upload");
