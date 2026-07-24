@@ -1,9 +1,13 @@
 import { contentApi } from "@oral/api-client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  confirmMeteredOperation,
+  mediaDurationSeconds,
+} from "../lib/meteredOperation";
 import CreatePage from "../pages/CreatePage";
 
 vi.mock("@oral/api-client", async (importOriginal) => {
@@ -13,6 +17,7 @@ vi.mock("@oral/api-client", async (importOriginal) => {
     contentApi: {
       ...actual.contentApi,
       probe: vi.fn(),
+      parse: vi.fn(),
     },
     catalogApi: {
       ...actual.catalogApi,
@@ -21,9 +26,22 @@ vi.mock("@oral/api-client", async (importOriginal) => {
   };
 });
 
+vi.mock("../lib/meteredOperation", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../lib/meteredOperation")>();
+  return {
+    ...actual,
+    confirmMeteredOperation: vi.fn(),
+    mediaDurationSeconds: vi.fn(),
+  };
+});
+
 describe("CreatePage 来源模式切换", () => {
   beforeEach(() => {
     vi.mocked(contentApi.probe).mockReset();
+    vi.mocked(contentApi.parse).mockReset();
+    vi.mocked(confirmMeteredOperation).mockReset();
+    vi.mocked(mediaDurationSeconds).mockReset();
   });
 
   it("切换模式时清除已放弃的来源，避免用旧输入继续下一步", async () => {
@@ -76,5 +94,41 @@ describe("CreatePage 来源模式切换", () => {
     fireEvent.click(screen.getByRole("button", { name: "下一步 →" }));
 
     expect(contentApi.probe).toHaveBeenCalledTimes(1);
+  });
+
+  it("上传视频转写期间显示阶段进度且不会静默等待", async () => {
+    vi.mocked(mediaDurationSeconds).mockResolvedValue(170);
+    vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-upload");
+    vi.mocked(contentApi.parse).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const fileInput =
+      container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    fireEvent.change(fileInput!, {
+      target: {
+        files: [new File(["video"], "sample.mp4", { type: "video/mp4" })],
+      },
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("progressbar", { name: "视频转写进度" }),
+      ).toHaveAttribute("aria-valuenow", "55"),
+    );
+    expect(
+      screen.getByText("正在识别音频，较长视频需要一些时间"),
+    ).toBeInTheDocument();
   });
 });

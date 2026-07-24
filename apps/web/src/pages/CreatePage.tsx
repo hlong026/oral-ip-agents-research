@@ -72,6 +72,43 @@ const initialWizard: Wizard = {
   title: "",
 };
 
+interface OperationProgress {
+  value: number;
+  label: string;
+}
+
+function TranscriptionProgress({ progress }: { progress: OperationProgress }) {
+  return (
+    <div
+      className="rounded-xl border border-brand-to/25 bg-brand-to/5 p-3"
+      aria-live="polite"
+    >
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span className="text-text-2">{progress.label}</span>
+        <span className="font-mono text-brand-to">{progress.value}%</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label="视频转写进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress.value}
+        className="h-2 overflow-hidden rounded-full bg-white/10"
+      >
+        <div
+          className="h-full rounded-full bg-brand-grad transition-[width] duration-500"
+          style={{ width: `${progress.value}%` }}
+        />
+      </div>
+      {progress.value < 100 && (
+        <p className="mt-2 text-[11px] text-text-3">
+          页面可以保持打开，失败不会扣除积分。
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function buildPricePreviewRequest(
   input: Pick<Wizard, "sourceUrl" | "topic" | "scriptText" | "count">,
   modulePrices: Pick<ModulePrice, "module" | "billingUnit" | "unitSize">[],
@@ -127,6 +164,8 @@ function StepLink({
     wiz.topic ? "topic" : wiz.scriptText ? "script" : "url",
   );
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState<OperationProgress | null>(null);
 
   const selectTab = (nextTab: "url" | "topic" | "script") => {
     setTab(nextTab);
@@ -140,21 +179,38 @@ function StepLink({
 
   const upload = async (file: File) => {
     setUploading(true);
+    setError("");
+    setProgress({ value: 8, label: "正在读取媒体信息" });
     try {
       const seconds = await mediaDurationSeconds(file);
+      setProgress({ value: 20, label: "正在获取本次转写报价" });
       const quoteId = await confirmMeteredOperation("asr", "上传转写", {
         seconds,
         assets: 1,
       });
-      if (!quoteId) return;
+      setProgress({ value: 55, label: "正在识别音频，较长视频需要一些时间" });
       const res = await contentApi.parse(undefined, file, quoteId);
-      if (res.transcript)
+      if (res.transcript) {
         setWiz({
           ...wiz,
           scriptText: res.transcript.text,
           sourceUrl: "",
           topic: "",
         });
+        setProgress({ value: 100, label: "转写完成，文案已提取" });
+      } else {
+        setProgress(null);
+        setError("未提取到文案，请检查文件是否包含清晰音轨");
+      }
+    } catch (e) {
+      setProgress(null);
+      setError(
+        e instanceof HttpError
+          ? e.body.message
+          : e instanceof Error
+            ? e.message
+            : "视频转写失败，请稍后重试",
+      );
     } finally {
       setUploading(false);
     }
@@ -195,6 +251,12 @@ function StepLink({
               ? "解析上传中…"
               : "粘贴链接直接解析，或点输入框左侧图标上传本地视频/音频（视频号、解析失败时降级转写）"}
           </p>
+          {progress && <TranscriptionProgress progress={progress} />}
+          {error && (
+            <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {error}
+            </div>
+          )}
         </div>
       )}
 
@@ -257,6 +319,7 @@ function StepScript({
   );
   const [outline, setOutline] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [progress, setProgress] = useState<OperationProgress | null>(null);
   const startedInitialGeneration = useRef(false);
 
   // 首次进入：链接/选题 → 转写/生成文案
@@ -270,8 +333,10 @@ function StepScript({
     const run = async () => {
       try {
         if (wiz.sourceUrl) {
+          setProgress({ value: 10, label: "正在解析视频链接" });
           const durationSeconds = (await contentApi.probe(wiz.sourceUrl))
             .durationSeconds;
+          setProgress({ value: 22, label: "正在获取本次转写报价" });
           const parseQuoteId = await confirmMeteredOperation(
             "asr",
             "链接转写",
@@ -280,7 +345,7 @@ function StepScript({
               assets: 1,
             },
           );
-          if (!parseQuoteId) return;
+          setProgress({ value: 50, label: "正在提取视频文案" });
           const res = await contentApi.parse(
             wiz.sourceUrl,
             undefined,
@@ -290,14 +355,16 @@ function StepScript({
           const text = res.transcript?.text ?? "";
           if (!text) {
             setError("未提取到文案，请检查链接是否有效，或尝试上传本地视频");
+            setProgress(null);
             return;
           }
+          setProgress({ value: 75, label: "转写完成，正在生成适配文案" });
           const rewriteQuoteId = await confirmMeteredOperation(
             "script_generation",
             "生成仿写文案",
             textOperationUsage(text),
           );
-          if (!rewriteQuoteId) return;
+          setProgress({ value: 88, label: "正在整理结构与表达" });
           const rw = await contentApi.rewrite(
             text,
             "structure",
@@ -312,6 +379,7 @@ function StepScript({
           });
           if (rw.structure) setStructure(rw.structure);
           if (rw.outline) setOutline(rw.outline);
+          setProgress({ value: 100, label: "文案处理完成" });
         } else {
           const prompt = `请围绕选题「${wiz.topic}」生成 60 秒口播文案`;
           const quoteId = await confirmMeteredOperation(
@@ -319,7 +387,6 @@ function StepScript({
             "生成口播文案",
             textOperationUsage(prompt),
           );
-          if (!quoteId) return;
           const rw = await contentApi.rewrite(
             prompt,
             "theme",
@@ -336,6 +403,7 @@ function StepScript({
           if (rw.outline) setOutline(rw.outline);
         }
       } catch (e) {
+        setProgress(null);
         setError(
           e instanceof HttpError
             ? e.body.message
@@ -449,6 +517,7 @@ function StepScript({
           {error}
         </div>
       )}
+      {progress && <TranscriptionProgress progress={progress} />}
       {degraded && !error && (
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           ⚠️
