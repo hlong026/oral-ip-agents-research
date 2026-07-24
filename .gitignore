@@ -44,6 +44,7 @@ server/*.db
 # temp debug files
 server/_tmp_*
 tmp_*
+reports/inoreader-rss-*.md
 
 # os / ide
 .DS_Store
