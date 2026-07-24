@@ -26,6 +26,8 @@ from . import repository as repo
 from .models import Script, ScriptVersion
 from .prompts import PROMPT_VERSION
 from .schemas import (
+    BatchRewriteItemOut,
+    BatchRewriteOut,
     ParseOut,
     RewriteOut,
     ScriptOut,
@@ -38,6 +40,13 @@ from .schemas import (
 
 logger = get_logger("oral.content")
 settings = get_settings()
+_VARIANT_STRATEGIES = (
+    ("强化开头钩子，表达稳健", 0.7),
+    ("调整叙事节奏，增加口语变化", 0.9),
+    ("转换表达视角，提升创意差异", 1.1),
+    ("强化案例与细节，减少抽象表述", 0.8),
+    ("压缩冗余内容，突出行动引导", 1.0),
+)
 
 
 async def parse_url(
@@ -467,6 +476,106 @@ async def rewrite(
         similarity=final_score,
         validationPassed=validation_passed,
     )
+
+
+async def batch_rewrite(
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    intensity: str,
+    count: int,
+    prompt: str | None,
+    script_id: str | None,
+) -> BatchRewriteOut:
+    """共享一次结构与大纲分析，生成 2~5 条可排序候选文案。"""
+    if not 2 <= count <= 5:
+        raise ValueError("count 必须在 2 到 5 之间")
+
+    persona = None
+    persona_ctx = ""
+    if script_id:
+        script = await repo.get(db, script_id, user_id)
+        if script and script.persona_id:
+            from app.modules.ipasset.repository import get as get_persona
+
+            persona = await get_persona(db, script.persona_id, user_id)
+    if persona is None:
+        from app.modules.ipasset.repository import get as get_persona
+        from app.modules.ipasset.service import get_active_persona_id
+
+        active_id = await get_active_persona_id(db, user_id)
+        if active_id:
+            persona = await get_persona(db, active_id, user_id)
+    if persona:
+        from app.modules.ipasset.service import persona_prompt_context
+
+        persona_ctx = persona_prompt_context(persona)
+
+    mode = "theme" if intensity == "theme" else "full"
+    structure, _ = await registry.run_with_fallback(
+        "llm",
+        registry.llm_chain,
+        "analyze_structure",
+        text,
+        mode=mode,
+    )
+    duration = persona.video_duration if persona else 60
+    outline, _ = await registry.run_with_fallback(
+        "llm",
+        registry.llm_chain,
+        "generate_outline",
+        structure,
+        persona_ctx,
+        intensity,
+        duration,
+    )
+    taboo_words = "、".join(json.loads(persona.taboo_words or "[]")) if persona else "无"
+    constraints = {
+        "duration": duration,
+        "cta_style": persona.cta_style if persona else "关注收藏",
+        "taboo_words": taboo_words,
+        "extra_prompt": prompt or "",
+    }
+
+    items: list[BatchRewriteItemOut] = []
+    for strategy, temperature in _VARIANT_STRATEGIES[:count]:
+        candidate, provider_name = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "generate_script_variant",
+            outline,
+            persona_ctx,
+            constraints,
+            temperature,
+            strategy,
+        )
+        similarity_result, _ = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "check_similarity",
+            candidate,
+            text,
+        )
+        items.append(
+            BatchRewriteItemOut(
+                text=candidate,
+                similarity=similarity_result.score,
+                strategy=strategy,
+                providerName=provider_name,
+            )
+        )
+
+    items.sort(key=lambda item: item.similarity)
+    if script_id and items:
+        best = items[0]
+        await _append_generated_version(db, user_id, script_id, best.text, best.providerName, best.similarity)
+    logger.info(
+        "batch_rewrite_done",
+        user_id=user_id,
+        count=count,
+        best_similarity=items[0].similarity,
+    )
+    return BatchRewriteOut(items=items, structure=structure, outline=outline)
 
 
 def _validate_taboo(text: str, taboo_words: str, avoid_topics: list[str]) -> tuple[str, bool]:

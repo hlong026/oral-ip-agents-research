@@ -12,6 +12,8 @@ from app.modules.billing.service import metered_operation, quote_operation_unit
 from app.providers.duration_probe import probe_media_bytes
 
 from .schemas import (
+    BatchRewriteIn,
+    BatchRewriteOut,
     ParseIn,
     ParseOut,
     ProbeUrlIn,
@@ -28,6 +30,7 @@ from .schemas import (
     TopicsOut,
 )
 from .service import (
+    batch_rewrite,
     create_script,
     get_script,
     list_script_versions,
@@ -177,6 +180,31 @@ async def api_rewrite(body: RewriteIn, user_id: str = Depends(get_current_user_i
         {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": 1},
     ):
         return await rewrite(db, user_id, body.text, body.intensity, body.prompt, body.scriptId)
+
+
+@router.post("/rewrite/batch", response_model=BatchRewriteOut)
+async def api_batch_rewrite(
+    body: BatchRewriteIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    characters = max(1, len(body.text) * body.count)
+    async with metered_operation(
+        db,
+        user_id,
+        body.quoteId,
+        "script_generation",
+        {"characters": characters, "tokens": max(1, (characters + 1) // 2), "assets": body.count},
+    ):
+        return await batch_rewrite(
+            db,
+            user_id,
+            body.text,
+            body.intensity,
+            body.count,
+            body.prompt,
+            body.scriptId,
+        )
 
 
 @router.post("/similarity", response_model=SimilarityOut)

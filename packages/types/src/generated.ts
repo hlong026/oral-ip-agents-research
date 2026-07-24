@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T10:01:55.293Z
+ * API 版本：1.0.0 · 生成时间：2026-07-24T08:21:41.177Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -82,6 +82,28 @@ export interface BatchGenerateOut {
   batchId: string;
   generated: number;
   codes: string[];
+}
+
+export interface BatchRewriteIn {
+  text: string;
+  intensity?: string;
+  count?: number;
+  prompt?: string | null;
+  scriptId?: string | null;
+  quoteId?: string | null;
+}
+
+export interface BatchRewriteItemOut {
+  text: string;
+  similarity: number;
+  strategy: string;
+  providerName: string;
+}
+
+export interface BatchRewriteOut {
+  items: BatchRewriteItemOut[];
+  structure: Record<string, unknown>;
+  outline: string;
 }
 
 export interface Body_api_clone_api_v1_voices_clone_post {

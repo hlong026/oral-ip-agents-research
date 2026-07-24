@@ -125,6 +125,17 @@ class MockLLM:
         await asyncio.sleep(1.2)
         return MOCK_SCRIPT
 
+    async def generate_script_variant(
+        self,
+        outline: str,
+        persona_ctx: str,
+        constraints: dict,
+        temperature: float,
+        strategy: str,
+    ) -> str:
+        await asyncio.sleep(0.2)
+        return f"【{strategy} · {temperature:.1f}】\n{MOCK_SCRIPT}"
+
     async def polish_light(self, text: str, persona_ctx: str) -> str:
         await asyncio.sleep(0.8)
         return f"【人设润色】\n{text.strip()}"

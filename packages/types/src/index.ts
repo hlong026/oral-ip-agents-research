@@ -283,6 +283,17 @@ export interface RewriteResult {
   validationPassed: boolean;
 }
 
+export interface BatchRewriteResult {
+  items: {
+    text: string;
+    similarity: number;
+    strategy: string;
+    providerName: string;
+  }[];
+  structure: Record<string, unknown>;
+  outline: string;
+}
+
 /** 文案资产（文案工坊） */
 export interface Script {
   id: string;

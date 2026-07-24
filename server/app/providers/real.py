@@ -63,7 +63,7 @@ class DeepSeekLLM:
         return await get_config("deepseek_model", "deepseek-chat")
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8))
-    async def _chat(self, system: str, user: str) -> str:
+    async def _chat(self, system: str, user: str, temperature: float = 0.8) -> str:
         client = await self._get_client()
         model = await self._get_model()
         try:
@@ -75,7 +75,7 @@ class DeepSeekLLM:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    "temperature": 0.8,
+                    "temperature": temperature,
                 },
             )
             resp.raise_for_status()
@@ -179,6 +179,31 @@ class DeepSeekLLM:
             taboo_words=constraints.get("taboo_words", "无"),
         )
         return await self._chat(SCRIPT_GENERATION_SYSTEM, user)
+
+    async def generate_script_variant(
+        self,
+        outline: str,
+        persona_ctx: str,
+        constraints: dict,
+        temperature: float,
+        strategy: str,
+    ) -> str:
+        duration = constraints.get("duration", 60)
+        extra_prompt = constraints.get("extra_prompt", "")
+        user = (
+            f"人设：\n{persona_ctx or '保持自然、可信的中文口播表达'}\n\n"
+            f"大纲：\n{outline}\n\n"
+            f"本候选策略：{strategy}\n"
+            f"目标时长：{duration} 秒\n"
+            f"CTA 风格：{constraints.get('cta_style', '关注收藏')}\n"
+            f"禁忌词：{constraints.get('taboo_words', '无')}\n"
+            f"额外要求：{extra_prompt or '无'}"
+        )
+        return await self._chat(
+            "你是短视频口播文案专家。请严格沿用给定大纲，但按候选策略生成一篇完整且可直接拍摄的独立文案。",
+            user,
+            temperature=temperature,
+        )
 
     async def polish_light(self, text: str, persona_ctx: str) -> str:
         from app.modules.content.prompts import LIGHT_POLISH_SYSTEM, LIGHT_POLISH_USER

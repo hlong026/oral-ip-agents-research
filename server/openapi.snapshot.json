@@ -1450,6 +1450,50 @@
         ]
       }
     },
+    "/api/v1/content/rewrite/batch": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Batch Rewrite",
+        "operationId": "api_batch_rewrite_api_v1_content_rewrite_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRewriteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchRewriteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/content/similarity": {
       "post": {
         "tags": ["content"],
@@ -5557,6 +5601,111 @@
         "required": ["batchId", "generated", "codes"],
         "title": "BatchGenerateOut",
         "description": "批量生成返回"
+      },
+      "BatchRewriteIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "intensity": {
+            "type": "string",
+            "title": "Intensity",
+            "default": "structure"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 5,
+            "minimum": 2,
+            "title": "Count",
+            "default": 3
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "scriptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scriptid"
+          },
+          "quoteId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quoteid"
+          }
+        },
+        "type": "object",
+        "required": ["text"],
+        "title": "BatchRewriteIn"
+      },
+      "BatchRewriteItemOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          },
+          "strategy": {
+            "type": "string",
+            "title": "Strategy"
+          },
+          "providerName": {
+            "type": "string",
+            "title": "Providername"
+          }
+        },
+        "type": "object",
+        "required": ["text", "similarity", "strategy", "providerName"],
+        "title": "BatchRewriteItemOut"
+      },
+      "BatchRewriteOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchRewriteItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "structure": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Structure"
+          },
+          "outline": {
+            "type": "string",
+            "title": "Outline"
+          }
+        },
+        "type": "object",
+        "required": ["items", "structure", "outline"],
+        "title": "BatchRewriteOut"
       },
       "Body_api_clone_api_v1_voices_clone_post": {
         "properties": {

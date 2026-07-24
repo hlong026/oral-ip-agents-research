@@ -4,6 +4,7 @@
 import type {
   AuthTokens,
   Avatar,
+  BatchRewriteResult,
   DashboardOverview,
   FeedEvent,
   ModulePriceCatalog,
@@ -158,6 +159,22 @@ export const contentApi = {
     http.post<RewriteResult>("/content/rewrite", {
       text,
       intensity,
+      prompt,
+      scriptId,
+      quoteId,
+    }),
+  batchRewrite: (
+    text: string,
+    intensity: RewriteIntensity,
+    count = 3,
+    prompt?: string,
+    scriptId?: string,
+    quoteId?: string,
+  ) =>
+    http.post<BatchRewriteResult>("/content/rewrite/batch", {
+      text,
+      intensity,
+      count,
       prompt,
       scriptId,
       quoteId,

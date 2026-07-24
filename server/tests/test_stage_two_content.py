@@ -310,6 +310,81 @@ def test_upload_validation_rejects_oversized_payload(monkeypatch) -> None:
     assert exc_info.value.detail["code"] == "FILE_TOO_LARGE"
 
 
+async def test_batch_rewrite_returns_ranked_variants(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import SimilarityResult
+
+    generated = 0
+
+    async def provider_call(_kind, _chain, method: str, *args, **_kwargs):
+        nonlocal generated
+        if method == "analyze_structure":
+            return {"hook_type": "提问"}, "deepseek-v3"
+        if method == "generate_outline":
+            return "[钩子] 提出问题\n[CTA] 关注", "deepseek-v3"
+        if method == "generate_script_variant":
+            generated += 1
+            return f"候选文案 {generated}", "deepseek-v3"
+        if method == "check_similarity":
+            score = 70.0 if args[0].endswith("1") else 30.0
+            return SimilarityResult(score=score), "deepseek-v3"
+        raise AssertionError(method)
+
+    monkeypatch.setattr(service.registry, "run_with_fallback", provider_call)
+
+    async with SessionLocal() as db:
+        result = await service.batch_rewrite(
+            db,
+            "batch-user",
+            "原始文案",
+            "structure",
+            2,
+            None,
+            None,
+        )
+
+    assert [item.text for item in result.items] == ["候选文案 2", "候选文案 1"]
+    assert [item.similarity for item in result.items] == [30.0, 70.0]
+    assert all(item.strategy for item in result.items)
+
+
+def test_batch_rewrite_count_is_limited() -> None:
+    from pydantic import ValidationError
+
+    from app.modules.content.schemas import BatchRewriteIn
+
+    assert BatchRewriteIn(text="测试", count=3).count == 3
+    with pytest.raises(ValidationError):
+        BatchRewriteIn(text="测试", count=1)
+    with pytest.raises(ValidationError):
+        BatchRewriteIn(text="测试", count=6)
+
+
+async def test_deepseek_variant_uses_requested_strategy_and_temperature(monkeypatch) -> None:
+    from app.providers.real import DeepSeekLLM
+
+    captured: dict[str, object] = {}
+    provider = DeepSeekLLM()
+
+    async def chat(system: str, user: str, temperature: float = 0.8) -> str:
+        captured.update(system=system, user=user, temperature=temperature)
+        return "候选文案"
+
+    monkeypatch.setattr(provider, "_chat", chat)
+
+    result = await provider.generate_script_variant(
+        "[钩子] 测试",
+        "专业顾问",
+        {"duration": 60, "cta_style": "私信咨询", "taboo_words": "绝对"},
+        1.1,
+        "转换表达视角",
+    )
+
+    assert result == "候选文案"
+    assert captured["temperature"] == 1.1
+    assert "转换表达视角" in str(captured["user"])
+
+
 async def test_similarity_compares_rewrite_with_source_text() -> None:
     from app.providers.real import DeepSeekLLM
 
