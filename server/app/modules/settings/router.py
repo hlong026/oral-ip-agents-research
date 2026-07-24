@@ -1,20 +1,24 @@
 """Provider 配置控制面。"""
 
 import re
+from typing import Literal, cast
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit
 from app.core.db import get_db
 from app.core.deps import require_admin
+from app.core.logging import get_logger
 
 from .models import ProviderConfig
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 provider_router = APIRouter(prefix="/providers", tags=["admin-providers"])
+logger = get_logger("oral.settings.providers")
 
 # 前端可配置的 key 白名单
 ALLOWED_KEYS = {
@@ -59,6 +63,65 @@ class SettingsOut(BaseModel):
 
 class SettingsIn(BaseModel):
     settings: dict[str, str]
+
+
+class ProviderStatusItem(BaseModel):
+    provider: str
+    enabled: bool
+    configured: bool
+    missingFields: list[str]
+    probeMode: Literal["credential", "sample"]
+
+
+class ProviderStatusOut(BaseModel):
+    items: list[ProviderStatusItem]
+
+
+class ProviderProbeOut(BaseModel):
+    provider: str
+    status: Literal["verified", "failed", "incomplete", "needs_sample"]
+    message: str
+    details: dict[str, object] = Field(default_factory=dict)
+
+
+_PROVIDER_REQUIREMENTS = {
+    "deepseek": {
+        "enabled": "deepseek_enabled",
+        "required": (
+            ("deepseek_api_key", "API Key"),
+            ("deepseek_base_url", "Base URL"),
+            ("deepseek_model", "模型"),
+        ),
+        "probe_mode": "credential",
+    },
+    "dashscope_asr": {
+        "enabled": "dashscope_enabled",
+        "required": (
+            ("dashscope_api_key", "API Key"),
+            ("dashscope_region", "地域"),
+            ("asr_model", "异步模型"),
+            ("asr_flash_model", "短音频同步模型"),
+        ),
+        "probe_mode": "credential",
+    },
+    "hifly": {
+        "enabled": "feiying_enabled",
+        "required": (
+            ("feiying_api_key", "API Key"),
+            ("feiying_base_url", "Base URL"),
+        ),
+        "probe_mode": "credential",
+    },
+    "douyidou": {
+        "enabled": "douyidou_enabled",
+        "required": (
+            ("douyidou_app_id", "App ID"),
+            ("douyidou_app_secret", "App Secret"),
+            ("douyidou_base_url", "Base URL"),
+        ),
+        "probe_mode": "sample",
+    },
+}
 
 
 def _mask_secret(value: str) -> str:
@@ -111,7 +174,7 @@ def _validate_provider_setting(key: str, value: str) -> None:
         )
 
 
-async def _read_settings(db: AsyncSession) -> dict[str, str]:
+async def _read_effective_settings(db: AsyncSession) -> dict[str, str]:
     from sqlalchemy import select
 
     from app.core.config import get_settings as get_static_settings
@@ -126,8 +189,147 @@ async def _read_settings(db: AsyncSession) -> dict[str, str]:
         val = db_data.get(key, "")
         if not val:
             val = str(getattr(static, key, "") or "")
-        data[key] = _mask_secret(val) if key in SENSITIVE_KEYS else val
+        data[key] = val
     return data
+
+
+async def _read_settings(db: AsyncSession) -> dict[str, str]:
+    data = await _read_effective_settings(db)
+    return {key: _mask_secret(value) if key in SENSITIVE_KEYS else value for key, value in data.items()}
+
+
+def _build_provider_status(provider: str, settings: dict[str, str]) -> ProviderStatusItem:
+    spec = _PROVIDER_REQUIREMENTS[provider]
+    missing = [label for key, label in spec["required"] if not settings.get(key, "").strip()]
+    return ProviderStatusItem(
+        provider=provider,
+        enabled=settings.get(str(spec["enabled"])) == "true",
+        configured=not missing,
+        missingFields=missing,
+        probeMode=cast(Literal["credential", "sample"], spec["probe_mode"]),
+    )
+
+
+def _probe_result(
+    provider: str,
+    status_value: Literal["verified", "failed", "incomplete", "needs_sample"],
+    message: str,
+    **details: object,
+) -> ProviderProbeOut:
+    return ProviderProbeOut(provider=provider, status=status_value, message=message, details=details)
+
+
+async def _probe_provider(provider: str, settings: dict[str, str]) -> ProviderProbeOut:
+    if provider not in _PROVIDER_REQUIREMENTS:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "PROVIDER_NOT_FOUND", "message": "未知 Provider"},
+        )
+    provider_status = _build_provider_status(provider, settings)
+    if not provider_status.configured:
+        return _probe_result(
+            provider,
+            "incomplete",
+            "配置不完整：" + "、".join(provider_status.missingFields),
+            missingFields=provider_status.missingFields,
+        )
+    if provider == "douyidou":
+        return _probe_result(
+            provider,
+            "needs_sample",
+            "配置项已完整；该服务需要真实样例链接才能验证签名和解析能力",
+        )
+
+    try:
+        if provider == "deepseek":
+            base_url = settings["deepseek_base_url"].rstrip("/")
+            _validate_provider_setting("deepseek_base_url", base_url)
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                response = await client.get(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {settings['deepseek_api_key']}"},
+                )
+                response.raise_for_status()
+            models = [
+                item["id"]
+                for item in response.json().get("data", [])
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            ]
+            selected_model = settings["deepseek_model"]
+            if selected_model not in models:
+                logger.warning(
+                    "provider_probe_model_unavailable",
+                    provider=provider,
+                    selected_model=selected_model,
+                )
+                available = "、".join(models[:5]) or "无"
+                return _probe_result(
+                    provider,
+                    "failed",
+                    f"凭据有效，但配置模型 {selected_model} 不可用；可用模型：{available}",
+                    models=models,
+                    selectedModel=selected_model,
+                )
+            return _probe_result(
+                provider,
+                "verified",
+                "凭据有效，配置模型可用",
+                models=models,
+                selectedModel=selected_model,
+            )
+
+        if provider == "dashscope_asr":
+            workspace_id = settings.get("dashscope_workspace_id", "")
+            region = settings["dashscope_region"]
+            if workspace_id:
+                base_url = f"https://{workspace_id}.{region}.maas.aliyuncs.com"
+            else:
+                base_url = {
+                    "cn-beijing": "https://dashscope.aliyuncs.com",
+                    "ap-southeast-1": "https://dashscope-intl.aliyuncs.com",
+                }[region]
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                response = await client.get(
+                    f"{base_url}/api/v1/files",
+                    params={"page_no": 1, "page_size": 1},
+                    headers={"Authorization": f"Bearer {settings['dashscope_api_key']}"},
+                )
+                response.raise_for_status()
+            return _probe_result(
+                provider,
+                "verified",
+                "凭据与区域端点连接正常；转写模型仍需使用真实音频验收",
+                region=region,
+                workspaceConfigured=bool(workspace_id),
+            )
+
+        base_url = settings["feiying_base_url"].rstrip("/")
+        _validate_provider_setting("feiying_base_url", base_url)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{base_url}/api/v2/hifly/account/credit",
+                headers={"Authorization": f"Bearer {settings['feiying_api_key']}"},
+            )
+            response.raise_for_status()
+        data = response.json()
+        if data.get("code", 0) != 0:
+            logger.warning("provider_probe_business_error", provider=provider, code=data.get("code"))
+            return _probe_result(provider, "failed", "凭据校验失败，请检查 API Key")
+        return _probe_result(
+            provider,
+            "verified",
+            "凭据有效，账户连接正常",
+            credits=data.get("left"),
+        )
+    except (httpx.HTTPError, KeyError, ValueError) as exc:
+        if isinstance(exc, httpx.HTTPStatusError):
+            message = f"连接失败：供应商返回 HTTP {exc.response.status_code}"
+        elif isinstance(exc, httpx.TimeoutException):
+            message = "连接超时，请检查网络或供应商状态"
+        else:
+            message = f"连接失败：{str(exc)[:120]}"
+        logger.warning("provider_probe_failed", provider=provider, error_type=type(exc).__name__)
+        return _probe_result(provider, "failed", message)
 
 
 @router.get("", response_model=SettingsOut)
@@ -186,6 +388,30 @@ async def get_providers_api(
     db: AsyncSession = Depends(get_db),
 ):
     return SettingsOut(settings=await _read_settings(db))
+
+
+@provider_router.get("/status", response_model=ProviderStatusOut)
+async def get_provider_status_api(
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    settings = await _read_effective_settings(db)
+    return ProviderStatusOut(items=[_build_provider_status(provider, settings) for provider in _PROVIDER_REQUIREMENTS])
+
+
+@provider_router.post("/{provider}/probe", response_model=ProviderProbeOut)
+async def probe_provider_api(
+    provider: str,
+    admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await _probe_provider(provider, await _read_effective_settings(db))
+    await write_audit(
+        "provider_connection_probed",
+        user_id=admin_id,
+        detail=f"provider={provider},status={result.status}",
+    )
+    return result
 
 
 @provider_router.put("", response_model=SettingsOut)

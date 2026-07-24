@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { adminApi, type ProviderConfig } from "../lib/adminHttp";
+import {
+  adminApi,
+  type ProviderConfig,
+  type ProviderProbeResult,
+} from "../lib/adminHttp";
 
 const fallbackProviders: ProviderConfig[] = [
   {
@@ -41,6 +45,9 @@ export default function ProvidersPage() {
   });
   const [items, setItems] = useState(fallbackProviders);
   const [message, setMessage] = useState("");
+  const [probeResults, setProbeResults] = useState<
+    Record<string, ProviderProbeResult>
+  >({});
 
   useEffect(() => {
     if (data && data.length > 0) setItems(data);
@@ -52,6 +59,15 @@ export default function ProvidersPage() {
     onSuccess: async () => {
       setMessage("Provider 配置已保存");
       await queryClient.invalidateQueries({ queryKey: ["admin-providers"] });
+    },
+  });
+  const probe = useMutation({
+    mutationFn: adminApi.probeProvider,
+    onSuccess: (result) => {
+      setProbeResults((current) => ({
+        ...current,
+        [result.provider]: result,
+      }));
     },
   });
 
@@ -89,8 +105,14 @@ export default function ProvidersPage() {
                 <h2 className="font-semibold">{provider.displayName}</h2>
                 <p className="mt-1 text-xs text-text-3">{provider.provider}</p>
                 <span className="chip mt-2">
-                  {provider.apiKeyConfigured ? "密钥已配置" : "密钥未配置"}
+                  {provider.configured ? "配置完整" : "配置不完整"}
                 </span>
+                {provider.missingFields &&
+                  provider.missingFields.length > 0 && (
+                    <p className="mt-2 text-xs text-warning">
+                      缺少：{provider.missingFields.join("、")}
+                    </p>
+                  )}
               </div>
               <label className="flex items-center gap-2 text-sm text-text-2">
                 <input
@@ -184,6 +206,20 @@ export default function ProvidersPage() {
             >
               保存配置
             </button>
+            <button
+              className="btn-ghost ml-2"
+              disabled={
+                probe.isPending && probe.variables === provider.provider
+              }
+              onClick={() => probe.mutate(provider.provider)}
+            >
+              {provider.probeMode === "sample" ? "检查配置" : "测试连接"}
+            </button>
+            {probeResults[provider.provider]?.message && (
+              <p className="text-sm text-text-2">
+                {probeResults[provider.provider]?.message}
+              </p>
+            )}
           </section>
         ))}
       </div>

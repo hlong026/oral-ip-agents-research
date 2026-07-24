@@ -18,7 +18,20 @@ describe("provider configuration page", () => {
     const savedSettings: Array<Record<string, string>> = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/providers/status")) {
+          return jsonResponse({
+            items: [
+              {
+                provider: "douyidou",
+                enabled: false,
+                configured: true,
+                missingFields: [],
+                probeMode: "sample",
+              },
+            ],
+          });
+        }
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             settings: Record<string, string>;
@@ -81,7 +94,20 @@ describe("provider configuration page", () => {
     const savedSettings: Array<Record<string, string>> = [];
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/providers/status")) {
+          return jsonResponse({
+            items: [
+              {
+                provider: "dashscope_asr",
+                enabled: false,
+                configured: true,
+                missingFields: [],
+                probeMode: "credential",
+              },
+            ],
+          });
+        }
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body)) as {
             settings: Record<string, string>;
@@ -153,6 +179,76 @@ describe("provider configuration page", () => {
         }),
       );
     });
+  });
+
+  it("shows missing fields and reports a successful credential probe", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/providers/status")) {
+          return jsonResponse({
+            items: [
+              {
+                provider: "deepseek",
+                enabled: true,
+                configured: false,
+                missingFields: ["API Key"],
+                probeMode: "credential",
+              },
+              {
+                provider: "hifly",
+                enabled: true,
+                configured: true,
+                missingFields: [],
+                probeMode: "credential",
+              },
+            ],
+          });
+        }
+        if (
+          String(input).endsWith("/providers/hifly/probe") &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse({
+            provider: "hifly",
+            status: "verified",
+            message: "凭据有效，账户连接正常",
+            details: { credits: 100 },
+          });
+        }
+        return jsonResponse({
+          settings: {
+            deepseek_enabled: "true",
+            feiying_enabled: "true",
+            feiying_api_key: "configured",
+            feiying_base_url: "https://hfw-api.hifly.cc",
+          },
+        });
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProvidersPage />
+      </QueryClientProvider>,
+    );
+
+    const deepseek = (
+      await screen.findByRole("heading", { name: "DeepSeek / LLM" })
+    ).closest("section") as HTMLElement;
+    expect(await within(deepseek).findByText("缺少：API Key")).toBeVisible();
+
+    const hifly = screen
+      .getByRole("heading", { name: "HiFly 数字人/声音" })
+      .closest("section") as HTMLElement;
+    fireEvent.click(within(hifly).getByRole("button", { name: "测试连接" }));
+
+    expect(
+      await within(hifly).findByText("凭据有效，账户连接正常"),
+    ).toBeVisible();
   });
 });
 

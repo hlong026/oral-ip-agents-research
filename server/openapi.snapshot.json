@@ -4694,6 +4694,75 @@
         ]
       }
     },
+    "/api/admin/v1/providers/status": {
+      "get": {
+        "tags": ["admin-providers"],
+        "summary": "Get Provider Status Api",
+        "operationId": "get_provider_status_api_api_admin_v1_providers_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderStatusOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/v1/providers/{provider}/probe": {
+      "post": {
+        "tags": ["admin-providers"],
+        "summary": "Probe Provider Api",
+        "operationId": "probe_provider_api_api_admin_v1_providers__provider__probe_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/users": {
       "get": {
         "tags": ["admin"],
@@ -7903,6 +7972,82 @@
         "type": "object",
         "required": ["durationSeconds"],
         "title": "ProbeUrlOut"
+      },
+      "ProviderProbeOut": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["verified", "failed", "incomplete", "needs_sample"],
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": ["provider", "status", "message"],
+        "title": "ProviderProbeOut"
+      },
+      "ProviderStatusItem": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "missingFields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missingfields"
+          },
+          "probeMode": {
+            "type": "string",
+            "enum": ["credential", "sample"],
+            "title": "Probemode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "enabled",
+          "configured",
+          "missingFields",
+          "probeMode"
+        ],
+        "title": "ProviderStatusItem"
+      },
+      "ProviderStatusOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderStatusItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": ["items"],
+        "title": "ProviderStatusOut"
       },
       "PublishCapabilityOut": {
         "properties": {

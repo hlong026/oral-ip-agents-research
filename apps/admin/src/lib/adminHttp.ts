@@ -75,6 +75,16 @@ export interface ProviderConfig {
   flashThresholdSec?: number;
   apiKeyConfigured?: boolean;
   apiKey?: string;
+  configured?: boolean;
+  missingFields?: string[];
+  probeMode?: "credential" | "sample";
+}
+
+export interface ProviderProbeResult {
+  provider: string;
+  status: "verified" | "failed" | "incomplete" | "needs_sample";
+  message: string;
+  details: Record<string, unknown>;
 }
 
 export interface AdminUser {
@@ -144,6 +154,16 @@ export interface ImMonitoringSummary {
 
 interface ProviderSettingsResponse {
   settings: Record<string, string>;
+}
+
+interface ProviderStatusResponse {
+  items: Array<{
+    provider: string;
+    enabled: boolean;
+    configured: boolean;
+    missingFields: string[];
+    probeMode: "credential" | "sample";
+  }>;
 }
 
 const providerDefinitions = [
@@ -367,10 +387,22 @@ export const adminApi = {
     }),
 
   async listProviders(): Promise<ProviderConfig[]> {
-    const response = await adminFetch<ProviderSettingsResponse>("/providers");
-    return providerDefinitions.map((definition) =>
-      providerFromSettings(definition, response.settings),
-    );
+    const [response, statusResponse] = await Promise.all([
+      adminFetch<ProviderSettingsResponse>("/providers"),
+      adminFetch<ProviderStatusResponse>("/providers/status"),
+    ]);
+    return providerDefinitions.map((definition) => {
+      const provider = providerFromSettings(definition, response.settings);
+      const status = statusResponse.items.find(
+        (item) => item.provider === definition.provider,
+      );
+      return {
+        ...provider,
+        configured: status?.configured ?? provider.apiKeyConfigured,
+        missingFields: status?.missingFields ?? [],
+        probeMode: status?.probeMode ?? "credential",
+      };
+    });
   },
   async saveProvider(
     provider: string,
@@ -408,4 +440,8 @@ export const adminApi = {
       apiKeyConfigured: body.apiKeyConfigured || Boolean(body.apiKey),
     };
   },
+  probeProvider: (provider: string) =>
+    adminFetch<ProviderProbeResult>(`/providers/${provider}/probe`, {
+      method: "POST",
+    }),
 };

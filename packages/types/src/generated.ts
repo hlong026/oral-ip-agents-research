@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-24T08:21:41.177Z
+ * API 版本：1.0.0 · 生成时间：2026-07-24T08:31:33.419Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -535,6 +535,25 @@ export interface ProbeUrlIn {
 
 export interface ProbeUrlOut {
   durationSeconds: number;
+}
+
+export interface ProviderProbeOut {
+  provider: string;
+  status: "verified" | "failed" | "incomplete" | "needs_sample";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ProviderStatusItem {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  missingFields: string[];
+  probeMode: "credential" | "sample";
+}
+
+export interface ProviderStatusOut {
+  items: ProviderStatusItem[];
 }
 
 export interface PublishCapabilityOut {
