@@ -40,7 +40,12 @@ class ProviderRegistry:
     """生产链只包含真实 Provider；开发和测试才追加显式 Mock。"""
 
     def __init__(self) -> None:
-        allow_mock = get_settings().app_env in {"dev", "test"}
+        settings = get_settings()
+        allow_mock = settings.app_env in {"dev", "test"} and getattr(
+            settings,
+            "provider_mock_fallback_enabled",
+            True,
+        )
         self.llm_chain: list[LLMProvider] = [DeepSeekLLM()]
         self.parse_chain: list[ParseProvider] = [DouyidouParser(), ThirdPartyParser()]
         self.asr_chain: list[ASRProvider] = [AliyunASR()]
@@ -55,7 +60,7 @@ class ProviderRegistry:
             self.avatar_chain.append(MockAvatar())
             self.compose_chain.append(MockCompose())
         self.publish_drivers: dict[str, PublishDriver]
-        if get_settings().app_env == "dev":
+        if settings.app_env == "dev":
             self.publish_drivers = {
                 platform: MockPublishDriver(platform) for platform in ("douyin", "xiaohongshu", "shipinhao")
             }
@@ -67,15 +72,17 @@ class ProviderRegistry:
             }
         # IM 不允许 Mock 降级：否则模拟响应会污染真实发送状态和灰度指标。
         self.im_drivers: dict[str, IMProvider] = {}
-        if get_settings().im_enabled and get_settings().douyin_im_app_key:
+        if settings.im_enabled and settings.douyin_im_app_key:
             self.im_drivers["douyin"] = DouyinIMProvider()
 
     async def provider_enabled(self, provider_name: str) -> bool:
         """真实 Provider 必须服从管理端开关；开发环境保留 Mock 降级体验。"""
-        if get_settings().app_env in {"dev", "test"}:
-            return True
         provider_switches = {
+            "deepseek-v3": "deepseek_enabled",
             "douyidou": "douyidou_enabled",
+            "aliyun-fun-asr": "dashscope_enabled",
+            "hifly-voice": "feiying_enabled",
+            "hifly-avatar": "feiying_enabled",
         }
         switch = provider_switches.get(provider_name)
         if switch is None:

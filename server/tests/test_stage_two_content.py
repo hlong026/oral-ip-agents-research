@@ -190,6 +190,46 @@ async def test_production_provider_chains_never_include_mock(monkeypatch) -> Non
     assert not hasattr(production_registry, "_publish_mock_fallback")
 
 
+async def test_acceptance_mode_removes_mock_provider_fallback(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.providers import registry as registry_module
+
+    acceptance = SimpleNamespace(
+        app_env="dev",
+        provider_mock_fallback_enabled=False,
+        im_enabled=False,
+        douyin_im_app_key="",
+    )
+    monkeypatch.setattr(registry_module, "get_settings", lambda: acceptance)
+
+    acceptance_registry = registry_module.ProviderRegistry()
+
+    chains = [
+        acceptance_registry.llm_chain,
+        acceptance_registry.parse_chain,
+        acceptance_registry.asr_chain,
+        acceptance_registry.voice_chain,
+        acceptance_registry.avatar_chain,
+        acceptance_registry.compose_chain,
+    ]
+    assert all(not provider.name.startswith("mock") for chain in chains for provider in chain)
+
+
+async def test_development_provider_switch_disables_real_provider(monkeypatch) -> None:
+    from app.core import dynamic_config
+    from app.providers.registry import ProviderRegistry
+
+    async def disabled_config(_key: str, _default: str = "") -> str:
+        return "false"
+
+    monkeypatch.setattr(dynamic_config, "get_config", disabled_config)
+    provider_registry = ProviderRegistry()
+
+    assert await provider_registry.provider_enabled("deepseek-v3") is False
+    assert await provider_registry.provider_enabled("mock-llm") is True
+
+
 async def test_similarity_compares_rewrite_with_source_text() -> None:
     from app.providers.real import DeepSeekLLM
 

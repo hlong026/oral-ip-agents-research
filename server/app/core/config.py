@@ -82,6 +82,7 @@ class Settings(BaseSettings):
 
     # 流水线并发闸门（F-406）
     pipeline_max_concurrency: int = 5
+    provider_mock_fallback_enabled: bool = True
 
     # 发布模块（social-auto-upload 浏览器自动化）
     # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口
