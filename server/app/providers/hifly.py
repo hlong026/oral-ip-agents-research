@@ -60,7 +60,7 @@ class HiFlyClient:
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
-        self._client_token: str = ""
+        self._client_config: tuple[str, str] | None = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         """动态获取 HTTP 客户端（凭据变更时自动重建）"""
@@ -68,7 +68,8 @@ class HiFlyClient:
         base_url = await get_config("feiying_base_url", "https://hfw-api.hifly.cc")
         if not token:
             raise StepRecoverableError("声音/数字人服务未配置，请在设置页填写 API Key")
-        if self._client is None or self._client_token != token:
+        client_config = (token, base_url)
+        if self._client is None or self._client_config != client_config:
             if self._client:
                 await self._client.aclose()
             self._client = httpx.AsyncClient(
@@ -76,7 +77,7 @@ class HiFlyClient:
                 headers={"Authorization": f"Bearer {token}"},
                 timeout=httpx.Timeout(60.0),
             )
-            self._client_token = token
+            self._client_config = client_config
         return self._client
 
     @property

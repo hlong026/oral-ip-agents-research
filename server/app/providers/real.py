@@ -39,7 +39,7 @@ class DeepSeekLLM:
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
-        self._client_key: str = ""  # 用于检测凭据变更时重建 client
+        self._client_config: tuple[str, str] | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """动态获取 HTTP 客户端（凭据变更时自动重建）"""
@@ -47,8 +47,8 @@ class DeepSeekLLM:
         base_url = await get_config("deepseek_base_url", "https://api.deepseek.com/v1")
         if not api_key:
             raise StepRecoverableError("deepseek key 未配置，请在设置页填写")
-        # 凭据变更时重建 client
-        if self._client is None or self._client_key != api_key:
+        client_config = (api_key, base_url)
+        if self._client is None or self._client_config != client_config:
             if self._client:
                 await self._client.aclose()
             self._client = httpx.AsyncClient(
@@ -56,7 +56,7 @@ class DeepSeekLLM:
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=TIMEOUT,
             )
-            self._client_key = api_key
+            self._client_config = client_config
         return self._client
 
     async def _get_model(self) -> str:
