@@ -199,9 +199,11 @@ class DouyidouParser:
                     return num / 1000.0 if num > 10000 else num
                 except (ValueError, TypeError):
                     continue
-        # 尝试嵌套在 video_info 中
-        video_info = payload.get("video_info") or {}
-        if isinstance(video_info, dict):
+        # 抖音响应把时长放在 other，其他平台可能放在 video_info
+        for nested_key in ("other", "video_info"):
+            video_info = payload.get(nested_key) or {}
+            if not isinstance(video_info, dict):
+                continue
             for key in ("duration", "time"):
                 val = video_info.get(key)
                 if val is not None:
