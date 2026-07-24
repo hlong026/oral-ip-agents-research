@@ -11,6 +11,7 @@ _TMP = tempfile.mkdtemp(prefix="oral-test-")
 os.environ["APP_ENV"] = "test"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP}/test.db"
 os.environ["LOCAL_STORAGE_DIR"] = os.path.join(_TMP, "storage")
+os.environ["STORAGE_DRIVER"] = "local"
 os.environ["REDIS_URL"] = "redis://127.0.0.1:1/9"  # 不可达 → 降级进程内广播
 os.environ["APP_SECRET"] = "test-secret"
 os.environ["CONFIG_ENCRYPTION_KEY"] = "test-config-encryption-key"
