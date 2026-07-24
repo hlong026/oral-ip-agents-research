@@ -6,6 +6,7 @@ URL/ID 识别器：自动识别平台（抖音/小红书）并标准化为可解
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from urllib.parse import parse_qs, urlsplit
 
 
 class Platform(StrEnum):
@@ -41,6 +42,24 @@ XHS_PATTERNS: list[re.Pattern] = [
 ]
 XHS_ID_PATTERN = re.compile(r"^[0-9a-f]{24}$")  # 笔记ID（24位hex）
 
+URL_PATTERN = re.compile(r"https?://[^\s<>'\"]+")
+URL_TRAILING_PUNCTUATION = ".,;:!?，。；：！？、)）]】}"
+
+
+def _extract_url(text: str) -> str:
+    match = URL_PATTERN.search(text)
+    return match.group(0).rstrip(URL_TRAILING_PUNCTUATION) if match else text
+
+
+def _canonical_douyin_modal_url(url: str) -> str | None:
+    parsed = urlsplit(url)
+    if parsed.hostname not in {"douyin.com", "www.douyin.com"}:
+        return None
+    modal_id = parse_qs(parsed.query).get("modal_id", [""])[0]
+    if not DOUYIN_ID_PATTERN.fullmatch(modal_id):
+        return None
+    return f"https://www.douyin.com/jingxuan?modal_id={modal_id}"
+
 
 def resolve_input(raw: str) -> ResolvedInput:
     """
@@ -63,23 +82,28 @@ def resolve_input(raw: str) -> ResolvedInput:
         url = f"https://www.xiaohongshu.com/explore/{text}"
         return ResolvedInput(platform=Platform.XIAOHONGSHU, url=url, raw_input=raw, is_id=True)
 
+    url = _extract_url(text)
+    canonical_douyin_url = _canonical_douyin_modal_url(url)
+    if canonical_douyin_url:
+        return ResolvedInput(platform=Platform.DOUYIN, url=canonical_douyin_url, raw_input=raw)
+
     # URL 形式：匹配平台
     for pat in DOUYIN_PATTERNS:
-        if pat.search(text):
-            return ResolvedInput(platform=Platform.DOUYIN, url=text, raw_input=raw)
+        if pat.search(url):
+            return ResolvedInput(platform=Platform.DOUYIN, url=url, raw_input=raw)
 
     for pat in XHS_PATTERNS:
-        if pat.search(text):
-            return ResolvedInput(platform=Platform.XIAOHONGSHU, url=text, raw_input=raw)
+        if pat.search(url):
+            return ResolvedInput(platform=Platform.XIAOHONGSHU, url=url, raw_input=raw)
 
     # 通用URL：透传给 Douyidou（其内部支持多平台）
-    if text.startswith(("http://", "https://")):
+    if url.startswith(("http://", "https://")):
         # 尝试从域名推断平台
-        if "douyin" in text:
-            return ResolvedInput(platform=Platform.DOUYIN, url=text, raw_input=raw)
-        if "xiaohongshu" in text or "xhslink" in text:
-            return ResolvedInput(platform=Platform.XIAOHONGSHU, url=text, raw_input=raw)
-        return ResolvedInput(platform=Platform.UNKNOWN, url=text, raw_input=raw)
+        if "douyin" in url:
+            return ResolvedInput(platform=Platform.DOUYIN, url=url, raw_input=raw)
+        if "xiaohongshu" in url or "xhslink" in url:
+            return ResolvedInput(platform=Platform.XIAOHONGSHU, url=url, raw_input=raw)
+        return ResolvedInput(platform=Platform.UNKNOWN, url=url, raw_input=raw)
 
     # 无法识别的输入
     return ResolvedInput(platform=Platform.UNKNOWN, url=text, raw_input=raw)
