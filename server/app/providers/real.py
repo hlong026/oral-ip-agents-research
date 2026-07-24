@@ -2,7 +2,7 @@
 真实 Provider 实现骨架
 - DeepSeek（LLM 主力，OpenAI 兼容协议）
 - 声音克隆 + 数字人已迁移到 hifly.py（HiFlyVoice / HiFlyAvatar）
-- 超时 30s + 重试 2 次（tenacity），失败抛 StepRecoverableError 触发降级链
+- 生成读取超时 90s + 重试 2 次（tenacity），失败抛 StepRecoverableError 触发降级链
 - 凭据从前端设置页动态读取（dynamic_config），保存即时生效无需重启
 """
 
@@ -29,7 +29,7 @@ from .base import (
 from .media_quality import inspect_media
 
 settings = get_settings()
-TIMEOUT = httpx.Timeout(30.0)
+TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
 
 
 class DeepSeekLLM:
@@ -62,7 +62,7 @@ class DeepSeekLLM:
     async def _get_model(self) -> str:
         return await get_config("deepseek_model", "deepseek-chat")
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8))
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8), reraise=True)
     async def _chat(self, system: str, user: str, temperature: float = 0.8) -> str:
         client = await self._get_client()
         model = await self._get_model()
