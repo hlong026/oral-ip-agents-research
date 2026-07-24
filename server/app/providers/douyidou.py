@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -72,10 +72,13 @@ class DouyidouParser:
 
     def _sign(self, params: dict[str, str], app_secret: str) -> str:
         """MD5签名：参数按key排序 → k=v& 拼接 → 末尾追加 appSecret → MD5"""
-        sorted_keys = sorted(params.keys())
-        parts = [f"{k}={quote(str(params[k]))}" for k in sorted_keys]
-        pre_str = "&".join(parts) + app_secret
+        pre_str = self._encode_params(params) + app_secret
         return hashlib.md5(pre_str.encode()).hexdigest()
+
+    @staticmethod
+    def _encode_params(params: dict[str, str]) -> str:
+        """与官方 SDK 一致，排序后使用 quote_plus 规则编码完整参数。"""
+        return urlencode(sorted(params.items()))
 
     @retry(
         stop=stop_after_attempt(2),
@@ -94,10 +97,7 @@ class DouyidouParser:
 
         sign = self._sign(params, app_secret)
 
-        # 构造排序后的查询字符串
-        sorted_keys = sorted(params.keys())
-        query_parts = [f"{k}={quote(str(params[k]))}" for k in sorted_keys]
-        query_string = "&".join(query_parts)
+        query_string = self._encode_params(params)
         full_url = f"{base_url}/api/parse?{query_string}"
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
