@@ -258,9 +258,69 @@ describe("provider configuration page", () => {
       .closest("section") as HTMLElement;
     fireEvent.click(within(hifly).getByRole("button", { name: "测试连接" }));
 
-    expect(
-      await within(hifly).findByText("凭据有效，账户连接正常"),
-    ).toBeVisible();
+    const successToast = await screen.findByRole("status", {
+      name: "HiFly 数字人/声音连接测试成功",
+    });
+    expect(successToast).toHaveTextContent("凭据有效，账户连接正常");
+  });
+
+  it("shows a prominent failure toast when a credential probe fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/providers/status")) {
+          return jsonResponse({
+            items: [
+              {
+                provider: "deepseek",
+                enabled: true,
+                configured: true,
+                missingFields: [],
+                probeMode: "credential",
+              },
+            ],
+          });
+        }
+        if (
+          String(input).endsWith("/providers/deepseek/probe") &&
+          init?.method === "POST"
+        ) {
+          return jsonResponse({
+            provider: "deepseek",
+            status: "failed",
+            message: "连接失败：401 Unauthorized",
+            details: {},
+          });
+        }
+        return jsonResponse({
+          settings: {
+            deepseek_enabled: "true",
+            deepseek_api_key: "configured",
+            deepseek_base_url: "https://api.deepseek.com/v1",
+            deepseek_model: "deepseek-chat",
+          },
+        });
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProvidersPage />
+      </QueryClientProvider>,
+    );
+
+    const deepseek = (
+      await screen.findByRole("heading", { name: "DeepSeek / LLM" })
+    ).closest("section") as HTMLElement;
+    fireEvent.click(within(deepseek).getByRole("button", { name: "测试连接" }));
+
+    const failureToast = await screen.findByRole("alert", {
+      name: "DeepSeek / LLM连接测试失败",
+    });
+    expect(failureToast).toHaveTextContent("连接失败：401 Unauthorized");
   });
 });
 

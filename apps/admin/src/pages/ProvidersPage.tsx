@@ -37,6 +37,13 @@ const fallbackProviders: ProviderConfig[] = [
   },
 ];
 
+type ProbeFeedback = {
+  providerName: string;
+  title: string;
+  message: string;
+  tone: "success" | "warning" | "error";
+};
+
 export default function ProvidersPage() {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -45,9 +52,9 @@ export default function ProvidersPage() {
   });
   const [items, setItems] = useState(fallbackProviders);
   const [message, setMessage] = useState("");
-  const [probeResults, setProbeResults] = useState<
-    Record<string, ProviderProbeResult>
-  >({});
+  const [probeFeedback, setProbeFeedback] = useState<ProbeFeedback | null>(
+    null,
+  );
 
   useEffect(() => {
     if (data && data.length > 0) setItems(data);
@@ -64,10 +71,27 @@ export default function ProvidersPage() {
   const probe = useMutation({
     mutationFn: adminApi.probeProvider,
     onSuccess: (result) => {
-      setProbeResults((current) => ({
-        ...current,
-        [result.provider]: result,
-      }));
+      const providerName =
+        items.find((item) => item.provider === result.provider)?.displayName ||
+        result.provider;
+      const presentation = probePresentation(result);
+      setProbeFeedback({
+        providerName,
+        message: result.message,
+        ...presentation,
+      });
+    },
+    onError: (probeError, provider) => {
+      const providerName =
+        items.find((item) => item.provider === provider)?.displayName ||
+        provider;
+      setProbeFeedback({
+        providerName,
+        title: "连接测试失败",
+        message:
+          probeError instanceof Error ? probeError.message : "连接测试失败",
+        tone: "error",
+      });
     },
   });
 
@@ -81,6 +105,12 @@ export default function ProvidersPage() {
 
   return (
     <div className="space-y-5">
+      {probeFeedback && (
+        <ProbeToast
+          feedback={probeFeedback}
+          onClose={() => setProbeFeedback(null)}
+        />
+      )}
       <div>
         <h1 className="text-2xl font-semibold">Provider 配置</h1>
         <p className="mt-2 text-sm text-text-3">
@@ -207,15 +237,74 @@ export default function ProvidersPage() {
               }
               onClick={() => probe.mutate(provider.provider)}
             >
-              {provider.probeMode === "sample" ? "检查配置" : "测试连接"}
+              {probe.isPending && probe.variables === provider.provider
+                ? "测试中..."
+                : provider.probeMode === "sample"
+                  ? "检查配置"
+                  : "测试连接"}
             </button>
-            {probeResults[provider.provider]?.message && (
-              <p className="text-sm text-text-2">
-                {probeResults[provider.provider]?.message}
-              </p>
-            )}
           </section>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function probePresentation(
+  result: ProviderProbeResult,
+): Pick<ProbeFeedback, "title" | "tone"> {
+  if (result.status === "verified") {
+    return { title: "连接测试成功", tone: "success" };
+  }
+  if (result.status === "needs_sample") {
+    return { title: "需要真实样例", tone: "warning" };
+  }
+  if (result.status === "incomplete") {
+    return { title: "配置不完整", tone: "warning" };
+  }
+  return { title: "连接测试失败", tone: "error" };
+}
+
+function ProbeToast({
+  feedback,
+  onClose,
+}: {
+  feedback: ProbeFeedback;
+  onClose: () => void;
+}) {
+  const toneClass =
+    feedback.tone === "success"
+      ? "border-success/50 bg-success/10"
+      : feedback.tone === "warning"
+        ? "border-warning/50 bg-warning/10"
+        : "border-danger/50 bg-danger/10";
+  const icon =
+    feedback.tone === "success" ? "✓" : feedback.tone === "warning" ? "!" : "×";
+
+  return (
+    <div
+      role={feedback.tone === "error" ? "alert" : "status"}
+      aria-label={`${feedback.providerName}${feedback.title}`}
+      className={`fixed right-6 top-6 z-50 w-[min(26rem,calc(100vw-3rem))] rounded-2xl border p-4 shadow-2xl backdrop-blur-xl ${toneClass}`}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-current text-lg font-semibold">
+          {icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            {feedback.providerName} · {feedback.title}
+          </p>
+          <p className="mt-1 text-sm text-text-2">{feedback.message}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭连接测试提示"
+          className="text-xl leading-none text-text-3 hover:text-text-1"
+          onClick={onClose}
+        >
+          ×
+        </button>
       </div>
     </div>
   );
