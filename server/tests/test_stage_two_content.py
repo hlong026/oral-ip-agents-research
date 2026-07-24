@@ -169,6 +169,24 @@ async def test_asr_poll_limits_come_from_runtime_config(monkeypatch) -> None:
     assert config["poll_max_attempts"] == 7
 
 
+async def test_asr_region_selects_matching_public_endpoint(monkeypatch) -> None:
+    from app.providers import aliyun_asr
+
+    async def fake_get_config(key: str, default: str = "") -> str:
+        values = {
+            "dashscope_api_key": "test-key",
+            "dashscope_workspace_id": "",
+            "dashscope_region": "ap-southeast-1",
+        }
+        return values.get(key, default)
+
+    monkeypatch.setattr(aliyun_asr, "get_config", fake_get_config)
+
+    config = await aliyun_asr.AliyunASR()._get_config()
+
+    assert config["base_url"] == "https://dashscope-intl.aliyuncs.com"
+
+
 async def test_production_provider_chains_never_include_mock(monkeypatch) -> None:
     from types import SimpleNamespace
 
