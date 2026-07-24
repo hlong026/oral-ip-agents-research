@@ -19,7 +19,7 @@ import {
   type RewriteIntensity,
 } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import LinkSourceInput from "../components/LinkSourceInput";
@@ -257,10 +257,13 @@ function StepScript({
   );
   const [outline, setOutline] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const startedInitialGeneration = useRef(false);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
     if (wiz.scriptText || (!wiz.sourceUrl && !wiz.topic)) return;
+    if (startedInitialGeneration.current) return;
+    startedInitialGeneration.current = true;
     setLoading(true);
     setError("");
     setDegraded(false);
