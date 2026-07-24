@@ -206,7 +206,9 @@ async def probe_url_duration(url: str, *, required: bool) -> float | None:
     """在报价前解析直链，并只返回供应商值或 ffprobe 验证值。"""
     resolved = resolve_input(url)
     result: DouyidouParseResult | None = None
+    fallback_chain = registry.parse_chain
     if await registry.provider_enabled("douyidou"):
+        fallback_chain = [provider for provider in registry.parse_chain if provider.name != "douyidou"]
         try:
             result = await DouyidouParser().parse_url_full(resolved.url)
         except Exception as exc:
@@ -218,7 +220,7 @@ async def probe_url_duration(url: str, *, required: bool) -> float | None:
         try:
             parsed, _ = await registry.run_with_fallback(
                 "parse",
-                registry.parse_chain,
+                fallback_chain,
                 "parse_url",
                 resolved.url,
             )

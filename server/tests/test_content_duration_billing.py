@@ -3,6 +3,61 @@
 from contextlib import asynccontextmanager
 
 
+async def test_duration_probe_does_not_retry_douyidou_in_fallback(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import ParseResult, StepRecoverableError
+    from app.providers.douyidou import DouyidouParser
+
+    calls = {"douyidou": 0, "fallback": 0}
+
+    async def fake_enabled(_provider_name: str) -> bool:
+        return True
+
+    async def fake_douyidou_parse(self, _url: str, is_title: int = 0):
+        del self, is_title
+        calls["douyidou"] += 1
+        raise StepRecoverableError("套餐未开通")
+
+    class FallbackParser:
+        name = "third-party-parse"
+
+        async def parse_url(self, _url: str) -> ParseResult:
+            calls["fallback"] += 1
+            return ParseResult(
+                platform="douyin",
+                title="",
+                video_key="https://cdn.example.com/video.mp4",
+            )
+
+    async def fake_probe_duration(
+        video_url: str,
+        *,
+        platform: str,
+        known_duration: float | None,
+    ) -> float:
+        assert video_url == "https://cdn.example.com/video.mp4"
+        assert platform == "douyin"
+        assert known_duration is None
+        return 42.0
+
+    monkeypatch.setattr(service.registry, "provider_enabled", fake_enabled)
+    monkeypatch.setattr(
+        service.registry,
+        "parse_chain",
+        [DouyidouParser(), FallbackParser()],
+    )
+    monkeypatch.setattr(DouyidouParser, "parse_url_full", fake_douyidou_parse)
+    monkeypatch.setattr(service, "probe_duration", fake_probe_duration)
+
+    duration = await service.probe_url_duration(
+        "https://www.douyin.com/video/7623347570785471796",
+        required=True,
+    )
+
+    assert duration == 42.0
+    assert calls == {"douyidou": 1, "fallback": 1}
+
+
 async def test_url_parse_freezes_verified_duration(monkeypatch) -> None:
     from app.modules.content import router
     from app.modules.content.schemas import ParseOut
