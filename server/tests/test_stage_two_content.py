@@ -270,6 +270,24 @@ async def test_real_acceptance_requires_public_media_base_url(monkeypatch) -> No
         await storage.get_accessible_url("uploads/source.mp4", require_public=True)
 
 
+async def test_upload_asr_failure_returns_actionable_fallback(monkeypatch) -> None:
+    from app.modules.content import service
+    from app.providers.base import StepRecoverableError
+
+    async def failing_asr(*_args, **_kwargs):
+        raise StepRecoverableError("ASR 服务超时")
+
+    monkeypatch.setattr(service.registry, "run_with_fallback", failing_asr)
+
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            await service.parse_upload(db, "asr-failure-user", "source.mp4", b"video", None, 3)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "ASR_FAILED"
+    assert exc_info.value.detail["fallbacks"] == ["paste_text", "retry_upload"]
+
+
 async def test_similarity_compares_rewrite_with_source_text() -> None:
     from app.providers.real import DeepSeekLLM
 

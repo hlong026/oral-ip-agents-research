@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
+from app.providers.base import ProviderError
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import probe_duration
 from app.providers.registry import registry
@@ -253,9 +254,24 @@ async def parse_upload(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"code": "MEDIA_PUBLIC_URL_REQUIRED", "message": str(exc)},
         ) from exc
-    tr, _ = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", file_url, duration_sec=duration_seconds
-    )
+    try:
+        tr, _ = await registry.run_with_fallback(
+            "asr", registry.asr_chain, "transcribe", file_url, duration_sec=duration_seconds
+        )
+    except ProviderError as exc:
+        logger.warning(
+            "upload_asr_failed",
+            filename=filename,
+            error=str(exc)[:200],
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "ASR_FAILED",
+                "message": "语音转写暂时不可用，请重试上传或直接粘贴正文",
+                "fallbacks": ["paste_text", "retry_upload"],
+            },
+        ) from exc
     script = await _create_script_with_source_version(
         db,
         user_id=user_id,
