@@ -128,6 +128,16 @@ function StepLink({
   );
   const [uploading, setUploading] = useState(false);
 
+  const selectTab = (nextTab: "url" | "topic" | "script") => {
+    setTab(nextTab);
+    setWiz({
+      ...wiz,
+      sourceUrl: nextTab === "url" ? wiz.sourceUrl : "",
+      topic: nextTab === "topic" ? wiz.topic : "",
+      scriptText: nextTab === "script" ? wiz.scriptText : "",
+    });
+  };
+
   const upload = async (file: File) => {
     setUploading(true);
     try {
@@ -162,7 +172,7 @@ function StepLink({
         ).map(([k, label]) => (
           <button
             key={k}
-            onClick={() => setTab(k)}
+            onClick={() => selectTab(k)}
             className={`rounded-lg py-2 text-sm transition-colors ${tab === k ? "bg-brand-grad text-white" : "text-text-3 hover:text-text-1"}`}
           >
             {label}
