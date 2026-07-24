@@ -307,11 +307,65 @@ describe("CreatePage 来源模式切换", () => {
         "quote-rewrite",
       ),
     );
-    expect(
-      screen.getByRole("textbox", { name: "提取原文" }),
-    ).toHaveValue("待改写的完整原文");
+    expect(screen.getByRole("textbox", { name: "提取原文" })).toHaveValue(
+      "待改写的完整原文",
+    );
     expect(
       await screen.findByRole("textbox", { name: "IP 改写结果" }),
     ).toHaveValue("结合IP生成的新文案");
+  });
+
+  it("IP改写期间显示分阶段预计进度和长耗时说明", async () => {
+    vi.mocked(contentApi.probe).mockResolvedValue({ durationSeconds: 170 });
+    vi.mocked(confirmMeteredOperation)
+      .mockResolvedValueOnce("quote-link")
+      .mockResolvedValueOnce("quote-rewrite");
+    vi.mocked(contentApi.parse).mockResolvedValue({
+      transcript: {
+        text: "等待改写的完整原文",
+        words: [],
+        duration: 170,
+        language: "zh",
+      },
+      degraded: false,
+      scriptId: "script-progress",
+    });
+    vi.mocked(contentApi.rewrite).mockImplementation(
+      () => new Promise(() => undefined),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>
+          <CreatePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("粘贴抖音 / 小红书视频链接或视频ID…"),
+      {
+        target: {
+          value: "https://www.douyin.com/jingxuan?modal_id=progress",
+        },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "下一步 →" }));
+    await screen.findByDisplayValue("等待改写的完整原文");
+
+    fireEvent.click(screen.getByRole("button", { name: "按当前 IP 改写" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("progressbar", { name: "IP 改写预计进度" }),
+      ).toHaveAttribute("aria-valuenow", "12"),
+    );
+    expect(
+      screen.getByText(
+        "预计进度：模型将依次完成结构分析、IP 大纲和完整改写，通常需要 1–2 分钟。",
+      ),
+    ).toBeInTheDocument();
   });
 });

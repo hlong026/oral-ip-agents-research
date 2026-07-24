@@ -81,9 +81,11 @@ const initialWizard: Wizard = {
 interface OperationProgress {
   value: number;
   label: string;
+  ariaLabel?: string;
+  hint?: string;
 }
 
-function TranscriptionProgress({ progress }: { progress: OperationProgress }) {
+function OperationProgressPanel({ progress }: { progress: OperationProgress }) {
   return (
     <div
       className="rounded-xl border border-brand-to/25 bg-brand-to/5 p-3"
@@ -95,7 +97,7 @@ function TranscriptionProgress({ progress }: { progress: OperationProgress }) {
       </div>
       <div
         role="progressbar"
-        aria-label="视频转写进度"
+        aria-label={progress.ariaLabel ?? "视频转写进度"}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={progress.value}
@@ -108,7 +110,7 @@ function TranscriptionProgress({ progress }: { progress: OperationProgress }) {
       </div>
       {progress.value < 100 && (
         <p className="mt-2 text-[11px] text-text-3">
-          页面可以保持打开，失败不会扣除积分。
+          {progress.hint ?? "页面可以保持打开，失败不会扣除积分。"}
         </p>
       )}
     </div>
@@ -273,7 +275,7 @@ function StepLink({
               ? "解析上传中…"
               : "粘贴链接直接解析，或点输入框左侧图标上传本地视频/音频（视频号、解析失败时降级转写）"}
           </p>
-          {progress && <TranscriptionProgress progress={progress} />}
+          {progress && <OperationProgressPanel progress={progress} />}
           {error && (
             <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
               {error}
@@ -355,6 +357,34 @@ function StepScript({
   const startedInitialGeneration = useRef(false);
   const loadQuota = useQuota((state) => state.load);
   const currentIp = useIp((state) => state.current);
+
+  useEffect(() => {
+    if (operation !== "rewrite") return;
+    const hint =
+      "预计进度：模型将依次完成结构分析、IP 大纲和完整改写，通常需要 1–2 分钟。";
+    const progressBase = {
+      ariaLabel: "IP 改写预计进度",
+      hint,
+    };
+    setProgress({
+      ...progressBase,
+      value: 12,
+      label: "正在校验 IP 与改写要求",
+    });
+    const stages = [
+      [15_000, 32, "正在拆解原文结构"],
+      [35_000, 55, "正在生成 IP 化大纲"],
+      [60_000, 78, "正在生成完整改写文案"],
+      [90_000, 92, "正在完成去重与质量检查"],
+    ] as const;
+    const timers = stages.map(([delay, value, label]) =>
+      window.setTimeout(
+        () => setProgress({ ...progressBase, value, label }),
+        delay,
+      ),
+    );
+    return () => timers.forEach(window.clearTimeout);
+  }, [operation]);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
@@ -457,7 +487,10 @@ function StepScript({
           requirement ? `${sourceText}\n${requirement}` : sourceText,
         ),
       );
-      if (!quoteId) return;
+      if (!quoteId) {
+        setProgress(null);
+        return;
+      }
       const rw = await contentApi.rewrite(
         sourceText,
         intensity,
@@ -474,7 +507,13 @@ function StepScript({
       });
       if (rw.structure) setStructure(rw.structure);
       if (rw.outline) setOutline(rw.outline);
+      setProgress({
+        value: 100,
+        label: "IP 改写完成",
+        ariaLabel: "IP 改写预计进度",
+      });
     } catch (e) {
+      setProgress(null);
       setError(
         e instanceof HttpError
           ? e.body.message
@@ -554,7 +593,7 @@ function StepScript({
           {error}
         </div>
       )}
-      {progress && <TranscriptionProgress progress={progress} />}
+      {progress && <OperationProgressPanel progress={progress} />}
       {degraded && !error && (
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           ⚠️
