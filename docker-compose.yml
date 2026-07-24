@@ -70,7 +70,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    command: dramatiq app.workers.tasks --processes 1 --threads 4
+    command: dramatiq app.workers.tasks --processes 2 --threads 1
     env_file:
       - ./server/.env
     environment:

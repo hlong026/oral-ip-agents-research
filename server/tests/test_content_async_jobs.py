@@ -1,5 +1,6 @@
 """文案转录、改写和分析必须通过持久后台任务执行。"""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -158,3 +159,24 @@ async def test_failed_job_releases_reservation_without_settlement(monkeypatch) -
 
 async def _noop() -> None:
     return None
+
+
+def test_worker_reuses_one_event_loop_for_sequential_messages() -> None:
+    from app.workers import tasks
+
+    previous_loop = tasks._worker_loop
+    tasks._worker_loop = None
+    observed_loops: list[asyncio.AbstractEventLoop] = []
+
+    async def observe_running_loop() -> None:
+        observed_loops.append(asyncio.get_running_loop())
+
+    try:
+        tasks._run_async(observe_running_loop())
+        tasks._run_async(observe_running_loop())
+    finally:
+        if tasks._worker_loop is not None:
+            tasks._worker_loop.close()
+        tasks._worker_loop = previous_loop
+
+    assert observed_loops[0] is observed_loops[1]
