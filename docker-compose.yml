@@ -64,7 +64,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./server:/app
       - oral-storage:/app/storage
 
   worker:
@@ -84,7 +83,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./server:/app
       - oral-storage:/app/storage
 
   im-listener:
@@ -104,7 +102,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./server:/app
       - oral-storage:/app/storage
 
 volumes:
