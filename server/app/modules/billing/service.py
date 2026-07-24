@@ -497,7 +497,7 @@ async def metered_operation(
 ) -> AsyncIterator[str]:
     """为独立 Provider 调用统一执行报价冻结、成功结算和异常释放。"""
     reservation_id = await reserve_metered_operation(db, user_id, quote_id, module, measures)
-    operation_id = f"operation_{uuid.uuid4().hex}"
+    operation_id = uuid.uuid4().hex
     try:
         yield operation_id
     except BaseException:
