@@ -6,10 +6,13 @@ SAU PublishDriver 公共基类
 
 import asyncio
 import uuid
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from app.core.logging import get_logger
-from app.core.storage import local_path
+from app.core.storage import download_to_path, local_path
+from app.core.storage import settings as storage_settings
 from app.providers.base import StepRecoverableError
 
 from .browser_pool import BrowserSlot
@@ -26,6 +29,15 @@ logger = get_logger("oral.publish.driver")
 
 # 确保 SAU 环境已初始化（仅首次 import 时执行）
 setup_sau()
+
+
+async def _materialize_publish_media(key: str, directory: str, name: str) -> str:
+    if storage_settings.storage_driver == "local":
+        return str(local_path(key))
+    suffix = Path(key).suffix
+    path = Path(directory) / f"{name}{suffix}"
+    await download_to_path(key, path)
+    return str(path)
 
 
 class SAUPublishDriverBase:
@@ -130,30 +142,26 @@ class SAUPublishDriverBase:
         session_json = json.dumps(account_session, ensure_ascii=False)
         cookie_file = session_to_file(session_json, account_id or "tmp", self.platform)
 
-        # 2. 视频/封面 → 本地绝对路径
-        video_path = str(local_path(video_key))
-        cover_path = str(local_path(cover_key)) if cover_key else None
-
-        # 3. 定时发布时间解析
-        publish_date = self._parse_schedule(scheduled_at)
-
-        # 4. 在浏览器槽位内执行发布
         try:
-            async with BrowserSlot():
-                post_id = await self._do_publish(
-                    cookie_file=cookie_file,
-                    video_path=video_path,
-                    title=title,
-                    topics=topics,
-                    cover_path=cover_path,
-                    publish_date=publish_date,
-                )
-            # 5. 发布后回写 Cookie（SAU 发布过程中可能刷新）
-            updated_session = file_to_session(account_id or "tmp", self.platform)
-            if updated_session and updated_session != "{}":
-                account_session.clear()
-                account_session.update(json.loads(updated_session))
-            return post_id
+            with TemporaryDirectory(prefix="oral-publish-media-") as media_dir:
+                video_path = await _materialize_publish_media(video_key, media_dir, "video")
+                cover_path = await _materialize_publish_media(cover_key, media_dir, "cover") if cover_key else None
+                publish_date = self._parse_schedule(scheduled_at)
+
+                async with BrowserSlot():
+                    post_id = await self._do_publish(
+                        cookie_file=cookie_file,
+                        video_path=video_path,
+                        title=title,
+                        topics=topics,
+                        cover_path=cover_path,
+                        publish_date=publish_date,
+                    )
+                updated_session = file_to_session(account_id or "tmp", self.platform)
+                if updated_session and updated_session != "{}":
+                    account_session.clear()
+                    account_session.update(json.loads(updated_session))
+                return post_id
         except StepRecoverableError:
             raise
         except Exception as e:

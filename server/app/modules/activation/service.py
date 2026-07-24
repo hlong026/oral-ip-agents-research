@@ -1,5 +1,11 @@
-"""activation 业务编排（激活码注册 / 兑换 / 批量生码 / 作废）
-安全：HMAC 签名校验 + 一码一户 + 频率限制预留
+"""activation 业务编排（激活码注册 / 兑换 / 批量生码 / 作废 / 订阅升级与到期处理）
+
+认证策略：
+- 激活码是开户唯一入口，激活时绑定手机号 + 密码
+- 禁止通过手机号直接注册
+- 已登录用户可兑换新码进行续费或套餐升级
+
+安全：HMAC 签名校验 + 一码一户 + 频率限制
 """
 
 from datetime import UTC, datetime, timedelta
@@ -319,6 +325,8 @@ async def redeem(db: AsyncSession, user_id: str, raw_code: str) -> RedeemOut:
     from app.modules.auth import repository as auth_repo
 
     user = await auth_repo.get_by_id(db, user_id)
+    previous_plan = (getattr(user, "plan_type", "none") or "none") if user else "none"
+    upgrade = is_upgrade(previous_plan, plan_type)
     new_expires: datetime | None
     if user and duration_days > 0:
         current_expires = _as_utc(getattr(user, "plan_expires_at", None))
@@ -374,8 +382,12 @@ async def redeem(db: AsyncSession, user_id: str, raw_code: str) -> RedeemOut:
 
     await db.commit()
 
-    logger.info("redeem_success", user_id=user_id, plan=plan_type, quota=quota_amount)
-    await write_audit("redeem_success", user_id=user_id, detail=f"plan={plan_type},quota={quota_amount}")
+    logger.info("redeem_success", user_id=user_id, plan=plan_type, quota=quota_amount, upgrade=upgrade)
+    await write_audit(
+        "redeem_success",
+        user_id=user_id,
+        detail=f"plan={plan_type},quota={quota_amount},upgrade={upgrade}",
+    )
 
     return RedeemOut(
         planType=plan_type,
@@ -383,6 +395,8 @@ async def redeem(db: AsyncSession, user_id: str, raw_code: str) -> RedeemOut:
         planExpiresAt=new_expires.isoformat() if new_expires else None,
         quotaGranted=quota_amount,
         newBalance=acc.balance,
+        isUpgrade=upgrade,
+        previousPlanType=previous_plan,
     )
 
 
@@ -587,3 +601,59 @@ async def revoke_batch_codes(db: AsyncSession, batch_id: str, admin_id: str) -> 
 async def get_stats(db: AsyncSession) -> CodeStatsOut:
     stats = await repo.code_stats(db)
     return CodeStatsOut(**stats)
+
+
+# ---------- 订阅升级与到期处理 ----------
+
+# 套餐层级（数字越大等级越高，用于升级判断）
+PLAN_TIER: dict[str, int] = {
+    "none": 0,
+    "trial": 1,
+    "points": 1,
+    "points_pack": 1,
+    "monthly": 2,
+    "quarterly": 3,
+    "yearly": 4,
+    "annual_bundle": 4,
+}
+
+
+def _plan_tier(plan_type: str) -> int:
+    return PLAN_TIER.get(plan_type, 0)
+
+
+def is_upgrade(current_plan: str, new_plan: str) -> bool:
+    """判断新套餐是否为升级（层级更高）"""
+    return _plan_tier(new_plan) > _plan_tier(current_plan)
+
+
+async def handle_subscription_expiry(db: AsyncSession, user_id: str) -> None:
+    """检查并处理用户订阅到期：将 plan_type 置为 none，保留积分余额不清零。
+
+    可在用户登录、访问订阅状态或定时任务中安全调用（幂等）。
+    """
+    from app.modules.auth import repository as auth_repo
+
+    user = await auth_repo.get_by_id(db, user_id)
+    if not user:
+        return
+    plan_expires = _as_utc(getattr(user, "plan_expires_at", None))
+    if plan_expires is None:
+        return
+    now = datetime.now(UTC)
+    if plan_expires > now:
+        return
+    # 已到期：降级为 none
+    current_plan = getattr(user, "plan_type", "none") or "none"
+    if current_plan == "none":
+        return
+    user.plan_type = "none"  # type: ignore[attr-defined]
+    await db.commit()
+    logger.info("subscription_expired", user_id=user_id, old_plan=current_plan)
+    await write_audit("subscription_expired", user_id=user_id, detail=f"old_plan={current_plan}")
+
+
+async def get_subscription_with_expiry_check(db: AsyncSession, user_id: str) -> SubscriptionOut:
+    """查询订阅状态（先检查到期，再返回结果）"""
+    await handle_subscription_expiry(db, user_id)
+    return await get_subscription(db, user_id)

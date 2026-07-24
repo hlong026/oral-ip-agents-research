@@ -1,11 +1,14 @@
 /**
  * WebSocket 任务进度通道（06 文档 §6.2：WS 网关 + Redis Pub/Sub，推送延迟 ≤2s）
- * 自动重连（指数退避）。消息与后端事件总线三频道对齐：
+ * 自动重连（指数退避）。消息与后端事件总线四频道对齐：
  *   CHANNEL_TASKS → task_updated / publish_updated / provider_fallback
  *   CHANNEL_FEED  → feed
  *   CHANNEL_ALERT → alert
+ *   CHANNEL_IM    → im_new_message / im_auto_replied / im_listener_status
  */
 import type { FeedEvent } from "@oral/types";
+
+import type { IMMessage } from "./api";
 
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
@@ -24,9 +27,73 @@ export type TaskEvent =
       message: string;
       body?: string;
     }
+  | {
+      kind: "im_new_message";
+      conversationId: string;
+      userId?: string;
+      message?: IMMessage;
+    }
+  | {
+      kind: "im_auto_replied";
+      conversationId: string;
+      messageId: string;
+      reply?: string;
+      userId?: string;
+    }
+  | {
+      kind: "im_listener_status";
+      accountId: string;
+      status: string;
+      errorMsg?: string;
+      userId?: string;
+    }
   | { kind: "ping" };
 
 type Listener = (ev: TaskEvent) => void;
+
+type ClientEnv = { VITE_API_BASE?: string; VITE_WS_BASE?: string };
+type ImportMetaWithEnv = ImportMeta & { env?: ClientEnv };
+type RuntimeGlobal = typeof globalThis & { process?: { env?: ClientEnv } };
+
+function appendTasksPath(base: string): string {
+  const trimmed = base.trim().replace(/\/+$/, "");
+  if (trimmed.endsWith("/ws/tasks")) return trimmed;
+  if (trimmed.endsWith("/ws")) return `${trimmed}/tasks`;
+  return `${trimmed}/ws/tasks`;
+}
+
+function toWebSocketUrl(base: string): string {
+  const url = new URL(appendTasksPath(base), location.origin);
+  if (url.protocol === "https:") url.protocol = "wss:";
+  if (url.protocol === "http:") url.protocol = "ws:";
+  return url.toString();
+}
+
+function wsUrlFromApiBase(apiBase: string): string {
+  const url = new URL(apiBase, location.origin);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = "/ws/tasks";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+function buildTaskSocketUrl(): string {
+  const env = {
+    ...(globalThis as RuntimeGlobal).process?.env,
+    ...(import.meta as ImportMetaWithEnv).env,
+  };
+  const explicitWsBase = env.VITE_WS_BASE?.trim();
+  if (explicitWsBase) return toWebSocketUrl(explicitWsBase);
+
+  const apiBase = env.VITE_API_BASE?.trim();
+  if (apiBase && /^https?:\/\//.test(apiBase)) {
+    return wsUrlFromApiBase(apiBase);
+  }
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  return `${proto}://${location.host}/ws/tasks`;
+}
 
 export class TaskSocket {
   private ws: WebSocket | null = null;
@@ -37,8 +104,7 @@ export class TaskSocket {
   private token: string;
 
   constructor(token: string) {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.url = `${proto}://${location.host}/ws/tasks`;
+    this.url = buildTaskSocketUrl();
     this.token = token;
   }
 

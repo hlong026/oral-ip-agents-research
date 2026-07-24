@@ -30,6 +30,7 @@ async def _create_user(*, role: str) -> tuple[str, str]:
             role=role,
             plan_type="trial" if role == "user" else "none",
             plan_expires_at=datetime.now(UTC) + timedelta(days=30) if role == "user" else None,
+            activated_at=datetime.now(UTC),
         )
         db.add(user)
         await db.commit()
@@ -475,8 +476,9 @@ async def test_user_cannot_access_admin_control_plane(client: AsyncClient):
     plans = await client.get("/api/admin/v1/plans", headers=headers)
     providers = await client.get("/api/admin/v1/providers", headers=headers)
 
-    assert plans.status_code == 403
-    assert providers.status_code == 403
+    # 双密钥隔离：用户面令牌在管理面密钥验证阶段即失败（401，而非进入鉴权后的 403）
+    assert plans.status_code == 401
+    assert providers.status_code == 401
 
 
 async def test_admin_role_with_user_audience_cannot_access_admin_control_plane(client: AsyncClient):
@@ -485,7 +487,21 @@ async def test_admin_role_with_user_audience_cannot_access_admin_control_plane(c
         "/api/admin/v1/plans",
         headers={"Authorization": f"Bearer {tokens['accessToken']}"},
     )
-    assert response.status_code == 403
+    # aud=user 令牌由用户面密钥签发，无法通过管理面密钥验证
+    assert response.status_code == 401
+
+
+async def test_admin_can_identify_its_creator_space_from_user_profile(client: AsyncClient):
+    """管理员在用户端创作时，前端需要知道可显示管理控制台入口。"""
+    tokens = await _user_login_for_role(client, role="admin")
+
+    response = await client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {tokens['accessToken']}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["role"] == "admin"
 
 
 async def test_admin_audience_token_cannot_access_user_data_plane(client: AsyncClient):
@@ -493,7 +509,8 @@ async def test_admin_audience_token_cannot_access_user_data_plane(client: AsyncC
 
     response = await client.get("/api/v1/billing/balance", headers=headers)
 
-    assert response.status_code == 403
+    # aud=admin 令牌由管理面密钥签发，无法通过用户面密钥验证
+    assert response.status_code == 401
 
 
 async def test_disabled_user_access_token_stops_working_immediately(client: AsyncClient):
@@ -528,7 +545,7 @@ async def test_admin_credit_adjustment_uses_ledger_instead_of_raw_balance_edit(c
     deducted = await client.post(
         f"/api/admin/v1/users/{user_id}/credits/adjust",
         headers=admin_headers,
-        json={"points": -30, "reason": "纠正重复发放"},
+        json={"points": -30, "reason": "纠正重复发放", "confirm": True},  # 扣减类调整需二次确认
     )
 
     assert granted.status_code == 200, granted.text
@@ -874,6 +891,64 @@ async def test_quote_reservation_freezes_and_idempotently_releases_points(client
     assert repeated.status_code == 200, repeated.text
     assert released.json()["availablePoints"] == 500
     assert repeated.json()["availablePoints"] == 500
+
+
+async def test_admin_reservation_is_zero_cost_and_does_not_write_billing_usage(client: AsyncClient):
+    admin_tokens = await _user_login_for_role(client, role="admin")
+    admin_headers = {"Authorization": f"Bearer {admin_tokens['accessToken']}"}
+    admin_id = str(decode_token(admin_tokens["accessToken"])["sub"])
+
+    quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=admin_headers,
+        json={"items": [{"module": "tts", "quantity": 1}]},
+    )
+    assert quote.status_code == 200, quote.text
+
+    reserved = await client.post(
+        "/api/v1/billing/reservations",
+        headers=admin_headers,
+        json={"quoteId": quote.json()["quoteId"]},
+    )
+    assert reserved.status_code == 201, reserved.text
+    reservation_id = reserved.json()["items"][0]["id"]
+    assert reserved.json()["items"][0]["reservedPoints"] == 0
+
+    from sqlalchemy import func, select
+
+    from app.modules.billing.models import CreditLedger, CreditReservation, QuotaAccount, QuotaUsage
+    from app.modules.billing.service import settle_reservation
+
+    async with SessionLocal() as db:
+        reservation = await db.get(CreditReservation, reservation_id)
+        assert reservation is not None and reservation.reserved_points == 0
+        assert await settle_reservation(db, reservation_id, "admin-task") == 1
+        account_count = await db.scalar(select(func.count(QuotaAccount.id)).where(QuotaAccount.user_id == admin_id))
+        ledger_count = await db.scalar(select(func.count(CreditLedger.id)).where(CreditLedger.user_id == admin_id))
+        usage_count = await db.scalar(select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == admin_id))
+
+    assert account_count == 0
+    assert ledger_count == 0
+    assert usage_count == 0
+
+
+async def test_admin_pipeline_does_not_require_a_paid_subscription(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    admin_tokens = await _user_login_for_role(client, role="admin")
+
+    from app.modules.pipeline import service as pipeline_service
+
+    monkeypatch.setattr(pipeline_service.settings, "app_env", "dev")
+    monkeypatch.setattr(pipeline_service, "schedule_run", lambda *_args: "admin-test-job")
+    created = await client.post(
+        "/api/v1/pipelines",
+        headers={"Authorization": f"Bearer {admin_tokens['accessToken']}"},
+        json={"ipId": "admin-test-ip", "scriptText": "管理员联调文案", "mode": "manual"},
+    )
+
+    assert created.status_code == 200, created.text
+    assert len(created.json()) == 1
 
 
 async def test_same_quote_can_only_be_reserved_once_under_concurrency(client: AsyncClient):

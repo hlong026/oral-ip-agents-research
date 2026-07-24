@@ -195,8 +195,9 @@ async def test_new_admin_im_routes_reject_user_audience_and_accept_admin(client:
     )
     for method, path, body in requests:
         assert (await client.request(method, path, json=body)).status_code == 401
-        assert (await client.request(method, path, headers=user_headers, json=body)).status_code == 403
-        assert (await client.request(method, path, headers=wrong_audience_headers, json=body)).status_code == 403
+        # 用户面令牌（含 admin 角色的 aud=user 令牌）在管理面密钥验证阶段即失败（401）
+        assert (await client.request(method, path, headers=user_headers, json=body)).status_code == 401
+        assert (await client.request(method, path, headers=wrong_audience_headers, json=body)).status_code == 401
 
     assert (await client.put(f"/api/admin/v1/im/gray/accounts/{account_id}", headers=admin_headers)).status_code == 200
     assert (await client.get("/api/admin/v1/im/gray/accounts", headers=admin_headers)).status_code == 200
@@ -307,6 +308,7 @@ async def _create_user(*, role: str) -> str:
                 password_hash=hash_password("Test@12345"),
                 nickname="灰度监控测试",
                 role=role,
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

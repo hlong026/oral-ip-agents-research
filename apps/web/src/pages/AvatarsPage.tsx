@@ -2,7 +2,7 @@ import { HttpError, avatarApi, personaApi } from "@oral/api-client";
 import { useIp } from "@oral/stores";
 import type { Avatar, Persona } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AssetNav from "../components/AssetNav";
 import {
   confirmMeteredOperation,
@@ -86,8 +86,11 @@ function IpBadge({ ip }: { ip: Persona }) {
   );
 }
 
-/** 训练新分身表单（合规红线：强制 consent 授权勾选） */
+/** 训练新分身表单（合规红线：强制 consent 授权勾选）
+ *  支持两种克隆方式：视频克隆（30s–3min 口播视频）/ 图片克隆（单张正面照）
+ */
 function TrainForm({ onDone }: { onDone: () => void }) {
+  const [mode, setMode] = useState<"video" | "image">("video");
   const [name, setName] = useState("");
   const [scene, setScene] = useState("口播");
   const [consent, setConsent] = useState(false);
@@ -96,31 +99,44 @@ function TrainForm({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const switchMode = (m: "video" | "image") => {
+    setMode(m);
+    setFile(null);
+    setError("");
+    // 非受控 input：手动清空，否则重选同一文件不触发 onChange
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
   const submit = async () => {
     if (!file || !consent || !name.trim()) return;
     setBusy(true);
     setError("");
     try {
       const consentToken = `consent-${Date.now()}`;
-      const seconds = await mediaDurationSeconds(file);
-      const quoteId = await confirmMeteredOperation(
-        "digital_human",
-        "数字分身训练",
-        {
-          seconds,
-          assets: 1,
-        },
-      );
-      if (!quoteId) return;
-      await avatarApi.clone(
-        `${name.trim()} · ${scene}`,
-        consentToken,
-        file,
-        quoteId,
-      );
+      const fullName = `${name.trim()} · ${scene}`;
+      if (mode === "video") {
+        const seconds = await mediaDurationSeconds(file);
+        const quoteId = await confirmMeteredOperation(
+          "digital_human",
+          "数字分身训练",
+          { seconds, assets: 1 },
+        );
+        if (!quoteId) return;
+        await avatarApi.clone(fullName, consentToken, file, quoteId);
+      } else {
+        // 图片克隆：后端按 {seconds:1, images:1, assets:1} 计量
+        const quoteId = await confirmMeteredOperation(
+          "digital_human",
+          "图片分身克隆",
+          { seconds: 1, images: 1, assets: 1 },
+        );
+        if (!quoteId) return;
+        await avatarApi.cloneByImage(fullName, consentToken, file, quoteId);
+      }
       setName("");
       setFile(null);
       setConsent(false);
+      if (fileRef.current) fileRef.current.value = "";
       onDone();
     } catch (e) {
       setError(
@@ -135,7 +151,26 @@ function TrainForm({ onDone }: { onDone: () => void }) {
     <div className="glass-strong space-y-3 p-5">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">训练一个新的数字分身</h2>
-        <span className="text-xs text-text-3">飞影 API · 约 2 小时</span>
+        <span className="text-xs text-text-3">
+          {mode === "video" ? "飞影 API · 约 2 小时" : "图片克隆 · 更快出片"}
+        </span>
+      </div>
+      {/* 克隆方式 Tab */}
+      <div className="flex gap-2">
+        {(
+          [
+            { key: "video", label: "视频克隆" },
+            { key: "image", label: "图片克隆" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => switchMode(t.key)}
+            className={`chip px-3 py-1.5 ${mode === t.key ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
@@ -164,18 +199,26 @@ function TrainForm({ onDone }: { onDone: () => void }) {
       </div>
       <div>
         <label className="label">
-          训练素材（30s–3min 正面口播视频，1080P，MP4/MOV）
+          {mode === "video"
+            ? "训练素材（30s–3min 正面口播视频，1080P，MP4/MOV）"
+            : "训练素材（单张高清正面照，JPG/PNG，五官清晰无遮挡）"}
         </label>
         <button
           className="btn-ghost w-full border-dashed py-6 text-text-3"
           onClick={() => fileRef.current?.click()}
         >
-          {file ? `已选择：${file.name}` : "⬆ 点击选择视频文件"}
+          {file
+            ? `已选择：${file.name}`
+            : mode === "video"
+              ? "⬆ 点击选择视频文件"
+              : "⬆ 点击选择图片文件"}
         </button>
         <input
           ref={fileRef}
           type="file"
-          accept="video/*,.mp4,.mov"
+          accept={
+            mode === "video" ? "video/*,.mp4,.mov" : "image/*,.jpg,.jpeg,.png"
+          }
           className="hidden"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
@@ -202,9 +245,37 @@ function TrainForm({ onDone }: { onDone: () => void }) {
         disabled={busy || !file || !consent || !name.trim()}
         onClick={submit}
       >
-        {busy ? "训练任务创建中…" : "开始训练（约 2 小时）"}
+        {busy
+          ? "训练任务创建中…"
+          : mode === "video"
+            ? "开始训练（约 2 小时）"
+            : "开始图片克隆"}
       </button>
     </div>
+  );
+}
+
+/** 训练中分身的进度徽标：独立轮询 status 端点，就绪/失败后刷新列表 */
+function TrainingBadge({ avatarId }: { avatarId: string }) {
+  const queryClient = useQueryClient();
+  const { data } = useQuery({
+    queryKey: ["avatar-status", avatarId],
+    queryFn: () => avatarApi.status(avatarId),
+    // 终态后停止轮询
+    refetchInterval: (q) =>
+      q.state.data?.status === "training" ? 4000 : false,
+  });
+  const status = data?.status;
+  // 训练结束（ready/failed）后刷新分身列表（副作用放在 useEffect）
+  useEffect(() => {
+    if (status && status !== "training") {
+      void queryClient.invalidateQueries({ queryKey: ["avatars"] });
+    }
+  }, [status, queryClient]);
+  return (
+    <span className="chip border-warning/40 text-[11px] text-warning">
+      训练中 {data?.progress ?? 0}%
+    </span>
   );
 }
 
@@ -235,6 +306,36 @@ export default function AvatarsPage() {
     if (!current) return;
     await personaApi.update(current.id, { avatarId: a.id });
     await load();
+  };
+
+  const [actionId, setActionId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState("");
+
+  const handleDelete = async (a: Avatar) => {
+    const isBound = current?.avatarId === a.id;
+    const hint =
+      a.status === "training"
+        ? `确定删除分身「${a.name}」？训练中的分身将被取消，冻结额度自动退还。`
+        : isBound
+          ? `确定删除分身「${a.name}」？该分身是当前 IP 的默认分身，删除后需重新绑定。`
+          : `确定删除分身「${a.name}」？此操作不可撤销。`;
+    if (!window.confirm(hint)) return;
+    setActionId(a.id);
+    setActionError("");
+    try {
+      await avatarApi.delete(a.id);
+      queryClient.setQueryData<Avatar[]>(["avatars"], (items = []) =>
+        items.filter((item) => item.id !== a.id),
+      );
+      // 删除的是当前绑定分身时，同步 IP store 避免 avatarId 悬空
+      if (isBound) await load();
+    } catch (e) {
+      setActionError(
+        e instanceof HttpError ? e.body.message : "删除失败，请重试",
+      );
+    } finally {
+      setActionId(null);
+    }
   };
 
   return (
@@ -308,9 +409,7 @@ export default function AvatarsPage() {
                             </span>
                           )}
                           {a.status === "training" && (
-                            <span className="chip border-warning/40 text-[11px] text-warning">
-                              训练中
-                            </span>
+                            <TrainingBadge avatarId={a.id} />
                           )}
                           {a.status === "failed" && (
                             <span className="chip border-danger/40 text-[11px] text-danger">
@@ -321,7 +420,7 @@ export default function AvatarsPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-2">
+                    <div className="mt-2 space-y-1">
                       {a.status === "ready" &&
                         current &&
                         current.avatarId !== a.id && (
@@ -337,6 +436,13 @@ export default function AvatarsPage() {
                           当前默认
                         </div>
                       )}
+                      <button
+                        className="btn-ghost w-full px-2.5 py-1 text-xs text-danger/70 hover:text-danger"
+                        disabled={actionId === a.id}
+                        onClick={() => void handleDelete(a)}
+                      >
+                        删除
+                      </button>
                     </div>
                   </div>
                 );
@@ -344,6 +450,11 @@ export default function AvatarsPage() {
               {mine.length === 0 && (
                 <div className="col-span-full py-8 text-center text-text-3">
                   还没有训练分身，也可先从下方公共形象库挑选
+                </div>
+              )}
+              {actionError && (
+                <div className="col-span-full text-sm text-danger">
+                  {actionError}
                 </div>
               )}
             </div>

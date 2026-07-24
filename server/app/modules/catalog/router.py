@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import write_audit
 from app.core.db import get_db
-from app.core.deps import require_admin
+from app.core.deps import require_permission
 
 from . import repository as repo
 from .schemas import (
@@ -46,7 +46,7 @@ async def api_public_module_prices(db: AsyncSession = Depends(get_db)):
 @admin_router.post("/plans", status_code=201, response_model=PlanOut)
 async def api_admin_create_plan(
     body: PlanCreateIn,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     return await create_plan(db, body, admin_id)
@@ -54,7 +54,7 @@ async def api_admin_create_plan(
 
 @admin_router.get("/plans", response_model=list[PlanOut])
 async def api_admin_list_plans(
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("catalog.read")),
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import select
@@ -71,7 +71,7 @@ async def api_admin_list_plans(
 async def api_admin_publish_plan(
     plan_id: str,
     body: PublishIn | None = None,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     return await publish_plan(db, plan_id, admin_id, body.effectiveAt if body else None)
@@ -80,7 +80,7 @@ async def api_admin_publish_plan(
 @admin_router.post("/plans/{plan_id}/clone", response_model=PlanOut)
 async def api_admin_clone_plan(
     plan_id: str,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     return await clone_plan(db, plan_id, admin_id)
@@ -89,7 +89,7 @@ async def api_admin_clone_plan(
 @admin_router.post("/plans/{plan_id}/retire", response_model=PlanOut)
 async def api_admin_retire_plan(
     plan_id: str,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     return await retire_plan(db, plan_id, admin_id)
@@ -98,7 +98,7 @@ async def api_admin_retire_plan(
 @admin_router.post("/price-versions", status_code=201, response_model=PriceVersionOut)
 async def api_admin_create_price_version(
     body: PriceVersionCreateIn,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     if await repo.get_price_version_by_name(db, body.version):
@@ -117,7 +117,7 @@ async def api_admin_create_price_version(
 
 @admin_router.get("/price-versions", response_model=list[PriceVersionOut])
 async def api_admin_list_price_versions(
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("catalog.read")),
     db: AsyncSession = Depends(get_db),
 ):
     await repo.promote_due_price_version(db)
@@ -138,7 +138,7 @@ async def api_admin_list_price_versions(
 @admin_router.get("/price-versions/{version_id}/modules")
 async def api_admin_list_module_prices(
     version_id: str,
-    _admin_id: str = Depends(require_admin),
+    _admin_id: str = Depends(require_permission("catalog.read")),
     db: AsyncSession = Depends(get_db),
 ):
     version = await repo.get_price_version(db, version_id)
@@ -155,7 +155,7 @@ async def api_admin_put_module_price(
     version_id: str,
     module: str,
     body: ModulePriceIn,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     price = await upsert_module_price(
@@ -186,7 +186,7 @@ async def api_admin_put_module_price(
 async def api_admin_publish_price_version(
     version_id: str,
     body: PublishIn | None = None,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("catalog.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     item = await repo.get_price_version(db, version_id)

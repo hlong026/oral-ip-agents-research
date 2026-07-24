@@ -82,6 +82,7 @@ class CreditReservation(Base):
     actual_points: Mapped[int] = mapped_column(Integer, default=0)
     allocations_json: Mapped[str] = mapped_column(Text, default="[]")
     status: Mapped[str] = mapped_column(String(16), default="reserved", index=True)
+    settled_by: Mapped[str] = mapped_column(String(64), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -97,8 +98,10 @@ class CreditGrant(Base):
     source_id: Mapped[str] = mapped_column(String(64), default="")
     granted_points: Mapped[int] = mapped_column(Integer)
     remaining_points: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CreditLedger(Base):

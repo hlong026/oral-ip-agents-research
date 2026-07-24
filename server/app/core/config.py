@@ -25,16 +25,41 @@ class Settings(BaseSettings):
     # 存储
     storage_driver: str = "local"  # local | s3
     local_storage_dir: str = "./storage"
+    public_base_url: str = "http://localhost:8000"  # 服务公网可访问地址（ASR 回调需要）
     s3_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "oral"
     s3_secret_key: str = "oral_dev_minio"
     s3_bucket: str = "oral-media"
+    s3_presign_expires: int = 3600  # pre-signed URL 有效期（秒）
+
+    # 上传限制
+    upload_max_size_mb: int = 2048  # 上传文件最大体积（MB）
+    upload_allowed_extensions: str = "mp4,mov,avi,mkv,mp3,wav,m4a,aac,flac,ogg,webm,wmv,flv"
 
     # JWT（F-601 / C7）
     jwt_algorithm: str = "HS256"
     access_token_ttl_min: int = 120
     refresh_token_ttl_days: int = 30
     single_session_kick: bool = False
+    # 管理控制面 JWT 专用签名密钥（aud=admin）。
+    # dev/test 留空时从 APP_SECRET 派生；staging/production 必须独立配置且不得与其他密钥复用，
+    # 使用户面密钥泄露时无法伪造管理面令牌。
+    admin_jwt_secret: str = ""
+
+    # 管理控制面网络层访问控制：逗号分隔的 IP/CIDR 白名单（如 10.0.0.0/8,1.2.3.4）。
+    # 空 = 不限制（仅推荐 dev/test）；staging/production 应配置办公网/运维出口段。
+    # 仅在直连对端属于受信代理（TRUSTED_PROXY_IPS）时采信 X-Forwarded-For。
+    admin_api_allowed_ips: str = ""
+
+    # 受信代理清单：逗号分隔的 IP/CIDR（如 127.0.0.1,10.0.0.0/8）。
+    # 仅当直连对端属于该清单时才采信 X-Forwarded-For 最左地址；否则一律使用直连对端 IP，
+    # 防止公网直连场景下伪造 XFF 绕过管理面白名单 / 登录频控 IP 主体。空 = 不信任任何代理。
+    trusted_proxy_ips: str = ""
+
+    # 登录防爆破（手机号+密码，用户面与管理面共用一套阈值）
+    login_failure_limit: int = 5  # 窗口内允许的最大失败次数
+    login_rate_window_seconds: int = 600  # 失败计数窗口（秒）
+    login_lock_seconds: int = 900  # 达到上限后的锁定时长（秒）
 
     # 激活码
     activation_secret: str = ""  # 激活码 HMAC 签名密钥（空则回退 app_secret）
@@ -112,22 +137,37 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings) -> None:
+    if settings.jwt_algorithm != "HS256":
+        raise RuntimeError("当前共享密钥实现仅允许 JWT_ALGORITHM=HS256")
     if settings.im_enabled and settings.app_env not in {"dev", "test"}:
         raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED")
     if settings.im_enabled and not settings.douyin_im_app_key:
         raise RuntimeError("启用私信模块必须配置真实 DOUYIN_IM_APP_KEY，禁止使用 Mock 发送")
     if settings.app_env in {"dev", "test"}:
         return
-    missing: list[str] = []
-    if settings.app_secret == "dev-secret-change-me":
-        missing.append("APP_SECRET")
-    if not settings.config_encryption_key:
-        missing.append("CONFIG_ENCRYPTION_KEY")
-    if not settings.activation_secret:
-        missing.append("ACTIVATION_SECRET")
-    if not settings.publish_session_encryption_key:
-        missing.append("PUBLISH_SESSION_ENCRYPTION_KEY")
-    if not settings.feiying_webhook_secret:
-        missing.append("FEIYING_WEBHOOK_SECRET")
-    if missing:
-        raise RuntimeError("生产环境缺少安全配置：" + ", ".join(missing))
+    secrets = {
+        "APP_SECRET": settings.app_secret,
+        "ADMIN_JWT_SECRET": settings.admin_jwt_secret,
+        "CONFIG_ENCRYPTION_KEY": settings.config_encryption_key,
+        "ACTIVATION_SECRET": settings.activation_secret,
+        "PUBLISH_SESSION_ENCRYPTION_KEY": settings.publish_session_encryption_key,
+        "FEIYING_WEBHOOK_SECRET": settings.feiying_webhook_secret,
+    }
+    weak = [name for name, value in secrets.items() if len(value) < 32]
+    if weak:
+        raise RuntimeError("生产环境安全密钥必须至少 32 字符：" + ", ".join(weak))
+    if len(set(secrets.values())) != len(secrets):
+        raise RuntimeError("生产环境安全密钥必须分别配置，不得复用")
+    # 管理面 IP 白名单在生产环境为强制项（防止管理 API 直接暴露公网）
+    if not settings.admin_api_allowed_ips.strip():
+        raise RuntimeError("生产环境必须配置 ADMIN_API_ALLOWED_IPS（管理控制面 IP/CIDR 白名单）")
+    import ipaddress
+
+    for entry in settings.admin_api_allowed_ips.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            ipaddress.ip_network(entry, strict=False)
+        except ValueError as exc:
+            raise RuntimeError(f"ADMIN_API_ALLOWED_IPS 存在无效条目: {entry}") from exc

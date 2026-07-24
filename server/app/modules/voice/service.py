@@ -272,6 +272,25 @@ async def synthesize(db: AsyncSession, user_id: str, voice_id: str, text: str, s
     )
 
 
+async def delete_voice(db: AsyncSession, user_id: str, voice_id: str) -> None:
+    """删除声音（训练中声音先释放计费冻结；清理 persona 绑定防悬空引用）"""
+    v = await repo.get(db, voice_id, user_id)
+    if not v:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
+    if v.status == "training" and v.reservation_id:
+        from app.modules.billing.service import release_reservation
+
+        await release_reservation(db, v.reservation_id, user_id)
+    # 清理 persona 绑定，防止悬空引用
+    from app.modules.ipasset.models import Persona
+
+    await db.execute(
+        update(Persona).where(Persona.voice_id == voice_id, Persona.user_id == user_id).values(voice_id="")
+    )
+    await repo.delete(db, v)
+    logger.info("voice_deleted", user_id=user_id, voice_id=voice_id)
+
+
 async def handle_voice_callback(
     db: AsyncSession, task_id: str, status_code: int, voice_id_remote: str, demo_url: str
 ) -> None:

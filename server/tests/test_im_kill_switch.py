@@ -1,6 +1,7 @@
 """S3-11 explicit automation consent and emergency kill switches."""
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
@@ -171,7 +172,8 @@ async def test_global_kill_switch_requires_admin_audience(client: AsyncClient) -
         json={"stopped": True},
     )
 
-    assert user_response.status_code == 403
+    # 用户面令牌由用户面密钥签发，在管理面密钥验证阶段即失败（401）
+    assert user_response.status_code == 401
     assert admin_response.status_code == 200
     assert admin_response.json()["stopped"] is True
 
@@ -200,6 +202,7 @@ async def _create_user(*, role: str) -> str:
                 password_hash=hash_password("Test@12345"),
                 nickname="授权测试",
                 role=role,
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

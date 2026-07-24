@@ -1,13 +1,27 @@
-"""对象存储：local（MVP 默认）/ s3（MinIO）；产物落库用相对 key，访问走 /media 路由"""
+"""对象存储：local（MVP 默认）/ s3（MinIO）；产物落库用相对 key，访问走 /media 路由。"""
 
+import asyncio
+import shutil
 import uuid
 from pathlib import Path
+from typing import Any
 
 import aiofiles
 
 from .config import get_settings
 
 settings = get_settings()
+
+
+def _s3_client() -> Any:
+    import boto3
+
+    return boto3.client(
+        "s3",
+        endpoint_url=settings.s3_endpoint,
+        aws_access_key_id=settings.s3_access_key,
+        aws_secret_access_key=settings.s3_secret_key,
+    )
 
 
 def _key(prefix: str, filename: str) -> str:
@@ -24,16 +38,8 @@ async def save_bytes(prefix: str, filename: str, data: bytes) -> str:
         async with aiofiles.open(path, "wb") as f:
             await f.write(data)
         return key
-    # S3 驱动（生产）
-    import boto3
-
-    client = boto3.client(
-        "s3",
-        endpoint_url=settings.s3_endpoint,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
-    )
-    client.put_object(Bucket=settings.s3_bucket, Key=key, Body=data)
+    client = _s3_client()
+    await asyncio.to_thread(client.put_object, Bucket=settings.s3_bucket, Key=key, Body=data)
     return key
 
 
@@ -42,7 +48,11 @@ async def save_text(prefix: str, filename: str, text: str) -> str:
 
 
 def local_path(key: str) -> Path:
-    return Path(settings.local_storage_dir) / key
+    root = Path(settings.local_storage_dir).resolve()
+    path = (root / key).resolve()
+    if path != root and root not in path.parents:
+        raise ValueError("media key escapes storage root")
+    return path
 
 
 def exists(key: str) -> bool:
@@ -55,13 +65,44 @@ async def read_bytes(key: str) -> bytes:
     if settings.storage_driver == "local":
         async with aiofiles.open(local_path(key), "rb") as f:
             return await f.read()
-    import boto3
+    obj = await get_object(key)
+    body = obj["Body"]
+    try:
+        return await asyncio.to_thread(body.read)
+    finally:
+        body.close()
 
-    client = boto3.client(
-        "s3",
-        endpoint_url=settings.s3_endpoint,
-        aws_access_key_id=settings.s3_access_key,
-        aws_secret_access_key=settings.s3_secret_key,
+
+async def download_to_path(key: str, destination: Path) -> None:
+    """Materialize an object without loading large media into application memory."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if settings.storage_driver == "local":
+        await asyncio.to_thread(shutil.copyfile, local_path(key), destination)
+        return
+    client = _s3_client()
+    await asyncio.to_thread(
+        client.download_file,
+        settings.s3_bucket,
+        key,
+        str(destination),
     )
-    obj = client.get_object(Bucket=settings.s3_bucket, Key=key)
-    return obj["Body"].read()
+
+
+async def get_object(key: str, byte_range: str | None = None) -> dict[str, Any]:
+    """Fetch object metadata and a streaming body without blocking the event loop."""
+    kwargs = {"Bucket": settings.s3_bucket, "Key": key}
+    if byte_range:
+        kwargs["Range"] = byte_range
+    client = _s3_client()
+    return await asyncio.to_thread(client.get_object, **kwargs)
+
+
+async def storage_ready() -> bool:
+    if settings.storage_driver == "local":
+        return await asyncio.to_thread(Path(settings.local_storage_dir).is_dir)
+    try:
+        client = _s3_client()
+        await asyncio.to_thread(client.head_bucket, Bucket=settings.s3_bucket)
+        return True
+    except Exception:  # noqa: BLE001
+        return False

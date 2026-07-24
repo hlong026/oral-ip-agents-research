@@ -4,6 +4,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const ADMIN_CONSOLE_URL =
+  import.meta.env.VITE_ADMIN_APP_URL || "http://localhost:5174";
+
 function NotificationBell() {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -150,7 +153,23 @@ export default function Topbar() {
           </span>
         </button>
         {menuOpen && (
-          <div className="glass-strong absolute right-0 top-full z-40 mt-2 w-44 overflow-hidden p-1">
+          <div className="glass-strong absolute right-0 top-full z-40 mt-2 w-56 overflow-hidden p-1">
+            {user?.role === "admin" && (
+              <>
+                <div className="px-3 py-2 text-xs text-text-3">
+                  当前空间 · 我的创作空间
+                </div>
+                <a
+                  href={ADMIN_CONSOLE_URL}
+                  aria-label="平台管理控制台"
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-brand-to hover:bg-white/5"
+                  onClick={() => setMenuOpen(false)}
+                >
+                  平台管理控制台 ↗
+                </a>
+                <div className="mx-2 border-t border-stroke" />
+              </>
+            )}
             <button
               onClick={() => {
                 setMenuOpen(false);

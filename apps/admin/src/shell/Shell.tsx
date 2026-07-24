@@ -1,6 +1,9 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { clearAdminToken } from "../lib/adminHttp";
 
+const CREATOR_APP_URL =
+  import.meta.env.VITE_CREATOR_APP_URL || "http://localhost:5173";
+
 const navItems = [
   { to: "/", label: "总览" },
   { to: "/plans", label: "套餐 SKU" },
@@ -40,8 +43,15 @@ export default function Shell() {
             </NavLink>
           ))}
         </nav>
+        <a
+          href={CREATOR_APP_URL}
+          aria-label="我的创作空间"
+          className="btn-ghost mt-auto text-center"
+        >
+          ← 我的创作空间
+        </a>
         <button
-          className="btn-ghost mt-auto"
+          className="btn-ghost mt-2"
           onClick={() => {
             clearAdminToken();
             navigate("/login", { replace: true });

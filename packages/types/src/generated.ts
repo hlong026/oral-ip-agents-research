@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T10:01:55.293Z
+ * API 版本：1.0.0 · 生成时间：2026-07-23T06:12:40.600Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -116,6 +116,11 @@ export interface Body_api_parse_api_v1_content_parse_post {
   file?: string | null;
 }
 
+export interface ChangePasswordIn {
+  oldPassword: string;
+  newPassword: string;
+}
+
 export interface CloneStatusOut {
   id: string;
   status: string;
@@ -178,6 +183,7 @@ export interface CreditAdjustIn {
   points: number;
   reason: string;
   expiresAt?: string | null;
+  confirm?: boolean;
 }
 
 export interface ExportOut {
@@ -236,6 +242,25 @@ export interface KillSwitchIn {
 export interface KillSwitchOut {
   stopped: boolean;
   canceledMessages?: number;
+}
+
+export interface LedgerItemOut {
+  id: string;
+  eventType: string;
+  pointsDelta: number;
+  referenceType: string;
+  referenceId: string;
+  taskId?: string;
+  detail?: Record<string, unknown> | null;
+  createdBy?: string;
+  createdAt: string;
+}
+
+export interface LedgerPageOut {
+  items: LedgerItemOut[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface ListenerControlIn {
@@ -553,6 +578,8 @@ export interface RedeemOut {
   planExpiresAt?: string | null;
   quotaGranted?: number;
   newBalance?: number;
+  isUpgrade?: boolean;
+  previousPlanType?: string;
 }
 
 export interface RefreshIn {
@@ -817,6 +844,12 @@ export interface UnreadOut {
   count: number;
 }
 
+export interface UpdatePhoneIn {
+  newPhone: string;
+  /** 当前密码，用于身份确认 */
+  password: string;
+}
+
 export interface UserOut {
   id: string;
   phone: string;
@@ -826,10 +859,11 @@ export interface UserOut {
   planType?: string;
   planExpiresAt?: string | null;
   activatedAt?: string | null;
+  role: "user" | "admin" | "ops" | "finance" | "auditor";
 }
 
 export interface UserUpdateIn {
-  role?: "user" | "admin" | null;
+  role?: "user" | "admin" | "ops" | "finance" | "auditor" | null;
   isActive?: boolean | null;
 }
 

@@ -1,7 +1,9 @@
 """Browser launch and QR login compatibility regressions."""
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -31,6 +33,56 @@ def test_missing_browser_keeps_edge_channel_fallback(tmp_path: Path) -> None:
     missing = tmp_path / "missing-browser"
 
     assert resolve_browser_executable("", candidates=[missing]) == ""
+
+
+@pytest.mark.asyncio
+async def test_publish_materializes_s3_media_for_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.providers.publish import base_driver
+
+    captured: dict[str, bytes | None] = {}
+
+    class FakeDriver(base_driver.SAUPublishDriverBase):
+        platform = "douyin"
+
+        async def _do_login(self, ticket: str, account_file: str) -> None:
+            raise AssertionError("login is not part of this test")
+
+        async def _do_publish(
+            self,
+            cookie_file: str,
+            video_path: str,
+            title: str,
+            topics: list[str],
+            cover_path: str | None,
+            publish_date: Any,
+        ) -> str:
+            captured["video"] = await asyncio.to_thread(Path(video_path).read_bytes)
+            captured["cover"] = await asyncio.to_thread(Path(cover_path).read_bytes) if cover_path else None
+            return "post-1"
+
+        async def _do_check_cookie(self, cookie_file: str) -> bool:
+            return True
+
+    async def download_remote(key: str, path: Path) -> None:
+        await asyncio.to_thread(
+            path.write_bytes,
+            {"compose/video.mp4": b"video", "compose/cover.jpg": b"cover"}[key],
+        )
+
+    monkeypatch.setattr(base_driver, "storage_settings", SimpleNamespace(storage_driver="s3"), raising=False)
+    monkeypatch.setattr(base_driver, "download_to_path", download_remote, raising=False)
+
+    post_id = await FakeDriver().publish(
+        {},
+        "compose/video.mp4",
+        "测试发布",
+        [],
+        "compose/cover.jpg",
+        account_id="account-1",
+    )
+
+    assert post_id == "post-1"
+    assert captured == {"video": b"video", "cover": b"cover"}
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,7 @@ async def write_audit(
     异步写入审计日志（fire-and-forget，失败仅记 warning 不影响主流程）
     使用独立 Session 避免与业务事务耦合。
     """
-    from app.core.logging import get_logger
+    from app.core.logging import get_logger, trace_id_var
 
     logger = get_logger("oral.audit")
     try:
@@ -48,7 +48,7 @@ async def write_audit(
                 AuditLog(
                     event=event,
                     user_id=user_id,
-                    trace_id=trace_id,
+                    trace_id=trace_id or trace_id_var.get(""),
                     task_id=task_id,
                     detail=detail[:2000],
                 )
@@ -56,3 +56,31 @@ async def write_audit(
             await db.commit()
     except Exception as e:  # noqa: BLE001
         logger.warning("audit_write_failed", audit_event=event, error=str(e)[:200])
+
+
+def add_audit(
+    db,
+    event: str,
+    *,
+    user_id: str = "",
+    trace_id: str = "",
+    task_id: str = "",
+    detail: str = "",
+) -> None:
+    """同事务追加审计日志（资金/权限类 A 级事件）。
+
+    将审计记录挂入调用方传入的业务 Session：业务事务提交时审计一并落库，
+    业务回滚时审计随之消失，保证"无业务结果即无审计、有业务结果必有审计"，
+    避免 fire-and-forget 路径在 DB 抖动时丢失资金类合规证据。
+    """
+    from app.core.logging import trace_id_var
+
+    db.add(
+        AuditLog(
+            event=event,
+            user_id=user_id,
+            trace_id=trace_id or trace_id_var.get(""),
+            task_id=task_id,
+            detail=detail[:2000],
+        )
+    )

@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import get_current_user_id, require_admin
+from app.core.deps import get_current_user_id, require_permission
 
 from . import repository as repo
 from . import service
@@ -98,8 +98,8 @@ async def api_subscription(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询当前订阅状态"""
-    return await service.get_subscription(db, user_id)
+    """查询当前订阅状态（自动检查到期）"""
+    return await service.get_subscription_with_expiry_check(db, user_id)
 
 
 @subscription_router.get("/subscription", response_model=SubscriptionOut)
@@ -107,7 +107,7 @@ async def api_current_subscription(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.get_subscription(db, user_id)
+    return await service.get_subscription_with_expiry_check(db, user_id)
 
 
 # ---------- 管理侧 ----------
@@ -116,7 +116,7 @@ async def api_current_subscription(
 @admin_router.post("/batches", status_code=201, response_model=BatchGenerateOut)
 async def api_admin_generate_batch(
     body: BatchCreateIn,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("activation.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.generate_batch(
@@ -139,7 +139,7 @@ async def api_list_codes(
     batchId: str | None = Query(None),
     page: int = Query(1, ge=1),
     pageSize: int = Query(50, ge=1, le=200),
-    _user_id: str = Depends(require_admin),
+    _user_id: str = Depends(require_permission("activation.read")),
     db: AsyncSession = Depends(get_db),
 ):
     """码列表（分页/筛选）"""
@@ -156,7 +156,7 @@ async def api_list_codes(
 async def api_list_batches(
     page: int = Query(1, ge=1),
     pageSize: int = Query(50, ge=1, le=200),
-    _user_id: str = Depends(require_admin),
+    _user_id: str = Depends(require_permission("activation.read")),
     db: AsyncSession = Depends(get_db),
 ):
     """批次列表"""
@@ -172,7 +172,7 @@ async def api_list_batches(
 @admin_router.put("/codes/{code_id}/revoke")
 async def api_revoke_code(
     code_id: str,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("activation.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     """作废单个码"""
@@ -183,7 +183,7 @@ async def api_revoke_code(
 @admin_router.put("/batches/{batch_id}/revoke")
 async def api_revoke_batch(
     batch_id: str,
-    admin_id: str = Depends(require_admin),
+    admin_id: str = Depends(require_permission("activation.manage")),
     db: AsyncSession = Depends(get_db),
 ):
     """批量作废"""
@@ -193,7 +193,7 @@ async def api_revoke_batch(
 
 @admin_router.get("/stats", response_model=CodeStatsOut)
 async def api_stats(
-    _user_id: str = Depends(require_admin),
+    _user_id: str = Depends(require_permission("activation.read")),
     db: AsyncSession = Depends(get_db),
 ):
     """码统计"""

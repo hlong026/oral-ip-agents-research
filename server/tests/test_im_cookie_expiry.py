@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import httpx
@@ -158,6 +159,7 @@ async def _create_account() -> tuple[str, str]:
                 password_hash=hash_password("Test@12345"),
                 nickname="Cookie 失效测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

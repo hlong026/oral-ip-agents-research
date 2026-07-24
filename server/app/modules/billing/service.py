@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import SessionLocal
@@ -278,6 +279,34 @@ async def reserve_quote(
             detail={"code": "QUOTE_ALREADY_USED", "message": "报价已使用"},
         )
 
+    if await _is_billing_exempt_admin(db, user_id):
+        reservations = [
+            CreditReservation(
+                user_id=user_id,
+                quote_id=quote.id,
+                reserved_points=0,
+            )
+            for _ in range(count)
+        ]
+        db.add_all(reservations)
+        await db.flush()
+        if commit:
+            await db.commit()
+        account = await repo.get_account(db, user_id)
+        logger.info("admin_quota_exempt_reservation", user_id=user_id, quote_id=quote.id, count=count)
+        return ReservationBatchOut(
+            items=[
+                ReservationItemOut(
+                    id=item.id,
+                    quoteId=item.quote_id,
+                    reservedPoints=0,
+                    status=item.status,
+                )
+                for item in reservations
+            ],
+            availablePoints=account.balance if account else 0,
+        )
+
     await repo.ensure_account(db, user_id)
     total = quote.estimated_points * count
     grants = list(
@@ -403,6 +432,14 @@ async def reserve_quote(
         ],
         availablePoints=account.balance if account else 0,
     )
+
+
+async def _is_billing_exempt_admin(db: AsyncSession, user_id: str) -> bool:
+    """Only the explicit admin role may run validated operations without credits."""
+    from app.modules.auth import repository as auth_repo
+
+    user = await auth_repo.get_by_id(db, user_id)
+    return bool(user and user.role == "admin")
 
 
 def pipeline_quote_quantities(task: dict, module_units: dict[str, str]) -> dict[str, int]:
@@ -590,15 +627,23 @@ async def settle_reservation(
     *,
     step: str = "pipeline",
 ) -> int:
+    """幂等结算：同一 reservation 只允许一次 settled 状态转换。
+
+    通过 CAS (WHERE status='reserved') + settled_by 唯一跟踪确保
+    轮询和 Webhook 重复触发不会重复结算。
+    """
     reservation = (
         await db.execute(select(CreditReservation).where(CreditReservation.id == reservation_id))
     ).scalar_one_or_none()
-    if reservation is None or reservation.status == "settled":
-        return reservation.actual_points if reservation else 0
+    if reservation is None:
+        return 0
+    if reservation.status == "settled":
+        return reservation.actual_points or 1
     if reservation.status != "reserved":
         return 0
     quote = await db.get(PriceQuote, reservation.quote_id)
     now = datetime.now(UTC)
+    settle_claimant = task_id or reservation.task_id or reservation_id
     result = await db.execute(
         update(CreditReservation)
         .where(CreditReservation.id == reservation_id, CreditReservation.status == "reserved")
@@ -606,13 +651,17 @@ async def settle_reservation(
             status="settled",
             actual_points=reservation.reserved_points,
             settled_at=now,
+            settled_by=settle_claimant,
             task_id=task_id or reservation.task_id,
         )
     )
     if int(getattr(result, "rowcount", 0) or 0) != 1:
         await db.rollback()
         current = await db.get(CreditReservation, reservation_id)
-        return current.actual_points if current and current.status == "settled" else 0
+        return (current.actual_points or 1) if current and current.status == "settled" else 0
+    if reservation.reserved_points == 0:
+        await db.commit()
+        return 1
     await db.execute(
         update(QuotaAccount)
         .where(QuotaAccount.user_id == reservation.user_id)
@@ -648,7 +697,17 @@ async def settle_reservation(
             compute="cloud",
         )
     )
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        # 唯一索引兖底：视为已被其他路径结算
+        await db.rollback()
+        logger.warning(
+            "settle_idempotent_guard_hit",
+            reservation_id=reservation_id,
+            task_id=task_id,
+        )
+        return reservation.reserved_points
     return reservation.reserved_points
 
 
@@ -670,6 +729,17 @@ async def release_reservation(
             .values(status="released", settled_at=datetime.now(UTC))
         )
         if int(getattr(result, "rowcount", 0) or 0) == 1:
+            if reservation.reserved_points == 0:
+                await db.commit()
+                reservation.status = "released"
+                account = await repo.get_account(db, reservation.user_id)
+                return ReservationStateOut(
+                    id=reservation.id,
+                    status=reservation.status,
+                    reservedPoints=0,
+                    actualPoints=0,
+                    availablePoints=account.balance if account else 0,
+                )
             allocations = json.loads(reservation.allocations_json or "[]")
             if allocations:
                 for allocation in allocations:
@@ -805,3 +875,137 @@ def usage_to_out(u: QuotaUsage) -> UsageItemOut:
         compute=u.compute,
         createdAt=u.created_at.astimezone(UTC).isoformat(),
     )
+
+
+# ============ 积分过期自动清零 ============
+
+
+async def expire_overdue_grants(db: AsyncSession, *, batch_size: int = 200) -> int:
+    """扫描已过期的 CreditGrant 批次，将 remaining_points 清零并记录流水。
+
+    幂等：只处理 status='active' 且 expires_at < now 且 remaining_points > 0 的批次。
+    返回本次处理的批次数。
+    """
+    now = datetime.now(UTC)
+    grants = list(
+        (
+            await db.execute(
+                select(CreditGrant)
+                .where(
+                    CreditGrant.status == "active",
+                    CreditGrant.expires_at.is_not(None),
+                    CreditGrant.expires_at <= now,
+                    CreditGrant.remaining_points > 0,
+                )
+                .order_by(CreditGrant.expires_at.asc())
+                .limit(batch_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not grants:
+        return 0
+
+    affected_users: dict[str, int] = {}  # user_id -> 本批次过期积分总和
+    for grant in grants:
+        expired_points = grant.remaining_points
+        result = await db.execute(
+            update(CreditGrant)
+            .where(
+                CreditGrant.id == grant.id,
+                CreditGrant.status == "active",
+                CreditGrant.remaining_points == expired_points,
+            )
+            .values(remaining_points=0, status="expired", expired_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if int(getattr(result, "rowcount", 0) or 0) != 1:
+            continue
+        db.add(
+            CreditLedger(
+                user_id=grant.user_id,
+                event_type="expire",
+                points_delta=-expired_points,
+                reference_type="grant",
+                reference_id=grant.id,
+                created_by="system",
+                detail_json=json.dumps(
+                    {"sourceType": grant.source_type, "expiredPoints": expired_points},
+                    ensure_ascii=False,
+                ),
+            )
+        )
+        affected_users[grant.user_id] = affected_users.get(grant.user_id, 0) + expired_points
+
+    # 相对扣减：避免覆盖并发消费事务的扣减
+    for user_id, expired_total in affected_users.items():
+        await db.execute(
+            update(QuotaAccount)
+            .where(QuotaAccount.user_id == user_id, QuotaAccount.balance >= expired_total)
+            .values(balance=QuotaAccount.balance - expired_total)
+        )
+
+    await db.commit()
+    logger.info("credit_grants_expired", count=len(grants), users=len(affected_users))
+    return len(grants)
+
+
+# ============ 消费明细查询 ============
+
+
+async def list_ledger(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    page: int = 1,
+    page_size: int = 20,
+    event_type: str | None = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> tuple[list[CreditLedger], int]:
+    """用户端消费明细分页查询，支持按事件类型和日期范围过滤。"""
+    conditions = [CreditLedger.user_id == user_id]
+    if event_type:
+        conditions.append(CreditLedger.event_type == event_type)
+    if start_date:
+        conditions.append(CreditLedger.created_at >= start_date)
+    if end_date:
+        conditions.append(CreditLedger.created_at <= end_date)
+
+    total = int((await db.scalar(select(func.count(CreditLedger.id)).where(*conditions))) or 0)
+    rows = list(
+        (
+            await db.execute(
+                select(CreditLedger)
+                .where(*conditions)
+                .order_by(CreditLedger.created_at.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return rows, total
+
+
+async def all_ledger_for_export(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+) -> list[CreditLedger]:
+    """导出用：获取指定日期范围内的全部流水。"""
+    conditions = [CreditLedger.user_id == user_id]
+    if start_date:
+        conditions.append(CreditLedger.created_at >= start_date)
+    if end_date:
+        conditions.append(CreditLedger.created_at <= end_date)
+    rows = list(
+        (await db.execute(select(CreditLedger).where(*conditions).order_by(CreditLedger.created_at.desc())))
+        .scalars()
+        .all()
+    )
+    return rows

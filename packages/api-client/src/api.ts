@@ -39,6 +39,10 @@ export const authApi = {
   login: (phone: string, password: string, deviceId?: string) =>
     http.post<AuthTokens>("/auth/login", { phone, password, deviceId }),
   me: () => http.get<User>("/auth/me"),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    http.post<void>("/auth/change-password", { oldPassword, newPassword }),
+  updatePhone: (newPhone: string, password: string) =>
+    http.put<User>("/auth/phone", { newPhone, password }),
 };
 
 // ---------- activation（激活码） ----------
@@ -64,6 +68,8 @@ export interface RedeemResult {
   planExpiresAt: string | null;
   quotaGranted: number;
   newBalance: number;
+  isUpgrade: boolean;
+  previousPlanType: string;
 }
 
 function activationDeviceFingerprint(): string {
@@ -198,6 +204,7 @@ export const voiceApi = {
       "/voices/synthesize",
       { voiceId, text, speed, quoteId },
     ),
+  delete: (voiceId: string) => http.delete<void>(`/voices/${voiceId}`),
 };
 
 export const avatarApi = {
@@ -210,6 +217,24 @@ export const avatarApi = {
     if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
+  cloneByImage: (
+    name: string,
+    consentToken: string,
+    file: File,
+    quoteId?: string,
+  ) => {
+    const fd = new FormData();
+    fd.append("name", name);
+    fd.append("consentToken", consentToken);
+    fd.append("file", file);
+    if (quoteId) fd.append("quoteId", quoteId);
+    return http.post<Avatar>("/avatars/create-by-image", fd);
+  },
+  status: (avatarId: string) =>
+    http.get<{ id: string; status: string; progress: number }>(
+      `/avatars/${avatarId}/status`,
+    ),
+  delete: (avatarId: string) => http.delete<void>(`/avatars/${avatarId}`),
 };
 
 // ---------- pipeline（F-405/406） ----------

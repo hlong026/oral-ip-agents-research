@@ -142,3 +142,27 @@ async def test_avatar_clone_persists_consent_evidence_without_plaintext(monkeypa
     assert avatar.consent_hash
     assert avatar.consent_hash != "consent-token-plain"
     assert avatar.consented_at is not None
+
+
+async def test_delete_avatar_unbinds_user_persona() -> None:
+    from app.modules.avatar import repository as avatar_repo
+    from app.modules.avatar.models import Avatar
+    from app.modules.avatar.service import delete_avatar
+    from app.modules.ipasset.models import Persona
+
+    async with SessionLocal() as db:
+        avatar = Avatar(id="avatar-to-delete", user_id="avatar-owner", name="待删除形象")
+        persona = Persona(
+            id="persona-with-avatar",
+            user_id="avatar-owner",
+            name="关联人设",
+            avatar_id=avatar.id,
+        )
+        db.add_all([avatar, persona])
+        await db.commit()
+
+        await delete_avatar(db, "avatar-owner", avatar.id)
+        await db.refresh(persona)
+
+        assert persona.avatar_id is None
+        assert await avatar_repo.get(db, avatar.id, "avatar-owner") is None

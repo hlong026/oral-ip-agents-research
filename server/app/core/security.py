@@ -6,7 +6,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from .config import get_settings
 
@@ -31,6 +32,20 @@ def consent_fingerprint(user_id: str, asset_kind: str, token: str) -> str:
     return hmac.new(settings.app_secret.encode(), message, hashlib.sha256).hexdigest()
 
 
+def _signing_key(audience: str) -> str:
+    """按令牌 audience 选择签名密钥（双密钥隔离）。
+
+    管理面（aud=admin）使用独立的 ADMIN_JWT_SECRET；dev/test 未配置时从
+    APP_SECRET 派生（staging/production 由 validate_runtime_security 强制独立配置）。
+    目的：用户面密钥泄露时，攻击者无法伪造管理面令牌。
+    """
+    if audience == "admin":
+        if settings.admin_jwt_secret:
+            return settings.admin_jwt_secret
+        return hashlib.sha256(f"{settings.app_secret}::admin-jwt".encode()).hexdigest()
+    return settings.app_secret
+
+
 def _make_token(
     subject: str,
     ttl: timedelta,
@@ -49,7 +64,7 @@ def _make_token(
     }
     if device_id:
         payload["dev"] = device_id
-    return jwt.encode(payload, settings.app_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(payload, _signing_key(audience), algorithm=settings.jwt_algorithm)
 
 
 def create_access_token(user_id: str, device_id: str | None = None, audience: str = "user") -> str:
@@ -60,16 +75,31 @@ def create_refresh_token(user_id: str, device_id: str | None = None, audience: s
     return _make_token(user_id, timedelta(days=settings.refresh_token_ttl_days), "refresh", device_id, audience)
 
 
-def decode_token(token: str, expected_type: str = "access") -> dict | None:
+def decode_token(token: str, expected_type: str = "access", audience: str | None = None) -> dict | None:
+    """解码并验证 JWT。
+
+    - 指定 audience 时：使用该 audience 对应的密钥验证，且 payload aud 必须严格匹配。
+      指定错误密钥签发的令牌（如用用户面密钥伪造 aud=admin）会被拒绝。
+    - 未指定 audience 时：先读取未验证的 aud claim 选择密钥，再做完整验证
+      （安全前提：密钥选择本身不依赖签名，伪造者无法用错误密钥通过完整验证）。
+    """
+    if audience is None:
+        try:
+            unverified = jwt.decode(token, options={"verify_signature": False})
+        except InvalidTokenError:
+            return None
+        audience = str(unverified.get("aud") or "user")
     try:
         payload = jwt.decode(
             token,
-            settings.app_secret,
+            _signing_key(audience),
             algorithms=[settings.jwt_algorithm],
             options={"verify_aud": False},
         )
-    except JWTError:
+    except InvalidTokenError:
         return None
     if payload.get("type") != expected_type:
+        return None
+    if payload.get("aud") != audience:
         return None
     return payload

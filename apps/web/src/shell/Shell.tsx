@@ -30,6 +30,8 @@ export default function Shell() {
   const upsertTask = useTasks((s) => s.upsert);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
+  // IM 监听错误 toast 按 accountId 去重（后端心跳周期会重复推送 error）
+  const imErrorToasted = useRef(new Set<string>());
 
   const showFlow = !NO_FLOW_PATHS.some((p) => location.pathname.startsWith(p));
 
@@ -38,7 +40,7 @@ export default function Shell() {
     void loadQuota();
   }, [loadIp, loadQuota]);
 
-  // WS 实时通道：任务进度 / 动态流 / 告警（≤2s 推送）
+  // WS 实时通道：任务进度 / 动态流 / 告警 / IM 私信事件（≤2s 推送）
   useEffect(() => {
     const token = getAccessToken();
     if (!user || !token) return;
@@ -63,6 +65,37 @@ export default function Shell() {
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 5000);
       } else if (ev.kind === "publish_updated") {
         void queryClient.invalidateQueries({ queryKey: ["publish-jobs"] });
+      } else if (ev.kind === "im_new_message") {
+        // 新私信：刷新会话列表与消息流
+        void queryClient.invalidateQueries({ queryKey: ["im-conversations"] });
+        void queryClient.invalidateQueries({ queryKey: ["im-messages"] });
+      } else if (ev.kind === "im_auto_replied") {
+        // 自动回复已发出：刷新消息流与会话列表（lastMessageAt 排序）
+        void queryClient.invalidateQueries({ queryKey: ["im-messages"] });
+        void queryClient.invalidateQueries({ queryKey: ["im-conversations"] });
+      } else if (ev.kind === "im_listener_status") {
+        // 监听状态变化：刷新账号页与规则页的监听状态
+        void queryClient.invalidateQueries({
+          queryKey: ["im-listener-status"],
+        });
+        void queryClient.invalidateQueries({ queryKey: ["im-listeners"] });
+        // 登录态失效等错误状态：toast 提醒用户重新绑定（按账号去重，恢复后重置）
+        if (ev.status === "error") {
+          if (!imErrorToasted.current.has(ev.accountId)) {
+            imErrorToasted.current.add(ev.accountId);
+            const id = ++toastId.current;
+            setToasts((t) => [
+              ...t,
+              { id, level: "error", text: ev.errorMsg || "IM 监听异常" },
+            ]);
+            setTimeout(
+              () => setToasts((t) => t.filter((x) => x.id !== id)),
+              5000,
+            );
+          }
+        } else {
+          imErrorToasted.current.delete(ev.accountId);
+        }
       }
     });
     socket.connect();

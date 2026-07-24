@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
@@ -28,6 +29,7 @@ async def _create_account() -> tuple[str, str]:
                 password_hash=hash_password("Test@12345"),
                 nickname="监听测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

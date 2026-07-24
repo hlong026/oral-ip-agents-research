@@ -236,6 +236,7 @@ async def _create_account() -> tuple[str, str]:
                 password_hash=hash_password("Test@12345"),
                 nickname="历史消息测试",
                 role="user",
+                activated_at=datetime.now(UTC),
             )
         )
         await db.commit()

@@ -3,7 +3,7 @@ import { useSession } from "@oral/stores";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-/** 登录页（激活码注册入口） */
+/** 登录页（仅限已激活用户，新用户请通过激活码激活） */
 export default function LoginPage() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -84,13 +84,13 @@ export default function LoginPage() {
           </button>
 
           <p className="text-center text-xs text-text-3">
-            还没有账号？{" "}
+            首次使用？{" "}
             <button
               type="button"
               onClick={() => navigate("/activate")}
               className="text-grad font-medium hover:underline"
             >
-              激活码注册
+              激活码激活开户
             </button>
           </p>
         </form>
