@@ -1438,6 +1438,41 @@ async def test_provider_secrets_are_admin_only_masked_and_encrypted(client: Asyn
     assert stored.startswith("enc:v1:")
 
 
+async def test_provider_settings_reject_invalid_dashscope_routing(client: AsyncClient):
+    admin_headers = await _login(client, role="admin")
+
+    invalid_settings = [
+        {"dashscope_region": "moon-base"},
+        {"dashscope_workspace_id": "workspace/invalid"},
+        {"asr_flash_threshold_sec": "0"},
+        {"asr_model": "fun asr"},
+        {"dashscope_enabled": "yes"},
+    ]
+    for settings in invalid_settings:
+        response = await client.put(
+            "/api/admin/v1/providers",
+            headers=admin_headers,
+            json={"settings": settings},
+        )
+        assert response.status_code == 400, settings
+
+    valid = await client.put(
+        "/api/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "settings": {
+                "dashscope_workspace_id": "workspace_123",
+                "dashscope_region": "ap-southeast-1",
+                "asr_model": "fun-asr",
+                "asr_flash_model": "fun-asr-flash-2026-06-15",
+                "asr_flash_threshold_sec": "180",
+                "dashscope_enabled": "true",
+            }
+        },
+    )
+    assert valid.status_code == 200, valid.text
+
+
 async def test_activation_batch_uses_published_sku_version(client: AsyncClient):
     admin_headers = await _login(client, role="admin")
     plan = await _create_and_publish_plan(

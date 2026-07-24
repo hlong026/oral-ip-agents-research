@@ -107,11 +107,13 @@ export default function ProvidersPage() {
                 启用
               </label>
             </div>
-            <Field
-              label="Base URL"
-              value={provider.baseUrl}
-              onChange={(baseUrl) => update(index, { baseUrl })}
-            />
+            {provider.provider !== "dashscope_asr" && (
+              <Field
+                label="Base URL"
+                value={provider.baseUrl}
+                onChange={(baseUrl) => update(index, { baseUrl })}
+              />
+            )}
             {provider.provider === "douyidou" && (
               <Field
                 label="App ID"
@@ -119,11 +121,13 @@ export default function ProvidersPage() {
                 onChange={(appId) => update(index, { appId })}
               />
             )}
-            <Field
-              label="模型"
-              value={provider.model || ""}
-              onChange={(model) => update(index, { model })}
-            />
+            {provider.provider === "deepseek" && (
+              <Field
+                label="模型"
+                value={provider.model || ""}
+                onChange={(model) => update(index, { model })}
+              />
+            )}
             <Field
               label={
                 provider.provider === "douyidou"
@@ -138,6 +142,45 @@ export default function ProvidersPage() {
               value={provider.apiKey || ""}
               onChange={(apiKey) => update(index, { apiKey })}
             />
+            {provider.provider === "dashscope_asr" && (
+              <>
+                <Field
+                  label="Workspace ID（可选）"
+                  value={provider.workspaceId || ""}
+                  onChange={(workspaceId) => update(index, { workspaceId })}
+                />
+                <SelectField
+                  label="地域"
+                  value={provider.region || "cn-beijing"}
+                  options={[
+                    { value: "cn-beijing", label: "中国内地（北京）" },
+                    {
+                      value: "ap-southeast-1",
+                      label: "国际（新加坡）",
+                    },
+                  ]}
+                  onChange={(region) => update(index, { region })}
+                />
+                <Field
+                  label="异步模型"
+                  value={provider.model || ""}
+                  onChange={(model) => update(index, { model })}
+                />
+                <Field
+                  label="短音频同步模型"
+                  value={provider.flashModel || ""}
+                  onChange={(flashModel) => update(index, { flashModel })}
+                />
+                <Field
+                  label="同步分流阈值（秒）"
+                  type="number"
+                  value={String(provider.flashThresholdSec || 300)}
+                  onChange={(value) =>
+                    update(index, { flashThresholdSec: Number(value) })
+                  }
+                />
+              </>
+            )}
             <label className="block">
               <span className="label">优先级</span>
               <input
@@ -183,6 +226,35 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="label">{label}</span>
+      <select
+        className="input"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

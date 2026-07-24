@@ -69,6 +69,10 @@ export interface ProviderConfig {
   baseUrl: string;
   appId?: string;
   model?: string;
+  workspaceId?: string;
+  region?: string;
+  flashModel?: string;
+  flashThresholdSec?: number;
   priority?: number;
   apiKeyConfigured?: boolean;
   apiKey?: string;
@@ -157,7 +161,11 @@ const providerDefinitions = [
     provider: "dashscope_asr",
     displayName: "DashScope ASR",
     key: "dashscope_api_key",
+    workspaceId: "dashscope_workspace_id",
+    region: "dashscope_region",
     model: "asr_model",
+    flashModel: "asr_flash_model",
+    flashThresholdSec: "asr_flash_threshold_sec",
     enabled: "dashscope_enabled",
     priority: "dashscope_priority",
     defaultBaseUrl: "https://dashscope.aliyuncs.com",
@@ -188,6 +196,15 @@ function providerFromSettings(
   const baseUrlKey = "baseUrl" in definition ? definition.baseUrl : undefined;
   const appIdKey = "appId" in definition ? definition.appId : undefined;
   const modelKey = "model" in definition ? definition.model : undefined;
+  const workspaceIdKey =
+    "workspaceId" in definition ? definition.workspaceId : undefined;
+  const regionKey = "region" in definition ? definition.region : undefined;
+  const flashModelKey =
+    "flashModel" in definition ? definition.flashModel : undefined;
+  const flashThresholdSecKey =
+    "flashThresholdSec" in definition
+      ? definition.flashThresholdSec
+      : undefined;
   const appId = (appIdKey && settings[appIdKey]) || "";
   return {
     provider: definition.provider,
@@ -198,6 +215,12 @@ function providerFromSettings(
       ("defaultBaseUrl" in definition ? definition.defaultBaseUrl : ""),
     appId,
     model: (modelKey && settings[modelKey]) || "",
+    workspaceId: (workspaceIdKey && settings[workspaceIdKey]) || "",
+    region: (regionKey && settings[regionKey]) || "",
+    flashModel: (flashModelKey && settings[flashModelKey]) || "",
+    flashThresholdSec: Number(
+      (flashThresholdSecKey && settings[flashThresholdSecKey]) || 0,
+    ),
     priority: Number(settings[definition.priority] || 0),
     apiKeyConfigured:
       settings[definition.key] === "configured" &&
@@ -374,6 +397,14 @@ export const adminApi = {
       settings[definition.baseUrl] = body.baseUrl;
     if ("model" in definition && body.model)
       settings[definition.model] = body.model;
+    if ("workspaceId" in definition)
+      settings[definition.workspaceId] = body.workspaceId || "";
+    if ("region" in definition && body.region)
+      settings[definition.region] = body.region;
+    if ("flashModel" in definition && body.flashModel)
+      settings[definition.flashModel] = body.flashModel;
+    if ("flashThresholdSec" in definition && body.flashThresholdSec)
+      settings[definition.flashThresholdSec] = String(body.flashThresholdSec);
     await adminFetch<ProviderSettingsResponse>("/providers", {
       method: "PUT",
       body: JSON.stringify({ settings }),

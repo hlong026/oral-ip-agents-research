@@ -75,6 +75,84 @@ describe("provider configuration page", () => {
       );
     });
   });
+
+  it("loads and saves the DashScope routing parameters", async () => {
+    const savedSettings: Array<Record<string, string>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === "PUT") {
+          const body = JSON.parse(String(init.body)) as {
+            settings: Record<string, string>;
+          };
+          savedSettings.push(body.settings);
+          return jsonResponse({ settings: body.settings });
+        }
+        return jsonResponse({
+          settings: {
+            dashscope_api_key: "configured",
+            dashscope_workspace_id: "workspace-old",
+            dashscope_region: "cn-beijing",
+            asr_model: "fun-asr",
+            asr_flash_model: "fun-asr-flash-old",
+            asr_flash_threshold_sec: "300",
+            dashscope_enabled: "false",
+          },
+        });
+      }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ProvidersPage />
+      </QueryClientProvider>,
+    );
+
+    const heading = await screen.findByRole("heading", {
+      name: "DashScope ASR",
+    });
+    const section = heading.closest("section");
+    expect(section).not.toBeNull();
+    const form = within(section as HTMLElement);
+    await waitFor(() => {
+      expect(form.getByLabelText("Workspace ID（可选）")).toHaveValue(
+        "workspace-old",
+      );
+    });
+    expect(form.queryByLabelText("Base URL")).not.toBeInTheDocument();
+
+    fireEvent.change(form.getByLabelText("Workspace ID（可选）"), {
+      target: { value: "workspace-new" },
+    });
+    fireEvent.change(form.getByLabelText("地域"), {
+      target: { value: "ap-southeast-1" },
+    });
+    fireEvent.change(form.getByLabelText("异步模型"), {
+      target: { value: "fun-asr-new" },
+    });
+    fireEvent.change(form.getByLabelText("短音频同步模型"), {
+      target: { value: "fun-asr-flash-new" },
+    });
+    fireEvent.change(form.getByLabelText("同步分流阈值（秒）"), {
+      target: { value: "180" },
+    });
+    fireEvent.click(form.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(savedSettings).toContainEqual(
+        expect.objectContaining({
+          dashscope_workspace_id: "workspace-new",
+          dashscope_region: "ap-southeast-1",
+          asr_model: "fun-asr-new",
+          asr_flash_model: "fun-asr-flash-new",
+          asr_flash_threshold_sec: "180",
+        }),
+      );
+    });
+  });
 });
 
 function jsonResponse(body: unknown): Response {

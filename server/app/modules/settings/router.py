@@ -1,8 +1,9 @@
 """Provider 配置控制面。"""
 
+import re
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -71,12 +72,43 @@ def _mask_secret(value: str) -> str:
 
 
 def _validate_provider_setting(key: str, value: str) -> None:
+    if key.endswith("_enabled") and value not in {"true", "false"}:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PROVIDER_SETTING_INVALID", "message": f"{key} 必须是 true 或 false"},
+        )
+    if key == "dashscope_region" and value not in {"cn-beijing", "ap-southeast-1"}:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PROVIDER_SETTING_INVALID", "message": "DashScope 地域无效"},
+        )
+    if key == "dashscope_workspace_id" and value and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PROVIDER_SETTING_INVALID", "message": "DashScope Workspace ID 格式无效"},
+        )
+    if key in {"asr_model", "asr_flash_model"} and not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail={"code": "PROVIDER_SETTING_INVALID", "message": f"{key} 格式无效"},
+        )
+    if key == "asr_flash_threshold_sec":
+        try:
+            threshold = int(value)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={"code": "PROVIDER_SETTING_INVALID", "message": "ASR 分流阈值必须是整数"},
+            ) from exc
+        if not 1 <= threshold <= 3600:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={"code": "PROVIDER_SETTING_INVALID", "message": "ASR 分流阈值必须在 1 到 3600 秒之间"},
+            )
     if not key.endswith("_base_url") or not value:
         return
     parsed = urlparse(value)
     if parsed.scheme != "https" or parsed.hostname not in ALLOWED_BASE_URL_HOSTS:
-        from fastapi import HTTPException, status
-
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail={"code": "PROVIDER_URL_NOT_ALLOWED", "message": "Provider 地址不在服务端白名单中"},
