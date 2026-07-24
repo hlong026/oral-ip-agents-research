@@ -59,6 +59,7 @@ describe("provider configuration page", () => {
         form.getByLabelText("App Secret（已配置，留空不覆盖）"),
       ).toHaveValue("");
     });
+    expect(form.queryByLabelText("优先级")).not.toBeInTheDocument();
 
     fireEvent.change(appId, { target: { value: "new-app-id" } });
     fireEvent.change(form.getByLabelText("App Secret（已配置，留空不覆盖）"), {

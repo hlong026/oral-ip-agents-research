@@ -9,7 +9,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
-    priority: 10,
   },
   {
     provider: "dashscope_asr",
@@ -17,7 +16,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://dashscope.aliyuncs.com",
     model: "fun-asr",
-    priority: 20,
   },
   {
     provider: "hifly",
@@ -25,7 +23,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://hfw-api.hifly.cc",
     model: "",
-    priority: 30,
   },
   {
     provider: "douyidou",
@@ -33,7 +30,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://gateway.diadi.cn",
     model: "",
-    priority: 40,
   },
 ];
 
@@ -181,17 +177,6 @@ export default function ProvidersPage() {
                 />
               </>
             )}
-            <label className="block">
-              <span className="label">优先级</span>
-              <input
-                className="input"
-                type="number"
-                value={provider.priority || 0}
-                onChange={(event) =>
-                  update(index, { priority: Number(event.target.value) })
-                }
-              />
-            </label>
             <button
               className="btn-primary"
               disabled={save.isPending}

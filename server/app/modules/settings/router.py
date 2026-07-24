@@ -31,15 +31,11 @@ ALLOWED_KEYS = {
     "deepseek_base_url",
     "deepseek_model",
     "deepseek_enabled",
-    "deepseek_priority",
     "feiying_api_key",
     "feiying_base_url",
     "feiying_enabled",
-    "feiying_priority",
     "dashscope_enabled",
-    "dashscope_priority",
     "douyidou_enabled",
-    "douyidou_priority",
 }
 
 # 敏感 key（GET 时脱敏返回）

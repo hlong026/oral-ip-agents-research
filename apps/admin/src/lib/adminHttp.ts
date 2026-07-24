@@ -73,7 +73,6 @@ export interface ProviderConfig {
   region?: string;
   flashModel?: string;
   flashThresholdSec?: number;
-  priority?: number;
   apiKeyConfigured?: boolean;
   apiKey?: string;
 }
@@ -155,7 +154,6 @@ const providerDefinitions = [
     baseUrl: "deepseek_base_url",
     model: "deepseek_model",
     enabled: "deepseek_enabled",
-    priority: "deepseek_priority",
   },
   {
     provider: "dashscope_asr",
@@ -167,7 +165,6 @@ const providerDefinitions = [
     flashModel: "asr_flash_model",
     flashThresholdSec: "asr_flash_threshold_sec",
     enabled: "dashscope_enabled",
-    priority: "dashscope_priority",
     defaultBaseUrl: "https://dashscope.aliyuncs.com",
   },
   {
@@ -176,7 +173,6 @@ const providerDefinitions = [
     key: "feiying_api_key",
     baseUrl: "feiying_base_url",
     enabled: "feiying_enabled",
-    priority: "feiying_priority",
   },
   {
     provider: "douyidou",
@@ -185,7 +181,6 @@ const providerDefinitions = [
     key: "douyidou_app_secret",
     baseUrl: "douyidou_base_url",
     enabled: "douyidou_enabled",
-    priority: "douyidou_priority",
   },
 ] as const;
 
@@ -221,7 +216,6 @@ function providerFromSettings(
     flashThresholdSec: Number(
       (flashThresholdSecKey && settings[flashThresholdSecKey]) || 0,
     ),
-    priority: Number(settings[definition.priority] || 0),
     apiKeyConfigured:
       settings[definition.key] === "configured" &&
       (!appIdKey || Boolean(appId)),
@@ -388,7 +382,6 @@ export const adminApi = {
     if (!definition) throw new AdminApiError("未知 Provider", 400);
     const settings: Record<string, string> = {
       [definition.enabled]: String(body.enabled),
-      [definition.priority]: String(body.priority || 0),
     };
     if ("appId" in definition && body.appId)
       settings[definition.appId] = body.appId;
