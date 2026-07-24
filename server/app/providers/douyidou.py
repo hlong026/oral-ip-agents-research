@@ -120,8 +120,9 @@ class DouyidouParser:
         完整解析：返回视频直链 + 文案 + 封面 + 作者等全部信息。
 
         核心逻辑：
-        - text 非空 → 已有文案，可跳过 ASR
-        - video 非空 → 视频直链，可传给 ASR 转写
+        - audio 非空 → 原始音频直链，优先传给 ASR
+        - video 非空 → 音频缺失时传给 ASR
+        - text 非空 → 音视频均不可用时作为降级文本
         """
         app_id, app_secret, _ = await self._get_credentials()
         if not app_id or not app_secret:

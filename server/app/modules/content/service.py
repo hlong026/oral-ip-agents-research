@@ -1,7 +1,7 @@
 """
 content 业务编排（F-101~F-106）
 降级链：自建解析 → 第三方解析 API → 手动上传/粘贴文案（C2，全链路 100% 可用）
-文案优先策略：Douyidou 返回 text 非空时直接使用（跳过ASR，零成本）
+链接转写策略：优先转写 Douyidou 音频直链，音频缺失时转写视频，平台 text 仅兜底
 ASR 智能分流：短音频(≤5min)走Flash同步 / 长音频走异步轮询
 日志：LLM 调用完成（§10.6.8-B #3）
 """
@@ -123,7 +123,7 @@ async def parse_url(
     verified_duration_seconds: float | None = None,
     require_verified_duration: bool = False,
 ) -> ParseOut:
-    """链接解析 → 文案优先 / ASR 转写 → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
+    """链接解析 → 音频优先 ASR → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
     logger.info(f"解析输入: platform={resolved.platform.value}, is_id={resolved.is_id}, url={resolved.url[:80]}")
@@ -139,24 +139,33 @@ async def parse_url(
         except Exception as e:
             logger.warning(f"Douyidou 完整解析失败，走降级链: {e}")
 
-    # 文案优先策略：Douyidou 已返回 text 时直接使用（跳过ASR，零成本）
-    if douyidou_result and douyidou_result.text:
-        return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
-
-    # 无文案：走 ASR 转写（需要视频直链）
+    # 平台 text 往往只是发布说明；完整口播必须优先从原始音频识别。
+    audio_url = next(
+        (
+            value
+            for value in (douyidou_result.audio if douyidou_result else [])
+            if isinstance(value, str) and _is_public_media_url(value)
+        ),
+        None,
+    )
     video_url = douyidou_result.video_url if douyidou_result else None
     platform = douyidou_result.platform if douyidou_result else resolved.platform.value
     title = douyidou_result.title if douyidou_result else ""
     cover = douyidou_result.cover if douyidou_result else None
 
-    if not video_url:
+    if not audio_url and not video_url:
         # 降级链兜底
         parse_result, _ = await registry.run_with_fallback("parse", registry.parse_chain, "parse_url", resolved.url)
         video_url = parse_result.video_key
         platform = parse_result.platform
         title = parse_result.title
 
-    if not video_url:
+    media_url = audio_url or video_url
+    if not media_url and douyidou_result and douyidou_result.text:
+        logger.warning("音视频直链不可用，降级使用平台发布文本")
+        return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
+
+    if not media_url:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -168,7 +177,7 @@ async def parse_url(
 
     known_dur = douyidou_result.duration_sec if douyidou_result else None
     duration_sec = verified_duration_seconds or await probe_duration(
-        video_url,
+        media_url,
         platform=platform,
         known_duration=known_dur,
     )
@@ -182,9 +191,11 @@ async def parse_url(
         )
     logger.info(f"ASR 分流决策: duration={duration_sec}, threshold={300}s")
 
-    # ASR 转写（直传视频URL，按时长智能分流）
+    logger.info(f"ASR 媒体选择: source={'audio' if audio_url else 'video'}")
+
+    # ASR 转写（优先直传音频URL，按时长智能分流）
     tr, provider_name = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", video_url, duration_sec=duration_sec
+        "asr", registry.asr_chain, "transcribe", media_url, duration_sec=duration_sec
     )
     transcript = TranscriptOut(
         text=tr.text,
@@ -218,7 +229,7 @@ async def parse_url(
 async def _save_text_result(
     db: AsyncSession, user_id: str, persona_id: str | None, source_url: str, result: DouyidouParseResult
 ) -> ParseOut:
-    """Douyidou 已返回文案时直接落库（跳过ASR，零成本）"""
+    """音视频不可用时，将 Douyidou 平台文本作为最后兜底。"""
     text = result.text or ""
     script = await _create_script_with_source_version(
         db,
@@ -230,7 +241,7 @@ async def _save_text_result(
         original_text=text,
         words_json="[]",
     )
-    logger.info(f"文案优先命中，跳过ASR: platform={result.platform}, text_len={len(text)}")
+    logger.info(f"平台文本兜底命中: platform={result.platform}, text_len={len(text)}")
     return ParseOut(
         transcript=TranscriptOut(text=text, words=[], duration=0, language="zh"),
         degraded=False,
