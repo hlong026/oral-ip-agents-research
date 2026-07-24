@@ -990,15 +990,9 @@ async def test_admin_reservation_is_zero_cost_and_does_not_write_billing_usage(c
         reservation = await db.get(CreditReservation, reservation_id)
         assert reservation is not None and reservation.reserved_points == 0
         assert await settle_reservation(db, reservation_id, "admin-task") == 1
-        account_count = await db.scalar(
-            select(func.count(QuotaAccount.id)).where(QuotaAccount.user_id == admin_id)
-        )
-        ledger_count = await db.scalar(
-            select(func.count(CreditLedger.id)).where(CreditLedger.user_id == admin_id)
-        )
-        usage_count = await db.scalar(
-            select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == admin_id)
-        )
+        account_count = await db.scalar(select(func.count(QuotaAccount.id)).where(QuotaAccount.user_id == admin_id))
+        ledger_count = await db.scalar(select(func.count(CreditLedger.id)).where(CreditLedger.user_id == admin_id))
+        usage_count = await db.scalar(select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == admin_id))
 
     assert account_count == 0
     assert ledger_count == 0
