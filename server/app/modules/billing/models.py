@@ -46,7 +46,7 @@ class QuotaUsage(Base):
     user_id: Mapped[str] = mapped_column(String(32), index=True)
     trace_id: Mapped[str] = mapped_column(String(64), index=True)
     task_id: Mapped[str] = mapped_column(String(32), index=True, default="")
-    step: Mapped[str] = mapped_column(String(16))
+    step: Mapped[str] = mapped_column(String(32))
     resolution: Mapped[str] = mapped_column(String(16), default="1080p")
     points: Mapped[float] = mapped_column(Float)  # 正=扣减，负=退还
     compute: Mapped[str] = mapped_column(String(8), default="cloud")
