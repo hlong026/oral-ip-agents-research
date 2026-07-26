@@ -1362,6 +1362,8 @@ export default function CreatePage() {
         ? 3000
         : false;
     },
+    // 标签页切后台时也保持轮询，切回即见最新进度
+    refetchIntervalInBackground: true,
   });
   const task = wiz.taskId ? (liveTask ?? fetchedTask) : undefined;
   const composeArtifacts = task?.steps.find(

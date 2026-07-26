@@ -27,6 +27,7 @@ export default function TasksPage() {
     queryKey: ["tasks", status, page],
     queryFn: () => pipelineApi.list(status || undefined, page, 12),
     refetchInterval: 15_000, // WS 断线兜底轮询
+    refetchIntervalInBackground: true, // 后台也保持，切回即见最新进度
   });
 
   // WS 推送的实时任务覆盖列表中的同 id 任务

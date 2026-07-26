@@ -232,16 +232,41 @@ export default function TaskDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const liveTask = useTasks((s) => s.tasks[id]);
-  const { data: fetched, refetch } = useQuery({
+  const {
+    data: fetched,
+    refetch,
+    error: fetchError,
+  } = useQuery({
     queryKey: ["task", id],
     queryFn: () => pipelineApi.get(id),
-    refetchInterval: (q) =>
-      q.state.data?.status === "running" || q.state.data?.status === "pending"
+    refetchInterval: (q) => {
+      // 404 等客户端错误属永久失败（任务不存在/已删除），停止轮询
+      if (q.state.error instanceof HttpError && q.state.error.status < 500)
+        return false;
+      // 首拉失败时也持续重试，避免 WS 不可用时页面永久停在加载态
+      if (!q.state.data) return 3000;
+      const s = q.state.data.status;
+      return s === "pending" || s === "running" || s === "waiting_confirm"
         ? 3000
-        : false,
+        : false;
+    },
+    // 标签页切后台时也保持轮询，切回即见最新进度
+    refetchIntervalInBackground: true,
   });
   const task = liveTask ?? fetched;
+  // 4xx 为永久失败（任务不存在/已删除）；5xx 瞬时错误继续保持加载 + 轮询
+  const notFound =
+    !task && fetchError instanceof HttpError && fetchError.status < 500;
 
+  if (notFound)
+    return (
+      <div className="py-16 text-center text-text-3">
+        任务不存在或已删除，
+        <Link className="text-brand-to underline" to="/tasks">
+          返回任务中心
+        </Link>
+      </div>
+    );
   if (!task)
     return <div className="py-16 text-center text-text-3">加载中…</div>;
 
