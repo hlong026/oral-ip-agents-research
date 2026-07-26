@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog, write_audit
 from app.core.db import get_db
 from app.core.deps import require_admin
-from app.modules.auth.models import User
+from app.modules.auth.models import RefreshSession, User
 from app.modules.billing.models import QuotaAccount
 from app.modules.catalog import repository as catalog_repo
 
@@ -51,6 +51,21 @@ async def list_users(
         .offset((page - 1) * pageSize)
         .limit(pageSize)
     )
+    users = rows.all()
+    # 反查绑定激活码（渠道 + 摘要掩码，明文不可回显），供运营识别激活码用户
+    from app.modules.activation.models import ActivationCode
+
+    user_ids = [user.id for user, _ in users]
+    code_masked: dict[str, str] = {}
+    if user_ids:
+        codes = (
+            await db.execute(select(ActivationCode).where(ActivationCode.bound_user_id.in_(user_ids)))
+        ).scalars()
+        for code in codes:
+            masked = f"{code.code[:4].upper()}****{code.code[-4:].upper()}"
+            if code.channel:
+                masked = f"{code.channel}·{masked}"
+            code_masked.setdefault(code.bound_user_id or "", masked)
     return {
         "items": [
             {
@@ -62,10 +77,12 @@ async def list_users(
                 "planType": user.plan_type,
                 "planSkuCode": user.plan_sku_code,
                 "planExpiresAt": user.plan_expires_at.isoformat() if user.plan_expires_at else None,
+                "deviceBound": bool(user.device_fingerprint),
+                "activationCodeMasked": code_masked.get(user.id),
                 "balance": balance or 0,
                 "createdAt": user.created_at.astimezone(UTC).isoformat(),
             }
-            for user, balance in rows.all()
+            for user, balance in users
         ],
         "total": total,
         "page": page,
@@ -99,6 +116,27 @@ async def update_user(
         detail=f"target={user_id},role={body.role},active={body.isActive}",
     )
     return {"id": user.id, "role": user.role, "isActive": user.is_active}
+
+
+@router.post("/users/{user_id}/unbind-device")
+async def unbind_device(
+    user_id: str,
+    admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """清空设备绑定并吊销全部刷新会话，用户可在新设备重新登录绑定"""
+    user = await db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "USER_NOT_FOUND", "message": "用户不存在"})
+    user.device_fingerprint = ""
+    sessions = await db.execute(
+        select(RefreshSession).where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False))
+    )
+    for session in sessions.scalars().all():
+        session.revoked = True
+    await db.commit()
+    await write_audit("admin_device_unbound", user_id=admin_id, detail=f"target={user_id}")
+    return {"ok": True}
 
 
 @router.post("/users/{user_id}/credits/adjust")

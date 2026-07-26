@@ -3,13 +3,16 @@
 from pydantic import BaseModel, Field
 
 
-class RegisterIn(BaseModel):
-    phone: str = Field(min_length=5, max_length=20)
-    password: str = Field(min_length=6, max_length=64)
-    nickname: str = Field(default="", max_length=64)
+class CodeLoginIn(BaseModel):
+    """用户端激活码登录"""
+
+    code: str = Field(min_length=10, max_length=40)
+    deviceFingerprint: str = Field(default="", max_length=128)
 
 
-class LoginIn(BaseModel):
+class AdminLoginIn(BaseModel):
+    """管理端手机号+密码登录"""
+
     phone: str
     password: str
     deviceId: str | None = None
@@ -17,6 +20,7 @@ class LoginIn(BaseModel):
 
 class RefreshIn(BaseModel):
     refreshToken: str
+    deviceFingerprint: str = Field(default="", max_length=128)
 
 
 class TokensOut(BaseModel):
@@ -27,10 +31,10 @@ class TokensOut(BaseModel):
 
 class UserOut(BaseModel):
     id: str
-    phone: str
     nickname: str
     avatarChar: str
     createdAt: str
     planType: str = "none"
     planExpiresAt: str | None = None
     activatedAt: str | None = None
+    deviceBound: bool = False

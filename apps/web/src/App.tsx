@@ -2,7 +2,6 @@ import { useSession } from "@oral/stores";
 import { useEffect } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Shell from "./shell/Shell";
-import ActivatePage from "./pages/ActivatePage";
 import AccountPage from "./pages/AccountPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
 import AssetsPage from "./pages/AssetsPage";
@@ -49,7 +48,6 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/activate" element={<ActivatePage />} />
       <Route
         element={
           <RequireAuth>

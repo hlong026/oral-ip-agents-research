@@ -23,7 +23,7 @@ PING_INTERVAL = 25  # 心跳保活（秒）
 async def tasks_ws(ws: WebSocket) -> None:
     protocols = [item.strip() for item in ws.headers.get("sec-websocket-protocol", "").split(",")]
     token = protocols[1] if len(protocols) == 2 and protocols[0] == "access-token" else ""
-    user_id = verify_ws_token(token)
+    user_id = await verify_ws_token(token)
     if user_id is None:
         await ws.close(code=4401)
         return

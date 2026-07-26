@@ -1,30 +1,56 @@
-import { HttpError } from "@oral/api-client";
+import { HttpError, activationApi } from "@oral/api-client";
+import type { CodeInfo } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
-/** 登录页（激活码注册入口） */
+/** 登录页（激活码即账号：首次登录自动开户并绑定本设备） */
 export default function LoginPage() {
-  const [phone, setPhone] = useState("");
-  const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [codeInfo, setCodeInfo] = useState<CodeInfo | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const login = useSession((s) => s.login);
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const planExpired = searchParams.get("reason") === "plan_expired";
   const from = (location.state as { from?: string } | null)?.from ?? "/";
+
+  // 失焦预校验：展示码对应的套餐信息（未使用码才返回 valid）
+  const precheck = async () => {
+    const value = code.trim();
+    if (!value) {
+      setCodeInfo(null);
+      return;
+    }
+    try {
+      setCodeInfo(await activationApi.validateCode(value));
+    } catch {
+      setCodeInfo(null);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      await login(phone, password);
+      await login(code.trim());
       navigate(from, { replace: true });
     } catch (err) {
-      setError(
-        err instanceof HttpError ? err.body.message : "网络异常，请稍后再试",
-      );
+      if (err instanceof HttpError) {
+        const messages: Record<string, string> = {
+          DEVICE_MISMATCH:
+            "该激活码已绑定其他设备，请在原设备使用或联系管理员解绑",
+          CODE_UNAVAILABLE: "激活码无效或已作废，请核对后重试",
+          CODE_EXPIRED: "激活码已过期，请更换新的激活码",
+          RATE_LIMITED: "尝试过于频繁，请稍后再试",
+        };
+        setError(messages[err.body.code] ?? err.body.message);
+      } else {
+        setError("网络异常，请稍后再试");
+      }
     } finally {
       setLoading(false);
     }
@@ -46,28 +72,34 @@ export default function LoginPage() {
         </div>
 
         <form onSubmit={submit} className="glass-strong space-y-4 p-6">
+          {planExpired && (
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+              套餐已到期：登录后可在「套餐与充值」页兑换新激活码续期
+            </div>
+          )}
           <div>
-            <label className="label">手机号</label>
+            <label className="label">激活码</label>
             <input
-              className="input"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              placeholder="请输入手机号"
+              className="input font-mono tracking-wide"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onBlur={() => void precheck()}
+              placeholder="ORAL-XXXX-XXXX-XXXX-XXXX-XXXX"
+              autoComplete="off"
+              spellCheck={false}
               required
             />
+            <p className="mt-1.5 text-xs text-text-3">
+              首次登录将自动开通账号并绑定本设备
+            </p>
           </div>
-          <div>
-            <label className="label">密码</label>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="至少 6 位"
-              minLength={6}
-              required
-            />
-          </div>
+
+          {codeInfo?.valid && (
+            <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
+              新激活码可用：{codeInfo.planType} 套餐 · {codeInfo.durationDays}{" "}
+              天 · {codeInfo.quotaAmount.toLocaleString()} 点算力
+            </div>
+          )}
 
           {error && (
             <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -80,18 +112,11 @@ export default function LoginPage() {
             disabled={loading}
             className="btn-primary w-full py-2.5"
           >
-            {loading ? "请稍候…" : "登录"}
+            {loading ? "请稍候…" : "登录 / 激活"}
           </button>
 
           <p className="text-center text-xs text-text-3">
-            还没有账号？{" "}
-            <button
-              type="button"
-              onClick={() => navigate("/activate")}
-              className="text-grad font-medium hover:underline"
-            >
-              激活码注册
-            </button>
+            激活码即账号，请妥善保管，切勿外泄
           </p>
         </form>
       </div>

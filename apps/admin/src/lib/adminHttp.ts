@@ -89,13 +89,15 @@ export interface ProviderProbeResult {
 
 export interface AdminUser {
   id: string;
-  phone: string;
+  phone: string | null;
   nickname: string;
   role: "user" | "admin";
   isActive: boolean;
   planType: string;
   planSkuCode: string;
   planExpiresAt?: string | null;
+  deviceBound: boolean;
+  activationCodeMasked?: string | null;
   balance: number;
   createdAt: string;
 }
@@ -357,6 +359,10 @@ export const adminApi = {
     adminFetch<{ balance: number }>(`/users/${id}/credits/adjust`, {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  unbindDevice: (id: string) =>
+    adminFetch<{ ok: boolean }>(`/users/${id}/unbind-device`, {
+      method: "POST",
     }),
   costAnalysis: () =>
     adminFetch<{ priceVersion: string | null; items: CostAnalysisItem[] }>(

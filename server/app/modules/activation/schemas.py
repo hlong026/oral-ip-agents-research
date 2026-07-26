@@ -5,16 +5,6 @@ from pydantic import BaseModel, Field
 # ---------- 用户侧 ----------
 
 
-class ActivateIn(BaseModel):
-    """激活码注册（首次开户）"""
-
-    code: str = Field(min_length=10, max_length=40)
-    phone: str = Field(min_length=5, max_length=20)
-    password: str = Field(min_length=6, max_length=64)
-    nickname: str = Field(default="", max_length=64)
-    deviceFingerprint: str = Field(default="web", max_length=64)
-
-
 class RedeemIn(BaseModel):
     """已登录用户兑换新码（续费/充值）"""
 
@@ -25,7 +15,7 @@ class ValidateCodeIn(BaseModel):
     """预校验码有效性"""
 
     code: str = Field(min_length=10, max_length=40)
-    deviceFingerprint: str = Field(default="", max_length=64)
+    deviceFingerprint: str = Field(default="", max_length=128)
 
 
 class CodeInfoOut(BaseModel):
@@ -36,18 +26,6 @@ class CodeInfoOut(BaseModel):
     quotaAmount: float = 0
     durationDays: int = 0
     message: str = ""
-
-
-class ActivateOut(BaseModel):
-    """激活注册返回"""
-
-    accessToken: str
-    refreshToken: str
-    expiresIn: int
-    planType: str
-    planSkuCode: str = ""
-    planExpiresAt: str | None = None
-    quotaBalance: float = 0
 
 
 class RedeemOut(BaseModel):

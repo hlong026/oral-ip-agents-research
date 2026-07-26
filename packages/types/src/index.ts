@@ -74,13 +74,13 @@ export type PipelineMode = "auto" | "manual";
 
 export interface User {
   id: string;
-  phone: string;
   nickname: string;
   avatarChar: string;
   createdAt: string;
   planType?: string;
   planExpiresAt?: string | null;
   activatedAt?: string | null;
+  deviceBound?: boolean;
 }
 
 export interface AuthTokens {

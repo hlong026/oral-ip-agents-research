@@ -1,5 +1,5 @@
-"""activation 业务编排（激活码注册 / 兑换 / 批量生码 / 作废）
-安全：HMAC 签名校验 + 一码一户 + 频率限制预留
+"""activation 业务编排（激活码登录 / 兑换 / 批量生码 / 作废）
+安全：HMAC 签名校验 + 一码一户 + 设备绑定 + 频率限制
 """
 
 from datetime import UTC, datetime, timedelta
@@ -11,13 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import write_audit
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password
+from app.core.security import create_access_token, create_refresh_token, decode_token
+from app.modules.auth.schemas import TokensOut
 
 from . import code_generator
 from . import repository as repo
 from .models import ActivationBatch, ActivationCode, UserSubscription
 from .schemas import (
-    ActivateOut,
     BatchGenerateOut,
     CodeInfoOut,
     CodeStatsOut,
@@ -108,15 +108,12 @@ async def validate_code(db: AsyncSession, raw_code: str) -> CodeInfoOut:
     )
 
 
-async def activate(
+async def login_with_code(
     db: AsyncSession,
     code_str: str,
-    phone: str,
-    password: str,
-    nickname: str,
     device_fingerprint: str,
-) -> ActivateOut:
-    """激活码注册（首次开户）"""
+) -> TokensOut:
+    """激活码登录：未使用码首次登录即自动开户；已使用码校验设备绑定后登录。"""
     code_str = _normalize_code(code_str)
     # 1. HMAC 签名校验
     _validate_code_or_raise(code_str)
@@ -125,31 +122,22 @@ async def activate(
     code = await repo.get_code_by_value(db, code_str)
     if not code:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "INVALID_CODE", "message": "激活码不存在"})
+    if code.status == "used":
+        return await _login_bound_user(db, code, device_fingerprint)
     if code.status != "unused":
-        msg = {"used": "激活码已被使用", "revoked": "激活码已作废", "expired": "激活码已过期"}.get(
-            code.status, "激活码不可用"
-        )
+        msg = {"revoked": "激活码已作废", "expired": "激活码已过期"}.get(code.status, "激活码不可用")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "CODE_UNAVAILABLE", "message": msg})
     if _code_expired(code.expires_at):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "CODE_EXPIRED", "message": "激活码已过期"})
 
-    # 3. 手机号唯一性
-    from app.modules.auth import repository as auth_repo
-
-    if await auth_repo.get_by_phone(db, phone):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "PHONE_TAKEN", "message": "该手机号已注册，请直接登录后兑换激活码"},
-        )
-
-    # 4. 原子性消耗激活码（CAS 防并发）
+    # 3. 原子性消耗激活码（CAS 防并发）
     consumed = await repo.mark_code_used(db, code.id, "__pending__")
     if not consumed:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, detail={"code": "CODE_UNAVAILABLE", "message": "激活码已被使用"}
         )
 
-    # 5. 创建用户（不单独 commit，保持事务原子性）
+    # 4. 创建用户（不单独 commit，保持事务原子性）
     from app.modules.auth.models import User
 
     now = datetime.now(UTC)
@@ -171,7 +159,7 @@ async def activate(
         if plan_type == "points_pack":
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                detail={"code": "POINTS_PACK_REQUIRES_ACCOUNT", "message": "积分包只能由已有用户登录后兑换"},
+                detail={"code": "POINTS_PACK_REQUIRES_ACCOUNT", "message": "积分包只能由已开户用户登录后兑换"},
             )
         duration_days = plan.duration_days
         monthly_points = plan.monthly_points
@@ -179,11 +167,12 @@ async def activate(
         plan_sku_code = plan.code
     plan_expires = now + timedelta(days=duration_days) if duration_days > 0 else None
 
+    nickname = f"创作者{code_str[-4:]}"
     user = User(
-        phone=phone,
-        password_hash=hash_password(password),
-        nickname=nickname or phone[-4:],
-        avatar_char=(nickname or phone)[0],
+        phone=None,
+        password_hash=None,
+        nickname=nickname,
+        avatar_char=nickname[0],
         activated_at=now,
         plan_type=plan_type,
         plan_sku_code=plan_sku_code,
@@ -193,28 +182,26 @@ async def activate(
     db.add(user)
     await db.flush()  # 获取 user.id
 
-    # 6. 更新码绑定到真实 user_id
+    # 5. 更新码绑定到真实 user_id
     from sqlalchemy import update as sa_update
-
-    from .models import ActivationCode
 
     await db.execute(sa_update(ActivationCode).where(ActivationCode.id == code.id).values(bound_user_id=user.id))
     if code.batch_id:
         await repo.increment_batch_used(db, code.batch_id)
 
-    # 7. 发放额度
+    # 6. 发放额度
     from app.modules.billing.service import grant_points
 
-    acc = await grant_points(
+    await grant_points(
         db,
         user.id,
         int(quota_amount),
-        source_type="points_pack" if plan_type == "points_pack" else "plan",
+        source_type="plan",
         source_id=code.id,
-        expires_at=(now + timedelta(days=365)) if plan_type == "points_pack" else plan_expires,
+        expires_at=plan_expires,
     )
 
-    # 8. 订阅记录
+    # 7. 订阅记录
     next_grant_at = now + timedelta(days=30) if monthly_points > 0 else None
     if next_grant_at and plan_expires and next_grant_at >= plan_expires:
         next_grant_at = None
@@ -235,38 +222,87 @@ async def activate(
         ),
     )
 
-    # 9. 默认 IP 档案
+    # 8. 默认 IP 档案
     from app.modules.ipasset.service import create_default_persona
 
     await create_default_persona(db, user.id, user.nickname)
 
-    # 10. 签发 JWT + 保存 session（不单独 commit）
-    from app.modules.auth.models import RefreshSession
-
-    device = device_fingerprint or "web"
-    access_token = create_access_token(user.id, device)
-    refresh_token = create_refresh_token(user.id, device)
-    payload = decode_token(refresh_token, "refresh")
-    if payload:
-        db.add(RefreshSession(user_id=user.id, device_id=device, refresh_jti=str(payload["jti"])))
+    # 9. 签发 JWT + 保存 session（不单独 commit）
+    tokens = _issue_tokens(db, user.id, device_fingerprint)
 
     await db.commit()
 
-    # 11. 审计日志
-    logger.info("activation_success", user_id=user.id, phone=phone, plan=plan_type, code_id=code.id)
+    # 10. 审计日志
+    logger.info("activation_login_first", user_id=user.id, plan=plan_type, code_id=code.id)
     await write_audit(
-        "activation_success", user_id=user.id, detail=f"phone={phone},plan={plan_type},quota={quota_amount}"
+        "activation_login_first", user_id=user.id, detail=f"code_id={code.id},plan={plan_type},quota={quota_amount}"
     )
 
-    return ActivateOut(
-        accessToken=access_token,
-        refreshToken=refresh_token,
+    return TokensOut(
+        accessToken=tokens[0],
+        refreshToken=tokens[1],
         expiresIn=settings.access_token_ttl_min * 60,
-        planType=plan_type,
-        planSkuCode=plan_sku_code,
-        planExpiresAt=plan_expires.isoformat() if plan_expires else None,
-        quotaBalance=acc.balance,
     )
+
+
+async def _login_bound_user(db: AsyncSession, code: ActivationCode, device_fingerprint: str) -> TokensOut:
+    """已使用码的重复登录：校验绑定用户与设备指纹。"""
+    from app.modules.auth import repository as auth_repo
+
+    if not code.bound_user_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail={"code": "CODE_UNAVAILABLE", "message": "激活码已被使用"}
+        )
+    user = await auth_repo.get_by_id(db, code.bound_user_id)
+    if not user:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail={"code": "CODE_UNAVAILABLE", "message": "激活码已被使用"}
+        )
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
+    # 设备绑定：空 = 未绑定（解绑后首次登录），自动重新绑定
+    if user.device_fingerprint and user.device_fingerprint != device_fingerprint:
+        logger.warning("code_login_failed", user_id=user.id, reason="DEVICE_MISMATCH")
+        await write_audit("code_login_failed", user_id=user.id, detail="reason=DEVICE_MISMATCH")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"code": "DEVICE_MISMATCH", "message": "该激活码已绑定其他设备，请在原设备使用或联系管理员解绑"},
+        )
+    if not user.device_fingerprint:
+        user.device_fingerprint = device_fingerprint
+
+    # 单端互踢 + 签发新会话
+    from app.modules.auth.models import RefreshSession
+
+    if settings.single_session_kick:
+        await db.execute(
+            update(RefreshSession)
+            .where(RefreshSession.user_id == user.id, RefreshSession.device_id == device_fingerprint)
+            .values(revoked=True)
+        )
+    tokens = _issue_tokens(db, user.id, device_fingerprint)
+    await db.commit()
+
+    logger.info("code_login", user_id=user.id, plan=user.plan_type)
+    await write_audit("code_login", user_id=user.id, detail=f"plan={user.plan_type}")
+    return TokensOut(
+        accessToken=tokens[0],
+        refreshToken=tokens[1],
+        expiresIn=settings.access_token_ttl_min * 60,
+    )
+
+
+def _issue_tokens(db: AsyncSession, user_id: str, device_fingerprint: str) -> tuple[str, str]:
+    """签发双令牌并登记 refresh 会话（不 commit，由调用方控制事务）。"""
+    from app.modules.auth.models import RefreshSession
+
+    device = device_fingerprint or "web"
+    access_token = create_access_token(user_id, device)
+    refresh_token = create_refresh_token(user_id, device)
+    payload = decode_token(refresh_token, "refresh")
+    if payload:
+        db.add(RefreshSession(user_id=user_id, device_id=device, refresh_jti=str(payload["jti"])))
+    return access_token, refresh_token
 
 
 async def redeem(db: AsyncSession, user_id: str, raw_code: str) -> RedeemOut:

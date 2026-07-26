@@ -2,12 +2,14 @@ import { activationApi, billingApi } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 /** 账号与额度（F-602：额度查询 / 用量明细 / CSV 导出） */
 export default function AccountPage() {
   const { user } = useSession();
   const [page, setPage] = useState(1);
+  const [searchParams] = useSearchParams();
+  const planExpired = searchParams.get("reason") === "plan_expired";
   const { data: quota } = useQuery({
     queryKey: ["quota"],
     queryFn: () => billingApi.quota(),
@@ -30,6 +32,15 @@ export default function AccountPage() {
     <div className="mx-auto max-w-4xl space-y-5">
       <h1 className="text-xl font-bold">账号与额度</h1>
 
+      {planExpired && (
+        <div className="flex items-center justify-between rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+          <span>套餐已到期，兑换新的激活码即可继续使用</span>
+          <Link to="/pricing" className="btn-primary px-3 py-1 text-xs">
+            去兑换
+          </Link>
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         {/* 用户信息卡 */}
         <div className="glass p-5">
@@ -39,14 +50,24 @@ export default function AccountPage() {
             </span>
             <div>
               <div className="text-lg font-bold">{user?.nickname}</div>
-              <div className="text-sm text-text-3">{user?.phone}</div>
+              <div className="text-sm text-text-3">
+                {user?.deviceBound ? "已绑定本设备" : "未绑定设备"}
+              </div>
             </div>
           </div>
-          <div className="mt-4 border-t border-stroke pt-3 text-xs text-text-3">
-            注册时间：
-            {user?.createdAt
-              ? new Date(user.createdAt).toLocaleDateString("zh-CN")
-              : "—"}
+          <div className="mt-4 grid gap-1 border-t border-stroke pt-3 text-xs text-text-3">
+            <span>
+              开通时间：
+              {user?.createdAt
+                ? new Date(user.createdAt).toLocaleDateString("zh-CN")
+                : "—"}
+            </span>
+            <span>
+              设备绑定：
+              {user?.deviceBound
+                ? "已绑定（换设备需联系管理员解绑）"
+                : "未绑定，下次登录自动绑定"}
+            </span>
           </div>
         </div>
 

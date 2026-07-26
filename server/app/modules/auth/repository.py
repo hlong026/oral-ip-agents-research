@@ -22,16 +22,6 @@ async def get_by_id_for_update(db: AsyncSession, user_id: str) -> User | None:
     return res.scalar_one_or_none()
 
 
-async def create_user(db: AsyncSession, phone: str, password_hash: str, nickname: str) -> User:
-    user = User(
-        phone=phone, password_hash=password_hash, nickname=nickname or phone[-4:], avatar_char=(nickname or phone)[0]
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
 async def save_session(db: AsyncSession, user_id: str, device_id: str, jti: str) -> None:
     db.add(RefreshSession(user_id=user_id, device_id=device_id, refresh_jti=jti))
     await db.commit()

@@ -16,7 +16,7 @@ import {
 interface SessionState {
   user: User | null;
   ready: boolean;
-  login: (phone: string, password: string) => Promise<void>;
+  login: (code: string) => Promise<void>;
   logout: () => void;
   bootstrap: () => Promise<void>;
 }
@@ -24,8 +24,8 @@ interface SessionState {
 export const useSession = create<SessionState>((set) => ({
   user: null,
   ready: false,
-  async login(phone, password) {
-    const tokens = await authApi.login(phone, password);
+  async login(code) {
+    const tokens = await authApi.login(code);
     setTokens(tokens);
     const user = await authApi.me();
     set({ user });

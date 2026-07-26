@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-24T14:42:39.333Z
+ * API 版本：1.0.0 · 生成时间：2026-07-26T02:28:27.315Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -17,35 +17,10 @@ export interface AccountUpdateIn {
   nickname: string;
 }
 
-export interface ActivateIn {
-  code: string;
+export interface AdminLoginIn {
   phone: string;
   password: string;
-  nickname?: string;
-  deviceFingerprint?: string;
-}
-
-export interface ActivateOut {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  planType: string;
-  planSkuCode?: string;
-  planExpiresAt?: string | null;
-  quotaBalance?: number;
-}
-
-export interface AutomationConsentIn {
-  accountId: string;
-  accepted: boolean;
-  riskVersion: string;
-}
-
-export interface AutomationStatusOut {
-  accountId: string;
-  authorized: boolean;
-  riskVersion?: string;
-  acceptedAt?: string | null;
+  deviceId?: string | null;
 }
 
 export interface AvatarOut {
@@ -158,6 +133,11 @@ export interface CodeInfoOut {
   message?: string;
 }
 
+export interface CodeLoginIn {
+  code: string;
+  deviceFingerprint?: string;
+}
+
 export interface CodeStatsOut {
   total?: number;
   unused?: number;
@@ -176,26 +156,6 @@ export interface ContentJobOut {
   error?: string;
   createdAt: string;
   updatedAt: string;
-}
-
-export interface ConversationOut {
-  id: string;
-  accountId: string;
-  platform: string;
-  remoteUid: string;
-  remoteNickname: string;
-  remoteAvatar: string;
-  lastMessageAt: string;
-  unreadCount: number;
-  status: string;
-  createdAt: string;
-}
-
-export interface ConversationPageOut {
-  items: ConversationOut[];
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 export interface CreatePipelineIn {
@@ -276,50 +236,6 @@ export interface KillSwitchIn {
 export interface KillSwitchOut {
   stopped: boolean;
   canceledMessages?: number;
-}
-
-export interface ListenerControlIn {
-  accountId: string;
-}
-
-export interface ListenerStatusOut {
-  accountId: string;
-  accountNickname?: string;
-  platform?: string;
-  status: string;
-  lastHeartbeat?: string | null;
-  errorMsg?: string;
-  startedAt?: string | null;
-}
-
-export interface LoginIn {
-  phone: string;
-  password: string;
-  deviceId?: string | null;
-}
-
-export interface MessageOut {
-  id: string;
-  conversationId: string;
-  direction: string;
-  msgType: number;
-  content: string;
-  autoReplied: boolean;
-  replyContent: string;
-  sendStatus: string;
-  sendError: string;
-  retryCount: number;
-  manualTakeover: boolean;
-  moderationStatus: string;
-  moderationReason: string;
-  createdAt: string;
-}
-
-export interface MessagePageOut {
-  items: MessageOut[];
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 export interface ModulePriceCatalogOut {
@@ -616,6 +532,7 @@ export interface RedeemOut {
 
 export interface RefreshIn {
   refreshToken: string;
+  deviceFingerprint?: string;
 }
 
 export interface ReservationBatchOut {
@@ -663,55 +580,6 @@ export interface RewriteOut {
   validationPassed?: boolean;
 }
 
-export interface RuleCreateIn {
-  accountId?: string;
-  name: string;
-  triggerType?: string;
-  triggerPattern?: string;
-  replyMode?: string;
-  replyTemplate?: string;
-  llmPrompt?: string;
-  priority?: number;
-  dailyLimit?: number;
-  delayMin?: number;
-  delayMax?: number;
-  deliveryMode?: string;
-  enabled?: boolean;
-}
-
-export interface RuleOut {
-  id: string;
-  accountId: string;
-  name: string;
-  triggerType: string;
-  triggerPattern: string;
-  replyMode: string;
-  replyTemplate: string;
-  llmPrompt: string;
-  priority: number;
-  dailyLimit: number;
-  delayMin: number;
-  delayMax: number;
-  deliveryMode: string;
-  enabled: boolean;
-  createdAt: string;
-}
-
-export interface RuleUpdateIn {
-  name?: string | null;
-  triggerType?: string | null;
-  triggerPattern?: string | null;
-  replyMode?: string | null;
-  replyTemplate?: string | null;
-  llmPrompt?: string | null;
-  priority?: number | null;
-  dailyLimit?: number | null;
-  delayMin?: number | null;
-  delayMax?: number | null;
-  deliveryMode?: string | null;
-  enabled?: boolean | null;
-}
-
 export interface ScriptCreateIn {
   title?: string;
   text: string;
@@ -747,11 +615,6 @@ export interface ScriptVersionOut {
   modelName: string;
   promptVersion: string;
   createdAt: string;
-}
-
-export interface SendMessageIn {
-  content: string;
-  msgType?: number;
 }
 
 export interface SettingsIn {
@@ -878,13 +741,13 @@ export interface UnreadOut {
 
 export interface UserOut {
   id: string;
-  phone: string;
   nickname: string;
   avatarChar: string;
   createdAt: string;
   planType?: string;
   planExpiresAt?: string | null;
   activatedAt?: string | null;
+  deviceBound?: boolean;
 }
 
 export interface UserUpdateIn {

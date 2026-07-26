@@ -17,8 +17,9 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
-    phone: Mapped[str] = mapped_column(String(20), unique=True, index=True)
-    password_hash: Mapped[str] = mapped_column(String(128))
+    # 手机号/密码仅管理员使用；激活码用户为 NULL
+    phone: Mapped[str | None] = mapped_column(String(20), unique=True, index=True, nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     nickname: Mapped[str] = mapped_column(String(64), default="")
     avatar_char: Mapped[str] = mapped_column(String(4), default="口")
     role: Mapped[str] = mapped_column(String(16), default="user", index=True)
@@ -28,7 +29,8 @@ class User(Base):
     plan_type: Mapped[str] = mapped_column(String(16), default="none")
     plan_sku_code: Mapped[str] = mapped_column(String(64), default="")
     plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    device_fingerprint: Mapped[str] = mapped_column(String(64), default="web")
+    # 设备绑定指纹（空 = 未绑定，登录时自动绑定）
+    device_fingerprint: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 

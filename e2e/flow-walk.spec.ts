@@ -26,11 +26,11 @@ const FLOW_STEP_LABELS = [
   "发布",
 ];
 
-const API_BASE = "http://127.0.0.1:8000/api";
+const API_BASE = process.env.E2E_API_BASE ?? "http://127.0.0.1:8000/api";
 const E2E_ADMIN_PHONE = "18800000000";
 const E2E_ADMIN_PASSWORD = "E2eAdmin@12345";
 
-/** 管理员生成真实 SKU/激活码，再走 Activation 开户。 */
+/** 管理员生成真实 SKU/激活码，再凭码登录开户（激活码即账号）。 */
 async function loginViaApi(
   page: Page,
   request: import("@playwright/test").APIRequestContext,
@@ -94,14 +94,11 @@ async function loginViaApi(
   );
   expect(batchResponse.ok()).toBeTruthy();
   const batch = await batchResponse.json();
-  const phone = `139${Math.floor(10000000 + Math.random() * 90000000)}`;
-  const res = await request.post(`${API_BASE}/v1/activation/activate`, {
+  // 空指纹 = 未绑定开户：避免与浏览器内自算指纹不一致导致 refresh 被拒
+  const res = await request.post(`${API_BASE}/v1/auth/login`, {
     data: {
       code: batch.codes[0],
-      phone,
-      password: "E2e@12345",
-      nickname: "E2E 走查",
-      deviceFingerprint: `playwright-${unique}`,
+      deviceFingerprint: "",
     },
   });
   expect(res.ok()).toBeTruthy();
@@ -118,7 +115,10 @@ test.beforeEach(async ({ page, request }) => {
 test("登录页渲染（公开路由）", async ({ page }) => {
   await page.goto("/login");
   await expect(page).toHaveURL(/\/login/);
-  await expect(page.getByText(/登录|激活码注册/).first()).toBeVisible();
+  await expect(page.getByText(/激活码/).first()).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /登录 \/ 激活/ }),
+  ).toBeVisible();
 });
 
 test("13 个流程页均可达且 flow-bar 六步可见", async ({ page }) => {

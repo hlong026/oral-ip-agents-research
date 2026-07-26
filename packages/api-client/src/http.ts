@@ -5,6 +5,7 @@
  * - X-Trace-Id 请求头注入（§10.6.9 Phase 4，前后端日志贯通）
  */
 import type { ApiError, AuthTokens } from "@oral/types";
+import { deviceFingerprint } from "./fingerprint";
 
 type ImportMetaWithEnv = ImportMeta & { env?: { VITE_API_BASE?: string } };
 
@@ -41,7 +42,10 @@ async function doRefresh(): Promise<boolean> {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({
+        refreshToken,
+        deviceFingerprint: await deviceFingerprint(),
+      }),
     });
     if (!res.ok) return false;
     const data = (await res.json()) as AuthTokens;
@@ -117,6 +121,15 @@ async function rawFetch<T>(
       }
     } catch {
       /* ignore */
+    }
+    // 套餐到期：已登录跳账户页兑换新码续期，未登录跳登录页提示
+    if (res.status === 403 && body.code === "PLAN_EXPIRED") {
+      const target = refreshToken
+        ? "/account?reason=plan_expired"
+        : "/login?reason=plan_expired";
+      if (window.location.pathname !== target.split("?")[0]) {
+        window.location.href = target;
+      }
     }
     throw new HttpError(res.status, body);
   }

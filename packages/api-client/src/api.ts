@@ -35,11 +35,15 @@ import type {
   WordTimestamp,
 } from "@oral/types";
 import { HttpError, http } from "./http";
+import { deviceFingerprint } from "./fingerprint";
 
-// ---------- auth ----------
+// ---------- auth（激活码即账号） ----------
 export const authApi = {
-  login: (phone: string, password: string, deviceId?: string) =>
-    http.post<AuthTokens>("/auth/login", { phone, password, deviceId }),
+  login: async (code: string) =>
+    http.post<AuthTokens>("/auth/login", {
+      code,
+      deviceFingerprint: await deviceFingerprint(),
+    }),
   me: () => http.get<User>("/auth/me"),
 };
 
@@ -52,15 +56,6 @@ export interface CodeInfo {
   message: string;
 }
 
-export interface ActivateResult {
-  accessToken: string;
-  refreshToken: string;
-  expiresIn: number;
-  planType: string;
-  planExpiresAt: string | null;
-  quotaBalance: number;
-}
-
 export interface RedeemResult {
   planType: string;
   planExpiresAt: string | null;
@@ -68,34 +63,11 @@ export interface RedeemResult {
   newBalance: number;
 }
 
-function activationDeviceFingerprint(): string {
-  const key = "oral_device_id";
-  const existing = localStorage.getItem(key);
-  if (existing) return existing;
-  const created = crypto.randomUUID();
-  localStorage.setItem(key, created);
-  return created;
-}
-
 export const activationApi = {
-  validateCode: (code: string) =>
+  validateCode: async (code: string) =>
     http.post<CodeInfo>("/activation/validate-code", {
       code,
-      deviceFingerprint: activationDeviceFingerprint(),
-    }),
-  activate: (
-    code: string,
-    phone: string,
-    password: string,
-    nickname: string,
-    deviceFingerprint = activationDeviceFingerprint(),
-  ) =>
-    http.post<ActivateResult>("/activation/activate", {
-      code,
-      phone,
-      password,
-      nickname,
-      deviceFingerprint,
+      deviceFingerprint: await deviceFingerprint(),
     }),
   redeem: (code: string) =>
     http.post<RedeemResult>("/activation/redeem", { code }),

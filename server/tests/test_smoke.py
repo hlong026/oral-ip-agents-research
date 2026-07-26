@@ -1,7 +1,7 @@
 """冒烟测试（§8 质量规范：pytest，mock provider 开箱可跑）
 
 覆盖：
-- W1–W2 验收「登录联通」：注册 → me → 额度真实余额（F-601/F-602）
+- W1–W2 验收「登录联通」：激活码登录开户 → me → 额度真实余额（F-601/F-602）
 - 合规红线：克隆无 consent_token 被拒绝（C8/C10）
 - F-405：统一 PipelineTask 模型 8 步状态机 + 取消
 """
@@ -14,6 +14,7 @@ from httpx import AsyncClient
 from app.core.db import SessionLocal
 from app.core.security import hash_password
 from app.modules.auth.models import User
+from tests.helpers import code_login, create_unused_code
 
 STEP_ORDER = ["parse", "asr", "rewrite", "voice", "avatar", "compose", "edit", "publish"]
 
@@ -22,7 +23,12 @@ def _phone() -> str:
     return f"139{uuid.uuid4().hex[:8]}"
 
 
-async def _register(client: AsyncClient, phone: str, role: str = "user") -> dict:
+async def _register(client: AsyncClient, phone: str = "", role: str = "user") -> dict:
+    """user 角色：建码后首次码登录自动开户；admin 角色：直建账号走管理面手机号密码登录。"""
+    if role == "user":
+        code = await create_unused_code()
+        return await code_login(client, code, fingerprint=f"fp-{uuid.uuid4().hex[:12]}.abcd1234")
+    phone = phone or _phone()
     password = "Test@12345"
     async with SessionLocal() as db:
         user = User(
@@ -42,8 +48,7 @@ async def _register(client: AsyncClient, phone: str, role: str = "user") -> dict
         await grant_initial_quota(db, user.id)
         await create_default_persona(db, user.id, user.nickname)
         await db.commit()
-    path = "/api/admin/v1/auth/login" if role == "admin" else "/api/v1/auth/login"
-    r = await client.post(path, json={"phone": phone, "password": password})
+    r = await client.post("/api/admin/v1/auth/login", json={"phone": phone, "password": password})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -98,25 +103,27 @@ async def test_healthz(client: AsyncClient):
 
 
 async def test_auth_and_quota_flow(client: AsyncClient):
-    """里程碑：登录联通（注册赠额度 → JWT → me → 额度卡真实余额）"""
-    phone = _phone()
-    tokens = await _register(client, phone)
+    """里程碑：登录联通（首次码登录开户赠额度 → JWT → me → 额度卡真实余额）"""
+    tokens = await _register(client, _phone())
 
     r = await client.get("/api/v1/auth/me", headers=_auth(tokens))
     assert r.status_code == 200
-    assert r.json()["phone"] == phone
+    body = r.json()
+    assert body["nickname"].startswith("创作者")
+    assert body["deviceBound"] is True
 
     r = await client.get("/api/v1/billing/quota", headers=_auth(tokens))
     assert r.status_code == 200
-    assert r.json()["balance"] > 0  # 开户礼初始额度
+    assert r.json()["balance"] > 0  # 首次码登录发放套餐额度
 
 
-async def test_login_wrong_password_rejected(client: AsyncClient):
-    phone = _phone()
-    await _register(client, phone)
-    r = await client.post("/api/v1/auth/login", json={"phone": phone, "password": "wrong-pass"})
-    assert r.status_code == 401
-    assert r.json()["detail"]["code"] == "BAD_CREDENTIALS"
+async def test_login_invalid_code_rejected(client: AsyncClient):
+    r = await client.post(
+        "/api/v1/auth/login",
+        json={"code": "ORAL-AAAA-BBBB-CCCC-DDDD-EEEE", "deviceFingerprint": "fp.x"},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"]["code"] == "INVALID_CODE"
 
 
 async def test_unauthorized_without_token(client: AsyncClient):

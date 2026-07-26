@@ -1,16 +1,14 @@
 """activation HTTP 路由（用户侧 + 管理侧）"""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
-from app.core.deps import get_current_user_id, require_admin
+from app.core.deps import get_current_user_id_ignore_plan, require_admin
 
 from . import repository as repo
 from . import service
 from .schemas import (
-    ActivateIn,
-    ActivateOut,
     BatchCreateIn,
     BatchGenerateOut,
     BatchOut,
@@ -49,53 +47,19 @@ async def api_validate_code(body: ValidateCodeIn, request: Request, db: AsyncSes
     return result
 
 
-@router.post("/activate", response_model=ActivateOut)
-async def api_activate(body: ActivateIn, request: Request, db: AsyncSession = Depends(get_db)):
-    """激活码注册（首次开户，无需登录）"""
-    from .rate_limit import enforce_rate_limit, record_attempt
-
-    ip_address = request.client.host if request.client else "unknown"
-    await enforce_rate_limit(
-        "activate",
-        ip_address=ip_address,
-        device_fingerprint=body.deviceFingerprint,
-        phone=body.phone,
-    )
-    try:
-        result = await service.activate(db, body.code, body.phone, body.password, body.nickname, body.deviceFingerprint)
-    except HTTPException:
-        await db.rollback()
-        await record_attempt(
-            "activate",
-            success=False,
-            ip_address=ip_address,
-            device_fingerprint=body.deviceFingerprint,
-            phone=body.phone,
-        )
-        raise
-    await record_attempt(
-        "activate",
-        success=True,
-        ip_address=ip_address,
-        device_fingerprint=body.deviceFingerprint,
-        phone=body.phone,
-    )
-    return result
-
-
 @router.post("/redeem", response_model=RedeemOut)
 async def api_redeem(
     body: RedeemIn,
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_ignore_plan),
     db: AsyncSession = Depends(get_db),
 ):
-    """已登录用户兑换新码（续费/充值）"""
+    """已登录用户兑换新码（续费/充值；到期用户也可续期）"""
     return await service.redeem(db, user_id, body.code)
 
 
 @router.get("/subscription", response_model=SubscriptionOut)
 async def api_subscription(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_ignore_plan),
     db: AsyncSession = Depends(get_db),
 ):
     """查询当前订阅状态"""
@@ -104,7 +68,7 @@ async def api_subscription(
 
 @subscription_router.get("/subscription", response_model=SubscriptionOut)
 async def api_current_subscription(
-    user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id_ignore_plan),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_subscription(db, user_id)

@@ -35,6 +35,11 @@ export default function UsersPage() {
       await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
     },
   });
+  const unbind = useMutation({
+    mutationFn: (id: string) => adminApi.unbindDevice(id),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
+  });
 
   return (
     <div className="space-y-5">
@@ -57,7 +62,7 @@ export default function UsersPage() {
             <option value="">请选择用户</option>
             {(data?.items ?? []).map((user) => (
               <option key={user.id} value={user.id}>
-                {user.nickname} · {user.phone}
+                {user.nickname} · {user.phone || "激活码用户"}
               </option>
             ))}
           </select>
@@ -118,6 +123,7 @@ export default function UsersPage() {
                 <th className="px-4 py-3">套餐</th>
                 <th className="px-4 py-3 text-right">积分</th>
                 <th className="px-4 py-3">权限</th>
+                <th className="px-4 py-3">设备</th>
                 <th className="px-4 py-3">状态</th>
               </tr>
             </thead>
@@ -129,7 +135,9 @@ export default function UsersPage() {
                 >
                   <td className="px-4 py-3">
                     <div className="font-medium">{user.nickname}</div>
-                    <div className="text-xs text-text-3">{user.phone}</div>
+                    <div className="text-xs text-text-3">
+                      {user.phone || user.activationCodeMasked || "激活码用户"}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-text-2">
                     {user.planSkuCode || user.planType || "未开通"}
@@ -154,6 +162,27 @@ export default function UsersPage() {
                       <option value="user">user</option>
                       <option value="admin">admin</option>
                     </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    {user.deviceBound ? (
+                      <button
+                        className="btn-ghost"
+                        disabled={unbind.isPending}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `确认解绑 ${user.nickname} 的设备？解绑后其登录态将失效，下次登录自动绑定新设备。`,
+                            )
+                          ) {
+                            unbind.mutate(user.id);
+                          }
+                        }}
+                      >
+                        解绑设备
+                      </button>
+                    ) : (
+                      <span className="text-xs text-text-3">未绑定</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <button

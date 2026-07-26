@@ -12,13 +12,14 @@ from app.core.db import SessionLocal
 from app.core.security import decode_token, hash_password
 from app.modules.auth.models import User
 from app.modules.catalog.service import LEGACY_MODULE_PRICES, MODULE_BILLING_UNITS
+from tests.helpers import DEFAULT_FINGERPRINT, bind_used_code, code_login
 
 
 def _phone() -> str:
     return f"138{uuid.uuid4().hex[:8]}"
 
 
-async def _create_user(*, role: str) -> tuple[str, str]:
+async def _create_user(*, role: str) -> tuple[str, str, str]:
     phone = _phone()
     password = "Test@12345"
     async with SessionLocal() as db:
@@ -33,25 +34,24 @@ async def _create_user(*, role: str) -> tuple[str, str]:
         )
         db.add(user)
         await db.commit()
-    return phone, password
+        user_id = user.id
+    return user_id, phone, password
 
 
 async def _login(client: AsyncClient, *, role: str) -> dict[str, str]:
-    phone, password = await _create_user(role=role)
-    prefix = "/api/admin/v1/auth" if role == "admin" else "/api/v1/auth"
-    response = await client.post(f"{prefix}/login", json={"phone": phone, "password": password})
-    assert response.status_code == 200, response.text
-    return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+    user_id, phone, password = await _create_user(role=role)
+    if role == "admin":
+        response = await client.post("/api/admin/v1/auth/login", json={"phone": phone, "password": password})
+        assert response.status_code == 200, response.text
+        return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+    tokens = await code_login(client, await bind_used_code(user_id))
+    return {"Authorization": f"Bearer {tokens['accessToken']}"}
 
 
 async def _user_login_for_role(client: AsyncClient, *, role: str) -> dict:
-    phone, password = await _create_user(role=role)
-    response = await client.post(
-        "/api/v1/auth/login",
-        json={"phone": phone, "password": password, "deviceId": "test"},
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
+    """以用户面（激活码）身份登录，取 user-audience 令牌。"""
+    user_id, _phone, _password = await _create_user(role=role)
+    return await code_login(client, await bind_used_code(user_id))
 
 
 def _annual_plan_payload(code: str, *, audience: str = "public") -> dict:
@@ -631,8 +631,14 @@ async def test_admin_credit_adjustment_uses_ledger_instead_of_raw_balance_edit(c
 async def test_refresh_token_is_rotated_and_old_token_cannot_be_reused(client: AsyncClient):
     tokens = await _user_login_for_role(client, role="user")
 
-    first = await client.post("/api/v1/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
-    replay = await client.post("/api/v1/auth/refresh", json={"refreshToken": tokens["refreshToken"]})
+    first = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refreshToken": tokens["refreshToken"], "deviceFingerprint": DEFAULT_FINGERPRINT},
+    )
+    replay = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refreshToken": tokens["refreshToken"], "deviceFingerprint": DEFAULT_FINGERPRINT},
+    )
 
     assert first.status_code == 200, first.text
     assert replay.status_code == 401
@@ -1629,24 +1635,18 @@ async def test_activation_batch_uses_published_sku_version(client: AsyncClient):
     legacy_admin_list = await client.get("/api/v1/activation/admin/codes", headers=admin_headers)
     assert legacy_admin_list.status_code == 404
 
-    activated = await client.post(
-        "/api/v1/activation/activate",
-        json={
-            "code": code,
-            "phone": _phone(),
-            "password": "Test@12345",
-            "nickname": "激活用户",
-            "deviceFingerprint": "test-device",
-        },
-    )
+    # 激活码即账号：未使用码首次登录即开户
+    logged_in = await code_login(client, code, fingerprint=f"fp-{uuid.uuid4().hex[:12]}.abcd1234")
+    activated_user_id = str(decode_token(logged_in["accessToken"])["sub"])
+    user_headers = {"Authorization": f"Bearer {logged_in['accessToken']}"}
 
-    assert activated.status_code == 200, activated.text
-    assert activated.json()["planSkuCode"] == plan["code"]
-    assert activated.json()["quotaBalance"] == 1000
+    subscription_now = await client.get("/api/v1/activation/subscription", headers=user_headers)
+    assert subscription_now.status_code == 200, subscription_now.text
+    assert subscription_now.json()["planSkuCode"] == plan["code"]
+    assert subscription_now.json()["quotaBalance"] == 1000
 
     from app.modules.billing.models import CreditGrant, CreditLedger
 
-    activated_user_id = str(decode_token(activated.json()["accessToken"])["sub"])
     async with SessionLocal() as db:
         grant = (await db.execute(select(CreditGrant).where(CreditGrant.user_id == activated_user_id))).scalar_one()
         ledger = (
@@ -1675,7 +1675,7 @@ async def test_activation_batch_uses_published_sku_version(client: AsyncClient):
 
     subscription = await client.get(
         "/api/v1/subscription",
-        headers={"Authorization": f"Bearer {activated.json()['accessToken']}"},
+        headers=user_headers,
     )
     assert subscription.status_code == 200, subscription.text
     assert subscription.json()["monthlyPoints"] == 1000

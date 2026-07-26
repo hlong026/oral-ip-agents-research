@@ -7,30 +7,27 @@ from fastapi import HTTPException
 from httpx import AsyncClient
 
 from app.core.db import SessionLocal
-from app.core.security import hash_password
 from app.modules.auth.models import User
 from app.modules.im.models import IMListenerState
 from app.modules.publish import repository as publish_repo
+from tests.helpers import bind_used_code, code_login
 
 
 async def _create_user_and_login(client: AsyncClient) -> tuple[str, dict[str, str]]:
     user_id = uuid.uuid4().hex
-    phone = f"137{uuid.uuid4().hex[:8]}"
-    password = "Test@12345"
     async with SessionLocal() as db:
         db.add(
             User(
                 id=user_id,
-                phone=phone,
-                password_hash=hash_password(password),
                 nickname="归属测试",
                 role="user",
             )
         )
         await db.commit()
-    response = await client.post("/api/v1/auth/login", json={"phone": phone, "password": password})
-    assert response.status_code == 200
-    return user_id, {"Authorization": f"Bearer {response.json()['accessToken']}"}
+    code = await bind_used_code(user_id)
+    fingerprint = f"fp-{uuid.uuid4().hex[:12]}.abcd1234"
+    tokens = await code_login(client, code, fingerprint=fingerprint)
+    return user_id, {"Authorization": f"Bearer {tokens['accessToken']}"}
 
 
 async def _create_publish_account(user_id: str) -> str:

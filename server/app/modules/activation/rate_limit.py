@@ -21,11 +21,11 @@ def _subject_hash(scope: str, value: str) -> str:
     return hmac.new(secret, f"{scope}:{value}".encode(), hashlib.sha256).hexdigest()
 
 
-def _subjects(ip_address: str, device_fingerprint: str, phone: str) -> list[tuple[str, str]]:
+def _subjects(ip_address: str, device_fingerprint: str, code: str) -> list[tuple[str, str]]:
     raw = (
         ("ip", ip_address.strip()),
         ("device", device_fingerprint.strip()),
-        ("phone", phone.strip()),
+        ("code", code.strip().upper()),
     )
     return [(scope, _subject_hash(scope, value)) for scope, value in raw if value]
 
@@ -36,9 +36,9 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC)
 
 
-async def enforce_rate_limit(action: str, *, ip_address: str, device_fingerprint: str = "", phone: str = "") -> None:
+async def enforce_rate_limit(action: str, *, ip_address: str, device_fingerprint: str = "", code: str = "") -> None:
     now = datetime.now(UTC)
-    subjects = _subjects(ip_address, device_fingerprint, phone)
+    subjects = _subjects(ip_address, device_fingerprint, code)
     blocked_scope = ""
     async with SessionLocal() as db:
         for scope, subject_hash in subjects:
@@ -69,9 +69,9 @@ async def record_attempt(
     success: bool,
     ip_address: str,
     device_fingerprint: str = "",
-    phone: str = "",
+    code: str = "",
 ) -> None:
-    subjects = _subjects(ip_address, device_fingerprint, phone)
+    subjects = _subjects(ip_address, device_fingerprint, code)
     if success:
         if not subjects:
             return

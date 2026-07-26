@@ -109,7 +109,10 @@ async def test_tasks_websocket_waits_for_all_subscription_cleanup(monkeypatch) -
         async def send_text(self, _payload: str) -> None:
             return None
 
-    monkeypatch.setattr(ws_module, "verify_ws_token", lambda _token: "notify-user")
+    async def fake_verify(_token: str) -> str:
+        return "notify-user"
+
+    monkeypatch.setattr(ws_module, "verify_ws_token", fake_verify)
     monkeypatch.setattr(ws_module, "subscribe", fake_subscribe)
 
     await ws_module.tasks_ws(FakeWebSocket())
