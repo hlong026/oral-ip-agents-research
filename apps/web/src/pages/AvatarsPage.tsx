@@ -4,6 +4,7 @@ import type { Avatar, Persona } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Play, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import AssetNav from "../components/AssetNav";
 import {
   confirmMeteredOperation,
@@ -372,6 +373,14 @@ export default function AvatarsPage() {
                     <div className="py-1 text-center text-xs text-success">
                       当前默认
                     </div>
+                  )}
+                  {a.status === "ready" && (
+                    <Link
+                      className="btn-ghost block w-full px-2.5 py-1 text-center text-xs text-brand-to"
+                      to={`/create?avatarId=${a.id}`}
+                    >
+                      用 TA 去成片 →
+                    </Link>
                   )}
                 </div>
               </div>

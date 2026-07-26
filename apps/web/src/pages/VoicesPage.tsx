@@ -4,6 +4,7 @@ import type { Voice } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mic, Music, Play, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import AssetNav from "../components/AssetNav";
 import {
   confirmMeteredOperation,
@@ -656,6 +657,14 @@ export default function VoicesPage() {
                       )}
                     </span>
                     <div className="flex items-center gap-1.5">
+                      {v.status === "ready" && (
+                        <Link
+                          className="btn-ghost px-2.5 py-0.5 text-xs text-brand-to"
+                          to={`/create?voiceId=${v.id}`}
+                        >
+                          去成片
+                        </Link>
+                      )}
                       {v.status === "ready" &&
                         current &&
                         current.voiceId !== v.id && (

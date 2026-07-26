@@ -8,7 +8,7 @@ const FLOW_STEPS = [
   { key: "script", label: "文案", to: "/scripts" },
   { key: "voice", label: "声音", to: "/assets/voices" },
   { key: "avatar", label: "数字人", to: "/assets/avatars" },
-  { key: "compose", label: "合成", to: "/tasks" },
+  { key: "compose", label: "合成", to: "/create?step=compose" },
   { key: "publish", label: "发布", to: "/publish/jobs" },
 ] as const;
 

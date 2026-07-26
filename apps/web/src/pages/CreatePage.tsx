@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import LinkSourceInput from "../components/LinkSourceInput";
 import PlatformIcon from "../components/PlatformIcon";
@@ -767,13 +767,15 @@ function StepVoice({
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
 }) {
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["voices"],
     queryFn: () => voiceApi.list(),
   });
+  // 只展示就绪声音：训练中/失败的声音无法用于合成
+  const ready = (data ?? []).filter((v) => v.status === "ready");
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {(data ?? []).map((v) => (
+      {ready.map((v) => (
         <button
           key={v.id}
           onClick={() => setWiz({ ...wiz, voiceId: v.id })}
@@ -796,9 +798,17 @@ function StepVoice({
           </div>
         </button>
       ))}
-      {(data ?? []).length === 0 && (
+      {isLoading && (
         <div className="col-span-full py-8 text-center text-sm text-text-3">
           加载音色库…
+        </div>
+      )}
+      {!isLoading && ready.length === 0 && (
+        <div className="col-span-full py-8 text-center text-sm text-text-3">
+          还没有就绪的声音，
+          <Link className="text-brand-to hover:underline" to="/assets/voices">
+            先去克隆一个 →
+          </Link>
         </div>
       )}
     </div>
@@ -812,13 +822,15 @@ function StepAvatar({
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
 }) {
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["avatars"],
     queryFn: () => avatarApi.list(),
   });
+  // 只展示就绪数字人：合成侧要求 status=ready 才能驱动
+  const ready = (data ?? []).filter((a) => a.status === "ready");
   return (
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {(data ?? []).map((a) => (
+      {ready.map((a) => (
         <button
           key={a.id}
           onClick={() => setWiz({ ...wiz, avatarId: a.id })}
@@ -843,6 +855,19 @@ function StepAvatar({
           </div>
         </button>
       ))}
+      {isLoading && (
+        <div className="col-span-full py-8 text-center text-sm text-text-3">
+          加载数字人…
+        </div>
+      )}
+      {!isLoading && ready.length === 0 && (
+        <div className="col-span-full py-8 text-center text-sm text-text-3">
+          还没有就绪的数字人，
+          <Link className="text-brand-to hover:underline" to="/assets/avatars">
+            先去训练一个 →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
@@ -1060,11 +1085,20 @@ export default function CreatePage() {
     current?.videoDuration,
   ]);
 
-  // Hero 入口参数带入；文案工坊「用它成片」带 scriptId 直接载入文案
+  // Hero 入口参数带入；文案工坊「用它成片」带 scriptId 直接载入文案；资产页「去成片」带 voiceId/avatarId 预选
   useEffect(() => {
     const url = params.get("url");
     const topic = params.get("topic");
     const scriptId = params.get("scriptId");
+    const voiceId = params.get("voiceId");
+    const avatarId = params.get("avatarId");
+    if (voiceId || avatarId) {
+      setWiz((w) => ({
+        ...w,
+        voiceId: voiceId ?? w.voiceId,
+        avatarId: avatarId ?? w.avatarId,
+      }));
+    }
     if (scriptId) {
       void contentApi.script(scriptId).then((s) => {
         setWiz((w) => ({
@@ -1082,6 +1116,17 @@ export default function CreatePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 预选当前 IP 绑定的默认声音/数字人（URL 参数与手动选择优先）
+  useEffect(() => {
+    if (!current) return;
+    setWiz((w) => ({
+      ...w,
+      voiceId: w.voiceId || current.voiceId || "",
+      avatarId: w.avatarId || current.avatarId || "",
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.id]);
 
   const goStep = (key: StepKey) => setParams({ step: key });
 
