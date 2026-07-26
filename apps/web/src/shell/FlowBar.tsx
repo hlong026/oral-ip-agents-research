@@ -2,13 +2,14 @@ import { Check } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
-/** flow-bar 全局六步动线（对齐效果图：创作流程页显示，账号/套餐页不显示） */
+/** flow-bar 全局七步动线（与一键成片向导七步对齐：创作流程页显示，账号/套餐页不显示） */
 const FLOW_STEPS = [
-  { key: "link", label: "链接/选题", to: "/create?step=link" },
-  { key: "script", label: "文案", to: "/scripts" },
-  { key: "voice", label: "声音", to: "/assets/voices" },
+  { key: "link", label: "链接选题", to: "/create?step=link" },
+  { key: "script", label: "文案二创", to: "/scripts" },
+  { key: "voice", label: "配音", to: "/assets/voices" },
   { key: "avatar", label: "数字人", to: "/assets/avatars" },
-  { key: "compose", label: "合成", to: "/create?step=compose" },
+  { key: "compose", label: "视频合成", to: "/create?step=compose" },
+  { key: "edit", label: "视频剪辑", to: "/create?step=edit" },
   { key: "publish", label: "发布", to: "/publish/jobs" },
 ] as const;
 
@@ -24,15 +25,16 @@ function useActiveStep(): string | null {
       if (step === "script") return "script";
       if (step === "voice") return "voice";
       if (step === "avatar") return "avatar";
-      if (step === "compose" || step === "edit") return "compose";
+      if (step === "compose") return "compose";
+      if (step === "edit") return "edit";
       if (step === "publish") return "publish";
       return "link";
     }
     if (pathname.startsWith("/scripts")) return "script";
     if (pathname.startsWith("/assets/voices")) return "voice";
     if (pathname.startsWith("/assets/avatars")) return "avatar";
-    if (pathname.startsWith("/tasks") || pathname.startsWith("/editor"))
-      return "compose";
+    if (pathname.startsWith("/tasks")) return "compose";
+    if (pathname.startsWith("/editor")) return "edit";
     if (pathname.startsWith("/publish")) return "publish";
     return null;
   }, [pathname, params]);

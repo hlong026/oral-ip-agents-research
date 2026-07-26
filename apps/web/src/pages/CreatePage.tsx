@@ -51,12 +51,12 @@ import {
 } from "../lib/meteredOperation";
 
 const STEPS = [
-  { key: "link", label: "链接/选题" },
-  { key: "script", label: "文案" },
-  { key: "voice", label: "声音" },
+  { key: "link", label: "链接选题" },
+  { key: "script", label: "文案二创" },
+  { key: "voice", label: "配音" },
   { key: "avatar", label: "数字人" },
-  { key: "compose", label: "合成" },
-  { key: "edit", label: "剪辑" },
+  { key: "compose", label: "视频合成" },
+  { key: "edit", label: "视频剪辑" },
   { key: "publish", label: "发布" },
 ] as const;
 
@@ -883,88 +883,6 @@ function StepAvatar({
   );
 }
 
-// ---------------- 第 5 步：合成参数 ----------------
-
-function StepCompose({
-  wiz,
-  setWiz,
-}: {
-  wiz: Wizard;
-  setWiz: (w: Wizard) => void;
-}) {
-  return (
-    <div className="space-y-5">
-      <div>
-        <label className="label">执行模式（F-405）</label>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => setWiz({ ...wiz, mode: "auto" })}
-            className={`rounded-xl border p-4 text-left ${wiz.mode === "auto" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
-          >
-            <div className="flex items-center gap-1.5 font-medium">
-              <Zap className="h-4 w-4" /> 全自动
-            </div>
-            <div className="mt-1 text-xs text-text-3">
-              8 步流水线一气呵成，适合成熟 IP
-            </div>
-          </button>
-          <button
-            onClick={() => setWiz({ ...wiz, mode: "manual" })}
-            className={`rounded-xl border p-4 text-left ${wiz.mode === "manual" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
-          >
-            <div className="flex items-center gap-1.5 font-medium">
-              <Hand className="h-4 w-4" /> 逐步确认
-            </div>
-            <div className="mt-1 text-xs text-text-3">
-              每步完成暂停，可人工干预/覆盖产物
-            </div>
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="label">批量生成数量（F-406，差异化混剪）</label>
-          <input
-            type="number"
-            min={1}
-            max={20}
-            className="input"
-            value={wiz.count}
-            onChange={(e) =>
-              setWiz({
-                ...wiz,
-                count: Math.max(1, Math.min(20, Number(e.target.value) || 1)),
-              })
-            }
-          />
-        </div>
-        <div>
-          <label className="label">差异化随机化（C5）</label>
-          <button
-            onClick={() => setWiz({ ...wiz, randomize: !wiz.randomize })}
-            className={`input flex items-center justify-between ${wiz.randomize ? "border-brand-from/60 text-text-1" : "text-text-3"}`}
-          >
-            {wiz.randomize ? "已开启（变速/镜像/抽帧）" : "已关闭"}
-            <span
-              className={`h-5 w-9 rounded-full p-0.5 transition-colors ${wiz.randomize ? "bg-brand-grad" : "bg-white/10"}`}
-            >
-              <span
-                className={`block h-4 w-4 rounded-full bg-white transition-transform ${wiz.randomize ? "translate-x-4" : ""}`}
-              />
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-stroke bg-white/[0.02] p-4 text-xs text-text-3">
-        云端智能合成 · 字幕双模式（语音时间戳优先，自动校准兜底）·
-        背景音乐自动闪避 · 1080p
-      </div>
-    </div>
-  );
-}
-
 // ---------------- 合成执行面板（提交后原地展示实时进度 + 成片预览） ----------------
 
 const TASK_STATUS_LABELS: Record<string, string> = {
@@ -1155,7 +1073,7 @@ function ComposeRunPanel({
             去处理
           </Link>
           <button className="btn-primary px-3 py-1 text-xs" onClick={onReset}>
-            重新调整参数并合成
+            重新合成
           </button>
         </div>
       )}
@@ -1163,10 +1081,10 @@ function ComposeRunPanel({
       {task.status === "canceled" && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stroke bg-white/[0.03] p-3 text-sm">
           <span className="flex-1 text-text-2">
-            任务已取消，冻结积分已释放，可调整参数后重新合成
+            任务已取消，冻结积分已释放，可一键重新合成
           </span>
           <button className="btn-primary px-3 py-1 text-xs" onClick={onReset}>
-            重新调整参数并合成
+            重新合成
           </button>
         </div>
       )}
@@ -1203,28 +1121,49 @@ function ComposeRunPanel({
   );
 }
 
-// ---------------- 第 6 步：剪辑（可跳过） ----------------
+// ---------------- 第 6 步：视频剪辑（成片预览 + 可跳过） ----------------
 
-function StepEdit({ onSkip }: { onSkip: () => void }) {
+function StepEdit({
+  finalVideoKey,
+  onSkip,
+}: {
+  finalVideoKey: string;
+  onSkip: () => void;
+}) {
   const navigate = useNavigate();
   return (
-    <div className="glass flex flex-col items-center gap-4 py-10 text-center">
-      <span className="text-text-2">
-        <Scissors className="h-9 w-9" />
-      </span>
-      <div>
-        <div className="font-medium">剪辑步可在成片后精修</div>
-        <p className="mt-1 text-sm text-text-3">
-          字幕样式 / BGM 三模式 / 封面编辑，均可在任务完成后进入剪辑台处理
-        </p>
-      </div>
-      <div className="flex gap-3">
-        <button className="btn-ghost" onClick={() => navigate("/editor")}>
-          先去剪辑台看看
-        </button>
-        <button className="btn-primary" onClick={onSkip}>
-          跳过，进入发布配置 →
-        </button>
+    <div className="space-y-4">
+      {finalVideoKey && (
+        <div>
+          <label className="label">成片预览</label>
+          <video
+            src={`/media/${finalVideoKey}`}
+            controls
+            playsInline
+            preload="metadata"
+            className="max-h-72 w-full rounded-xl bg-black"
+            aria-label="剪辑成片预览"
+          />
+        </div>
+      )}
+      <div className="glass flex flex-col items-center gap-4 py-8 text-center">
+        <span className="text-text-2">
+          <Scissors className="h-9 w-9" />
+        </span>
+        <div>
+          <div className="font-medium">可先去剪辑台精修，也可直接发布</div>
+          <p className="mt-1 text-sm text-text-3">
+            字幕样式 / BGM 三模式 / 封面编辑，剪辑台支持对成片精修
+          </p>
+        </div>
+        <div className="flex gap-3">
+          <button className="btn-ghost" onClick={() => navigate("/editor")}>
+            先去剪辑台看看
+          </button>
+          <button className="btn-primary" onClick={onSkip}>
+            跳过，进入发布配置 →
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1256,7 +1195,7 @@ function StepPublish({
   if (!finalVideoKey) {
     return (
       <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
-        成片尚未生成，请先回到「合成」步完成合成后再配置发布。
+        成片尚未生成，请先回到「视频合成」步完成合成后再配置发布。
       </div>
     );
   }
@@ -1338,13 +1277,19 @@ export default function CreatePage() {
   const [batchCount, setBatchCount] = useState(1);
   const [error, setError] = useState("");
   const [quote, setQuote] = useState<PricePreview | null>(null);
-  const [quoting, setQuoting] = useState(false);
   const { current } = useIp();
   const navigate = useNavigate();
-  const { data: moduleCatalog } = useQuery({
+  const {
+    data: moduleCatalog,
+    isError: catalogFailed,
+    refetch: refetchCatalog,
+  } = useQuery({
     queryKey: ["catalog", "module-prices"],
     queryFn: () => catalogApi.modulePrices(),
   });
+
+  // 合成步全自动：进入即报价并创建任务，ref 防止 StrictMode/重渲染重复触发
+  const autoStartRef = useRef(false);
 
   // 合成任务实时追踪：WS 推送（useTasks）优先，3s 轮询兜底
   const liveTask = useTasks((s) =>
@@ -1371,6 +1316,23 @@ export default function CreatePage() {
   )?.artifacts;
   const finalVideoKey = composeArtifacts?.final_video_key ?? "";
   const coverKey = composeArtifacts?.cover_key ?? "";
+
+  // 合成前置产物校验：直达本步缺料时引导补齐对应步骤，绝不静默自动扣费
+  const composeGap = !current
+    ? { text: "请先在左侧栏选择一个 IP", step: null }
+    : wiz.scriptText.trim().length < 10
+      ? {
+          text: "缺少口播文案，请先完成「文案二创」步",
+          step: "script" as StepKey,
+        }
+      : !wiz.voiceId
+        ? { text: "缺少声音，请先完成「配音」步", step: "voice" as StepKey }
+        : !wiz.avatarId
+          ? {
+              text: "缺少数字人，请先完成「数字人」步",
+              step: "avatar" as StepKey,
+            }
+          : null;
 
   useEffect(() => {
     setQuote(null);
@@ -1427,6 +1389,21 @@ export default function CreatePage() {
 
   const goStep = (key: StepKey) => setParams({ step: key });
 
+  // 进入「视频合成」步后自动开始：前置产物齐备且模块价格目录就绪才报价 + 创建任务
+  useEffect(() => {
+    if (step !== "compose" || wiz.taskId || autoStartRef.current) return;
+    if (composeGap || !moduleCatalog) return;
+    void startCompose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, wiz.taskId, composeGap, moduleCatalog]);
+
+  // 模块价格目录加载失败时给出可重试的错误，避免停留在「准备中…」死局
+  useEffect(() => {
+    if (step === "compose" && !wiz.taskId && catalogFailed && !moduleCatalog) {
+      setError("模块价格目录加载失败，请重试");
+    }
+  }, [step, wiz.taskId, catalogFailed, moduleCatalog]);
+
   const canNext = (): boolean => {
     if (step === "link")
       return Boolean(wiz.sourceUrl || wiz.topic || wiz.scriptText);
@@ -1447,24 +1424,42 @@ export default function CreatePage() {
     if (s) goStep(s.key);
   };
 
-  /** 合成步提交：创建流水线任务后原地展示实时进度，发布在成片预览后单独配置 */
+  /** 合成步全自动提交：报价 → 校验余额 → 创建流水线任务，随后原地展示实时进度 */
   const startCompose = async () => {
     if (!current) {
       setError("请先在左侧栏选择 IP");
       return;
     }
-    if (!quote) {
-      setError("请先计算并确认预计积分");
-      return;
-    }
-    const estimatedTotal = quote.estimatedPoints * Math.max(1, wiz.count);
-    if (quote.availablePoints < estimatedTotal) {
-      setError("积分余额不足，请先兑换积分包或续费套餐");
-      return;
-    }
+    autoStartRef.current = true;
     setSubmitting(true);
     setError("");
     try {
+      // 目录首拉失败后手动重试时补拉一次，保证「重试合成」可自愈
+      let catalogItems = moduleCatalog?.items;
+      if (!catalogItems) {
+        catalogItems = (await refetchCatalog()).data?.items;
+      }
+      if (!catalogItems) {
+        setError("模块价格目录加载失败，请重试");
+        return;
+      }
+      const request = buildPricePreviewRequest(
+        wiz,
+        catalogItems,
+        current.videoDuration || 60,
+      );
+      if (request.items.length === 0) {
+        setError("当前没有已发布的模块积分价格，请联系管理员配置价格版本");
+        return;
+      }
+      const freshQuote = await billingApi.pricePreview(request);
+      setQuote(freshQuote);
+      const estimatedTotal =
+        freshQuote.estimatedPoints * Math.max(1, wiz.count);
+      if (freshQuote.availablePoints < estimatedTotal) {
+        setError("积分余额不足，请先兑换积分包或续费套餐");
+        return;
+      }
       const tasks = await pipelineApi.create({
         ipId: current.id,
         sourceUrl: wiz.sourceUrl || undefined,
@@ -1476,7 +1471,7 @@ export default function CreatePage() {
         platforms: [],
         randomize: wiz.randomize,
         count: wiz.count,
-        quoteId: quote.quoteId,
+        quoteId: freshQuote.quoteId,
       });
       const first = tasks[0];
       if (!first) {
@@ -1487,7 +1482,9 @@ export default function CreatePage() {
       // 函数式更新，避免覆盖提交期间用户对向导的其它修改
       setWiz((w) => ({ ...w, taskId: first.id }));
     } catch (e) {
-      setError(e instanceof HttpError ? e.body.message : "创建失败，请重试");
+      setError(
+        e instanceof HttpError ? e.body.message : "合成启动失败，请重试",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1529,29 +1526,6 @@ export default function CreatePage() {
     }
   };
 
-  const requestQuote = async () => {
-    const request = buildPricePreviewRequest(
-      wiz,
-      moduleCatalog?.items ?? [],
-      current?.videoDuration || 60,
-    );
-    if (request.items.length === 0) {
-      setError("当前没有已发布的模块积分价格，请联系管理员配置价格版本");
-      return;
-    }
-    setQuoting(true);
-    setError("");
-    try {
-      setQuote(await billingApi.pricePreview(request));
-    } catch (e) {
-      setError(
-        e instanceof HttpError ? e.body.message : "积分报价失败，请稍后重试",
-      );
-    } finally {
-      setQuoting(false);
-    }
-  };
-
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <div className="glass-strong p-6">
@@ -1572,6 +1546,7 @@ export default function CreatePage() {
                 finalVideoKey={finalVideoKey}
                 onRefresh={() => void refetchTask()}
                 onReset={() => {
+                  autoStartRef.current = false;
                   setWiz((w) => ({ ...w, taskId: "" }));
                   setQuote(null);
                   setBatchCount(1);
@@ -1582,61 +1557,56 @@ export default function CreatePage() {
                 任务已创建，正在加载实时进度…
               </div>
             )
+          ) : composeGap ? (
+            // 直达合成步但缺前置产物：引导补齐，不自动扣费
+            <div className="glass flex flex-col items-center gap-3 py-10 text-center">
+              <TriangleAlert className="h-8 w-8 text-warning" />
+              <div className="font-medium">暂无法开始合成</div>
+              <p className="text-sm text-text-3">{composeGap.text}</p>
+            </div>
           ) : (
-            <StepCompose wiz={wiz} setWiz={setWiz} />
+            // 全自动：进入本步即自动报价并开始合成，无需手动配置
+            <div className="space-y-4">
+              <div className="glass flex flex-col items-center gap-3 py-10 text-center">
+                {error ? (
+                  <TriangleAlert className="h-8 w-8 text-danger" />
+                ) : (
+                  <LoaderCircle className="h-8 w-8 animate-spin text-info" />
+                )}
+                <div className="font-medium">
+                  {error
+                    ? "合成启动失败"
+                    : submitting
+                      ? "正在启动数字人合成…"
+                      : "正在准备合成参数…"}
+                </div>
+                <p className="text-sm text-text-3">
+                  自动计算所需积分并创建合成任务，完成后可在本页预览数字人视频
+                </p>
+                {quote && (
+                  <p className="text-xs text-text-3">
+                    预计消耗{" "}
+                    <span className="font-mono">
+                      {quote.estimatedPoints * Math.max(1, wiz.count)}
+                    </span>{" "}
+                    点 · 可用积分{" "}
+                    <span className="font-mono">
+                      {quote.availablePoints.toLocaleString()}
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
           ))}
-        {step === "edit" && <StepEdit onSkip={next} />}
+        {step === "edit" && (
+          <StepEdit finalVideoKey={finalVideoKey} onSkip={next} />
+        )}
         {step === "publish" && (
           <StepPublish
             wiz={wiz}
             setWiz={setWiz}
             finalVideoKey={finalVideoKey}
           />
-        )}
-
-        {step === "compose" && !wiz.taskId && (
-          <section className="mt-5 rounded-xl border border-stroke bg-white/[0.03] p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-medium">合成积分报价</h2>
-                <p className="mt-1 text-xs text-text-3">
-                  报价有效 10 分钟，开始合成时冻结预计积分，失败或取消自动释放。
-                </p>
-              </div>
-              <button
-                className="btn-ghost"
-                onClick={() => void requestQuote()}
-                disabled={quoting}
-              >
-                {quoting ? "计算中…" : quote ? "重新计算" : "计算预计积分"}
-              </button>
-            </div>
-            {quote && (
-              <div className="mt-4 space-y-2 text-sm">
-                {quote.items.map((item) => (
-                  <div
-                    key={item.module}
-                    className="flex justify-between text-text-2"
-                  >
-                    <span>{item.name || item.module}</span>
-                    <span className="font-mono">{item.points} 点</span>
-                  </div>
-                ))}
-                <div className="flex justify-between border-t border-stroke pt-2 font-medium">
-                  <span>预计合计</span>
-                  <span className="font-mono">
-                    {quote.estimatedPoints * Math.max(1, wiz.count)} 点
-                    {wiz.count > 1 ? `（${wiz.count} 条）` : ""}
-                  </span>
-                </div>
-                <div
-                  className={`text-right text-xs ${quote.availablePoints >= quote.estimatedPoints * Math.max(1, wiz.count) ? "text-success" : "text-danger"}`}
-                >
-                  可用积分 {quote.availablePoints.toLocaleString()}
-                </div>
-              </div>
-            )}
-          </section>
         )}
 
         {error && (
@@ -1655,19 +1625,29 @@ export default function CreatePage() {
             >
               ← 上一步
             </button>
-            {step === "compose" && !wiz.taskId ? (
+            {step === "compose" && !wiz.taskId && composeGap ? (
+              <button
+                className="btn-primary px-8"
+                onClick={() => composeGap.step && goStep(composeGap.step)}
+                disabled={!composeGap.step}
+              >
+                去补齐 →
+              </button>
+            ) : step === "compose" && !wiz.taskId ? (
               <button
                 className="btn-primary flex items-center gap-1.5 px-8"
-                onClick={startCompose}
-                disabled={submitting || !quote}
+                onClick={() => void startCompose()}
+                disabled={submitting || !error}
               >
                 {submitting ? (
-                  "创建中…"
-                ) : (
+                  "正在启动合成…"
+                ) : error ? (
                   <>
                     <Zap className="h-4 w-4" />
-                    {wiz.count > 1 ? `开始合成 ×${wiz.count}` : "开始合成"}
+                    重试合成
                   </>
+                ) : (
+                  "准备中…"
                 )}
               </button>
             ) : step !== "publish" ? (

@@ -12,13 +12,7 @@ import type {
   PricePreview,
 } from "@oral/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +31,7 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       probe: vi.fn(),
       parse: vi.fn(),
       rewrite: vi.fn(),
+      script: vi.fn(),
     },
     catalogApi: {
       ...actual.catalogApi,
@@ -417,7 +412,7 @@ describe("CreatePage 来源模式切换", () => {
   });
 });
 
-// ---------------- 合成步：就地提交 + 实时进度 + 成片预览 ----------------
+// ---------------- 视频合成步：进入即自动报价开始合成 + 实时进度 + 成片预览 ----------------
 
 const testPersona = {
   id: "ip-1",
@@ -463,30 +458,25 @@ function makeTask(overrides: Partial<PipelineTask> = {}): PipelineTask {
   } as unknown as PipelineTask;
 }
 
-function renderStep(step: "compose" | "publish") {
+function renderStep(step: "compose" | "publish", opts?: { bare?: boolean }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // 合成步需要前四步产物：默认通过 scriptId 注入文案，bare 模拟直达缺料场景
+  const entry =
+    step === "compose" && !opts?.bare
+      ? "/create?step=compose&scriptId=script-1"
+      : `/create?step=${step}`;
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/create?step=${step}`]}>
+      <MemoryRouter initialEntries={[entry]}>
         <CreatePage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
 
-/** 等模块价格目录写入缓存后触发一次报价，保证单次点击对应单次报价请求 */
-async function requestComposeQuote() {
-  await waitFor(() => expect(catalogApi.modulePrices).toHaveBeenCalled());
-  // 让 React Query 将已解析的目录写入缓存并完成重渲染
-  await act(async () => {});
-  fireEvent.click(screen.getByRole("button", { name: "计算预计积分" }));
-  await screen.findByText("预计合计");
-  expect(billingApi.pricePreview).toHaveBeenCalledTimes(1);
-}
-
-describe("CreatePage 合成步就地提交", () => {
+describe("CreatePage 视频合成步全自动", () => {
   beforeEach(() => {
     vi.mocked(catalogApi.modulePrices).mockResolvedValue({
       items: modulePriceItems,
@@ -494,33 +484,25 @@ describe("CreatePage 合成步就地提交", () => {
     vi.mocked(billingApi.pricePreview).mockReset();
     vi.mocked(pipelineApi.create).mockReset();
     vi.mocked(pipelineApi.get).mockReset();
+    vi.mocked(contentApi.script).mockReset();
+    vi.mocked(contentApi.script).mockResolvedValue({
+      id: "script-1",
+      originalText: "原始文案",
+      rewrittenText: "这是一段超过十个字的测试口播文案，用于满足合成前置校验。",
+    } as Awaited<ReturnType<typeof contentApi.script>>);
     useIp.setState({ current: testPersona, personas: [testPersona] });
     useTasks.setState({ tasks: {} });
     useQuota.setState({ quota: null, load: vi.fn() });
   });
 
-  it("报价前禁止开始合成，计算积分后展示明细并解锁", async () => {
-    vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
-    renderStep("compose");
-
-    expect(screen.getByRole("button", { name: "开始合成" })).toBeDisabled();
-
-    await requestComposeQuote();
-
-    expect(screen.getByText("数字人渲染")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始合成" })).toBeEnabled();
-  });
-
-  it("开始合成以「暂不发布」方式提交，并原地展示实时进度面板", async () => {
+  it("进入合成步自动报价并以「暂不发布」方式创建任务，原地展示实时进度面板", async () => {
     vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
     vi.mocked(pipelineApi.create).mockResolvedValue([makeTask()]);
     vi.mocked(pipelineApi.get).mockResolvedValue(makeTask());
     renderStep("compose");
 
-    await requestComposeQuote();
-    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
-
     await screen.findByText("流水线时间线（实时）");
+    expect(billingApi.pricePreview).toHaveBeenCalledTimes(1);
     expect(pipelineApi.create).toHaveBeenCalledWith(
       expect.objectContaining({
         ipId: "ip-1",
@@ -558,12 +540,22 @@ describe("CreatePage 合成步就地提交", () => {
     vi.mocked(pipelineApi.get).mockResolvedValue(doneTask);
     renderStep("compose");
 
-    await requestComposeQuote();
-    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
-
     const video = await screen.findByLabelText("成片预览");
     expect(video).toHaveAttribute("src", "/media/final/task-1.mp4");
     expect(screen.getByRole("button", { name: "下一步 →" })).toBeEnabled();
+  });
+
+  it("积分余额不足时显示启动失败并可重试，不创建任务", async () => {
+    vi.mocked(billingApi.pricePreview).mockResolvedValue({
+      ...composeQuote,
+      availablePoints: 10,
+    } as PricePreview);
+    renderStep("compose");
+
+    await screen.findByText("积分余额不足，请先兑换积分包或续费套餐");
+    expect(screen.getByText("合成启动失败")).toBeInTheDocument();
+    expect(pipelineApi.create).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "重试合成" })).toBeEnabled();
   });
 
   it("未生成成片时发布步给出警告并禁用提交", () => {
@@ -571,7 +563,7 @@ describe("CreatePage 合成步就地提交", () => {
 
     expect(
       screen.getByText(
-        "成片尚未生成，请先回到「合成」步完成合成后再配置发布。",
+        "成片尚未生成，请先回到「视频合成」步完成合成后再配置发布。",
       ),
     ).toBeInTheDocument();
     expect(
@@ -579,7 +571,17 @@ describe("CreatePage 合成步就地提交", () => {
     ).toBeDisabled();
   });
 
-  it("任务取消后可重新调整参数并回到报价表单", async () => {
+  it("直达合成步但缺少文案时只引导补齐，不自动报价扣费", async () => {
+    renderStep("compose", { bare: true });
+
+    await screen.findByText("缺少口播文案，请先完成「文案二创」步");
+    expect(screen.getByText("暂无法开始合成")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "去补齐 →" })).toBeEnabled();
+    expect(billingApi.pricePreview).not.toHaveBeenCalled();
+    expect(pipelineApi.create).not.toHaveBeenCalled();
+  });
+
+  it("任务取消后可一键重新合成，自动重新报价并创建新任务", async () => {
     const canceledTask = makeTask({
       status: "canceled",
       steps: [
@@ -593,14 +595,10 @@ describe("CreatePage 合成步就地提交", () => {
     vi.mocked(pipelineApi.get).mockResolvedValue(canceledTask);
     renderStep("compose");
 
-    await requestComposeQuote();
-    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新合成" }));
 
-    fireEvent.click(
-      await screen.findByRole("button", { name: "重新调整参数并合成" }),
-    );
-
-    expect(screen.getByText("合成积分报价")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "开始合成" })).toBeDisabled();
+    // 重置后自动重新报价 + 创建，无需手动确认
+    await waitFor(() => expect(pipelineApi.create).toHaveBeenCalledTimes(2));
+    expect(billingApi.pricePreview).toHaveBeenCalledTimes(2);
   });
 });

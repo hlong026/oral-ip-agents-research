@@ -4,7 +4,15 @@ import { describe, expect, it } from "vitest";
 
 import FlowBar from "../shell/FlowBar";
 
-const STEP_LABELS = ["链接/选题", "文案", "声音", "数字人", "合成", "发布"];
+const STEP_LABELS = [
+  "链接选题",
+  "文案二创",
+  "配音",
+  "数字人",
+  "视频合成",
+  "视频剪辑",
+  "发布",
+];
 
 function renderAt(path: string) {
   return render(
@@ -23,34 +31,40 @@ function checkIcons(container: HTMLElement) {
   return container.querySelectorAll("svg");
 }
 
-describe("FlowBar 全局六步动线", () => {
-  it("渲染全部六步", () => {
+describe("FlowBar 全局七步动线", () => {
+  it("渲染全部七步", () => {
     renderAt("/");
     for (const label of STEP_LABELS) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
 
-  it("任务中心页：合成步当前高亮，前四步标记完成", () => {
+  it("任务中心页：视频合成步当前高亮，前四步标记完成", () => {
     const { container } = renderAt("/tasks");
-    expect(linkOf("合成").className).toContain("bg-brand-grad");
+    expect(linkOf("视频合成").className).toContain("bg-brand-grad");
     // 前四步显示 ✓ 图标
     expect(checkIcons(container)).toHaveLength(4);
   });
 
-  it("一键成片向导 ?step=voice：声音步当前高亮", () => {
-    const { container } = renderAt("/create?step=voice");
-    expect(linkOf("声音").className).toContain("bg-brand-grad");
-    expect(checkIcons(container)).toHaveLength(2); // 链接/选题、文案 已完成
-  });
-
-  it("向导 ?step=publish：发布步当前高亮，前五步完成", () => {
-    const { container } = renderAt("/create?step=publish");
-    expect(linkOf("发布").className).toContain("bg-brand-grad");
+  it("剪辑台页：视频剪辑步当前高亮，前五步标记完成", () => {
+    const { container } = renderAt("/editor");
+    expect(linkOf("视频剪辑").className).toContain("bg-brand-grad");
     expect(checkIcons(container)).toHaveLength(5);
   });
 
-  it("工作台首页：无当前步（不属于六步动线）", () => {
+  it("一键成片向导 ?step=voice：配音步当前高亮", () => {
+    const { container } = renderAt("/create?step=voice");
+    expect(linkOf("配音").className).toContain("bg-brand-grad");
+    expect(checkIcons(container)).toHaveLength(2); // 链接选题、文案二创 已完成
+  });
+
+  it("向导 ?step=publish：发布步当前高亮，前六步完成", () => {
+    const { container } = renderAt("/create?step=publish");
+    expect(linkOf("发布").className).toContain("bg-brand-grad");
+    expect(checkIcons(container)).toHaveLength(6);
+  });
+
+  it("工作台首页：无当前步（不属于七步动线）", () => {
     const { container } = renderAt("/");
     for (const label of STEP_LABELS) {
       expect(linkOf(label).className).not.toContain("bg-brand-grad");
