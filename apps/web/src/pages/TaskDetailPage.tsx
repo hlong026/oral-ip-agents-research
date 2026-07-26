@@ -3,6 +3,7 @@ import { useTasks } from "@oral/stores";
 import { STEP_LABELS, type PipelineTask, type StepState } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ChevronDown,
   Circle,
   CircleCheck,
   Clapperboard,
@@ -226,11 +227,12 @@ function StepNode({
   );
 }
 
-/** 任务详情：8 步流水线时间线（F-405）+ manual 确认 + 成片预览 */
+/** 任务详情：成片预览为主 + 进度条弱化展示（F-405，步骤详情可展开重跑/覆盖） */
 export default function TaskDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const liveTask = useTasks((s) => s.tasks[id]);
   const {
     data: fetched,
@@ -275,10 +277,31 @@ export default function TaskDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["task", id] });
   };
 
-  const finalVideo = task.steps.find((s) => s.step === "compose")?.artifacts
-    ?.final_video_key;
+  const composeStep = task.steps.find((s) => s.step === "compose");
+  const finalVideo = composeStep?.artifacts?.final_video_key;
+  const coverKey = composeStep?.artifacts?.cover_key;
   const script = task.steps.find((s) => s.step === "rewrite")?.artifacts
     ?.script;
+
+  // 总体进度：skipped 不计入分母，运行中步骤按自身百分比折算
+  const activeSteps = task.steps.filter((s) => s.status !== "skipped");
+  const doneCount = activeSteps.filter((s) => s.status === "done").length;
+  const runningStep = task.steps.find((s) => s.status === "running");
+  const overallPct =
+    task.status === "done"
+      ? 100
+      : Math.min(
+          99,
+          Math.round(
+            ((doneCount + (runningStep ? runningStep.progress / 100 : 0)) /
+              Math.max(activeSteps.length, 1)) *
+              100,
+          ),
+        );
+  const isFinished =
+    task.status === "done" ||
+    task.status === "failed" ||
+    task.status === "canceled";
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -335,76 +358,165 @@ export default function TaskDetailPage() {
         </div>
       )}
 
-      <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
-        {/* 流水线时间线 */}
-        <div className="glass p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <span className="font-medium">流水线时间线</span>
-            {(task.status === "running" ||
-              task.status === "waiting_confirm") && (
-              <button
-                className="btn-danger px-3 py-1 text-xs"
-                onClick={async () => {
-                  await pipelineApi.cancel(task.id);
-                  refresh();
-                }}
+      {/* 成片预览（主体）：就绪即内嵌播放，未就绪时以进度占位 */}
+      <div className="glass p-5">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="font-medium">成片预览</span>
+          {finalVideo && (
+            <div className="flex gap-2">
+              <Link to="/editor" className="btn-ghost px-3 py-1.5 text-xs">
+                去剪辑精修
+              </Link>
+              <Link
+                to="/publish/jobs"
+                className="btn-primary px-3 py-1.5 text-xs"
               >
-                取消任务
-              </button>
+                去发布
+              </Link>
+            </div>
+          )}
+        </div>
+        {finalVideo ? (
+          <video
+            src={`/media/${finalVideo}`}
+            poster={coverKey ? `/media/${coverKey}` : undefined}
+            controls
+            playsInline
+            preload="metadata"
+            className="max-h-[480px] w-full rounded-xl bg-black"
+            aria-label="成片预览"
+          />
+        ) : (
+          <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl border border-stroke bg-black/40 text-text-3">
+            {isFinished ? (
+              <>
+                <Clapperboard className="h-9 w-9 text-text-2" />
+                <span className="text-sm">
+                  {task.status === "failed"
+                    ? "合成未完成，可展开下方步骤详情从失败步续跑"
+                    : "任务已取消，未生成成片"}
+                </span>
+              </>
+            ) : (
+              <>
+                <LoaderCircle className="h-9 w-9 animate-spin text-info" />
+                <span className="text-sm">
+                  成片生成中…{" "}
+                  {runningStep
+                    ? `当前：${STEP_LABELS[runningStep.step]}`
+                    : task.status === "waiting_confirm"
+                      ? "等待人工确认"
+                      : "等待调度"}
+                </span>
+                <span className="text-2xl font-bold text-text-1">
+                  {overallPct}%
+                </span>
+              </>
             )}
           </div>
-          {task.steps.map((s, i) => (
-            <StepNode
-              key={s.step}
-              task={task}
-              step={s}
-              isLast={i === task.steps.length - 1}
-              onAction={refresh}
-            />
-          ))}
-        </div>
+        )}
+      </div>
 
-        {/* 产物栏 */}
-        <div className="space-y-4">
-          {task.status === "done" && finalVideo && (
-            <div className="glass p-4">
-              <div className="mb-2 text-xs font-medium text-text-3">成片</div>
-              <div className="rounded-xl border border-stroke bg-black/40 p-3 text-center text-xs text-text-3">
-                <div className="mb-2 flex justify-center text-text-2">
-                  <Clapperboard className="h-8 w-8" />
-                </div>
-                <div className="break-all">{finalVideo}</div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <Link to="/editor" className="btn-ghost text-xs">
-                  去剪辑精修
-                </Link>
-                <Link to="/publish/jobs" className="btn-primary text-xs">
-                  去发布
-                </Link>
-              </div>
-            </div>
+      {/* 生成进度（弱化）：总进度条 + 步骤节点，详情按需展开 */}
+      <div className="glass p-5">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium">生成进度</span>
+          <span className="text-xs text-text-3">
+            {task.status === "done"
+              ? "已完成"
+              : runningStep
+                ? `${STEP_LABELS[runningStep.step]}中…`
+                : task.status === "failed"
+                  ? "已失败"
+                  : task.status === "canceled"
+                    ? "已取消"
+                    : task.status === "waiting_confirm"
+                      ? "等待人工确认"
+                      : "等待中"}
+          </span>
+          <div className="flex-1" />
+          <span className="text-xs font-medium text-text-2">{overallPct}%</span>
+          {(task.status === "running" ||
+            task.status === "waiting_confirm") && (
+            <button
+              className="btn-danger px-3 py-1 text-xs"
+              onClick={async () => {
+                await pipelineApi.cancel(task.id);
+                refresh();
+              }}
+            >
+              取消任务
+            </button>
           )}
-          {script && (
-            <div className="glass p-4">
-              <div className="mb-2 text-xs font-medium text-text-3">
-                口播文案
-              </div>
-              <div className="max-h-64 overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-text-2">
-                {script}
-              </div>
-            </div>
-          )}
-          <div className="glass p-4 text-xs text-text-3">
-            <div>任务 ID：{task.id}</div>
-            <div className="mt-1">
-              创建：{new Date(task.createdAt).toLocaleString("zh-CN")}
-            </div>
-            <div className="mt-1">
-              更新：{new Date(task.updatedAt).toLocaleString("zh-CN")}
-            </div>
+        </div>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/5">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${
+              task.status === "failed" ? "bg-danger/70" : "bg-brand-grad-x"
+            }`}
+            style={{ width: `${overallPct}%` }}
+          />
+        </div>
+        {/* 步骤节点一览（skipped 置灰） */}
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+          {task.steps.map((s) => {
+            const m = STEP_STATUS_ICON[s.status] ?? STEP_STATUS_ICON.pending!;
+            return (
+              <span
+                key={s.step}
+                className={`flex items-center gap-1 text-xs ${
+                  s.status === "skipped" || s.status === "pending"
+                    ? "text-text-3/60"
+                    : "text-text-2"
+                }`}
+              >
+                <m.icon className={`h-3 w-3 ${m.cls}`} />
+                {STEP_LABELS[s.step]}
+              </span>
+            );
+          })}
+        </div>
+        <button
+          className="mt-3 flex items-center gap-1 text-xs text-text-3 transition-colors hover:text-text-1"
+          onClick={() => setDetailsOpen((v) => !v)}
+        >
+          <ChevronDown
+            className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
+          />
+          {detailsOpen ? "收起步骤详情" : "展开步骤详情（重跑 / 人工覆盖）"}
+        </button>
+        {detailsOpen && (
+          <div className="mt-4 border-t border-stroke pt-4">
+            {task.steps.map((s, i) => (
+              <StepNode
+                key={s.step}
+                task={task}
+                step={s}
+                isLast={i === task.steps.length - 1}
+                onAction={refresh}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 口播文案：全量展示不截断 */}
+      {script && (
+        <div className="glass p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <span className="font-medium">口播文案</span>
+            <span className="text-xs text-text-3">{script.length} 字</span>
+          </div>
+          <div className="whitespace-pre-wrap text-sm leading-relaxed text-text-2">
+            {script}
           </div>
         </div>
+      )}
+
+      <div className="glass flex flex-wrap gap-x-6 gap-y-1 p-4 text-xs text-text-3">
+        <span>任务 ID：{task.id}</span>
+        <span>创建：{new Date(task.createdAt).toLocaleString("zh-CN")}</span>
+        <span>更新：{new Date(task.updatedAt).toLocaleString("zh-CN")}</span>
       </div>
     </div>
   );
