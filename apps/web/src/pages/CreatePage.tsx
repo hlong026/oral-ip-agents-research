@@ -8,26 +8,35 @@ import {
   publishApi,
   voiceApi,
 } from "@oral/api-client";
-import { useIp, useQuota } from "@oral/stores";
+import { useIp, useQuota, useTasks } from "@oral/stores";
 import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
+  STEP_LABELS,
   type ModulePrice,
+  type PipelineTask,
   type Platform,
   type PricePreview,
   type PricePreviewRequest,
   type RewriteIntensity,
+  type StepState,
 } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChartColumn,
   ChevronDown,
   ChevronUp,
+  Circle,
+  CircleCheck,
   Hand,
+  LoaderCircle,
+  type LucideIcon,
+  Minus,
   Music,
   Scissors,
   Smile,
   TriangleAlert,
+  X,
   Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -69,6 +78,7 @@ interface Wizard {
   platforms: Platform[];
   publishAt: string;
   title: string;
+  taskId: string;
 }
 
 const initialWizard: Wizard = {
@@ -87,6 +97,7 @@ const initialWizard: Wizard = {
   platforms: [],
   publishAt: "",
   title: "",
+  taskId: "",
 };
 
 interface OperationProgress {
@@ -954,6 +965,244 @@ function StepCompose({
   );
 }
 
+// ---------------- 合成执行面板（提交后原地展示实时进度 + 成片预览） ----------------
+
+const TASK_STATUS_LABELS: Record<string, string> = {
+  pending: "排队中",
+  running: "合成中",
+  waiting_confirm: "等待确认",
+  done: "已完成",
+  failed: "失败",
+  canceled: "已取消",
+};
+
+const STEP_STATUS_META: Record<
+  string,
+  { icon: LucideIcon; cls: string; label: string }
+> = {
+  pending: { icon: Circle, cls: "text-text-3", label: "等待" },
+  running: {
+    icon: LoaderCircle,
+    cls: "animate-spin text-info",
+    label: "进行中",
+  },
+  done: { icon: CircleCheck, cls: "text-success", label: "完成" },
+  skipped: { icon: Minus, cls: "text-text-3", label: "跳过" },
+  failed: { icon: X, cls: "text-danger", label: "失败" },
+};
+
+function ComposeStepRow({
+  step,
+  isLast,
+}: {
+  step: StepState;
+  isLast: boolean;
+}) {
+  const meta = STEP_STATUS_META[step.status] ?? STEP_STATUS_META.pending!;
+  return (
+    <div className="relative flex gap-3 pb-4">
+      {!isLast && (
+        <span className="absolute left-[9px] top-6 h-full w-px bg-stroke" />
+      )}
+      <span className={`z-10 mt-0.5 flex w-5 justify-center ${meta.cls}`}>
+        <meta.icon className="h-4 w-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-medium">{STEP_LABELS[step.step]}</span>
+          <span className="chip text-[11px]">{meta.label}</span>
+          {step.durationMs != null && (
+            <span className="chip text-[11px]">
+              {(step.durationMs / 1000).toFixed(1)} 秒
+            </span>
+          )}
+        </div>
+        {step.status === "running" && (
+          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-white/5">
+            <div
+              className="h-full animate-pulse rounded-full bg-brand-grad"
+              style={{ width: `${Math.max(step.progress, 10)}%` }}
+            />
+          </div>
+        )}
+        {step.message && (
+          <div
+            className={`mt-1 text-xs ${step.status === "failed" ? "text-danger" : "text-text-3"}`}
+          >
+            {step.message}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ComposeRunPanel({
+  task,
+  batchCount,
+  finalVideoKey,
+  onRefresh,
+  onReset,
+}: {
+  task: PipelineTask;
+  batchCount: number;
+  finalVideoKey: string;
+  onRefresh: () => void;
+  onReset: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [panelError, setPanelError] = useState("");
+  const active =
+    task.status === "pending" ||
+    task.status === "running" ||
+    task.status === "waiting_confirm";
+
+  const confirm = async () => {
+    setBusy(true);
+    setPanelError("");
+    try {
+      await pipelineApi.confirm(task.id);
+      onRefresh();
+    } catch (e) {
+      // 轮询/WS 可能已推进状态，服务端会拒绝非 waiting_confirm 的确认
+      setPanelError(
+        e instanceof HttpError ? e.body.message : "确认失败，请刷新后重试",
+      );
+      onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = async () => {
+    setBusy(true);
+    setPanelError("");
+    try {
+      await pipelineApi.cancel(task.id);
+      onRefresh();
+    } catch (e) {
+      setPanelError(
+        e instanceof HttpError ? e.body.message : "取消失败，请刷新后重试",
+      );
+      onRefresh();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4" aria-live="polite">
+      <div className="flex flex-wrap items-center gap-2">
+        {active && <LoaderCircle className="h-4 w-4 animate-spin text-info" />}
+        <span className="font-medium">
+          {TASK_STATUS_LABELS[task.status] ?? task.status}
+        </span>
+        <span className="chip text-[11px]">
+          {task.mode === "manual" ? "逐步确认" : "全自动"}
+        </span>
+        {batchCount > 1 && (
+          <span className="chip border-brand-to/40 text-[11px] text-brand-to">
+            批量 ×{batchCount}，其余任务见任务中心
+          </span>
+        )}
+        <div className="flex-1" />
+        {active && (
+          <button
+            className="btn-danger px-3 py-1 text-xs"
+            disabled={busy}
+            onClick={() => void cancel()}
+          >
+            取消任务
+          </button>
+        )}
+        <Link className="btn-ghost px-3 py-1 text-xs" to={`/tasks/${task.id}`}>
+          任务详情 →
+        </Link>
+      </div>
+
+      {panelError && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {panelError}
+        </div>
+      )}
+
+      {task.status === "waiting_confirm" && (
+        <div className="flex items-center gap-3 rounded-xl border border-warning/40 bg-warning/10 p-3">
+          <Hand className="h-4 w-4 shrink-0 text-warning" />
+          <span className="flex-1 text-sm">
+            当前步骤已完成，检查产物后继续（也可去任务详情重跑/覆盖）
+          </span>
+          <button
+            className="btn-primary px-4 py-1.5 text-sm"
+            disabled={busy}
+            onClick={() => void confirm()}
+          >
+            确认，继续 →
+          </button>
+        </div>
+      )}
+
+      {task.status === "failed" && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
+          <X className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            合成失败：{task.error || "可在任务详情从失败步骤重新报价后续跑"}
+          </span>
+          <Link
+            className="btn-ghost px-3 py-1 text-xs"
+            to={`/tasks/${task.id}`}
+          >
+            去处理
+          </Link>
+          <button className="btn-primary px-3 py-1 text-xs" onClick={onReset}>
+            重新调整参数并合成
+          </button>
+        </div>
+      )}
+
+      {task.status === "canceled" && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-stroke bg-white/[0.03] p-3 text-sm">
+          <span className="flex-1 text-text-2">
+            任务已取消，冻结积分已释放，可调整参数后重新合成
+          </span>
+          <button className="btn-primary px-3 py-1 text-xs" onClick={onReset}>
+            重新调整参数并合成
+          </button>
+        </div>
+      )}
+
+      {finalVideoKey && (
+        <div className="rounded-xl border border-success/30 bg-success/5 p-3">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-success">
+            <CircleCheck className="h-3.5 w-3.5" /> 成片已生成，可直接预览
+          </div>
+          <video
+            src={`/media/${finalVideoKey}`}
+            controls
+            playsInline
+            preload="metadata"
+            className="max-h-96 w-full rounded-xl bg-black"
+            aria-label="成片预览"
+          />
+        </div>
+      )}
+
+      <div className="rounded-xl border border-stroke bg-white/[0.02] p-4">
+        <div className="mb-3 text-xs font-medium text-text-3">
+          流水线时间线（实时）
+        </div>
+        {task.steps.map((s, i) => (
+          <ComposeStepRow
+            key={s.step}
+            step={s}
+            isLast={i === task.steps.length - 1}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------------- 第 6 步：剪辑（可跳过） ----------------
 
 function StepEdit({ onSkip }: { onSkip: () => void }) {
@@ -981,14 +1230,16 @@ function StepEdit({ onSkip }: { onSkip: () => void }) {
   );
 }
 
-// ---------------- 第 7 步：发布配置 ----------------
+// ---------------- 第 7 步：发布配置（对着已生成的成片选平台发布） ----------------
 
 function StepPublish({
   wiz,
   setWiz,
+  finalVideoKey,
 }: {
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
+  finalVideoKey: string;
 }) {
   const { data: capabilities } = useQuery({
     queryKey: ["publish-capabilities"],
@@ -1002,8 +1253,27 @@ function StepPublish({
         : [...wiz.platforms, p],
     });
 
+  if (!finalVideoKey) {
+    return (
+      <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+        成片尚未生成，请先回到「合成」步完成合成后再配置发布。
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
+      <div>
+        <label className="label">成片预览</label>
+        <video
+          src={`/media/${finalVideoKey}`}
+          controls
+          playsInline
+          preload="metadata"
+          className="max-h-72 w-full rounded-xl bg-black"
+          aria-label="待发布成片预览"
+        />
+      </div>
       <div>
         <label className="label">
           发布平台（可仅生成不发布，稍后在发布管理手动发）
@@ -1065,6 +1335,7 @@ export default function CreatePage() {
   const stepIdx = STEPS.findIndex((s) => s.key === step);
   const [wiz, setWiz] = useState<Wizard>(initialWizard);
   const [submitting, setSubmitting] = useState(false);
+  const [batchCount, setBatchCount] = useState(1);
   const [error, setError] = useState("");
   const [quote, setQuote] = useState<PricePreview | null>(null);
   const [quoting, setQuoting] = useState(false);
@@ -1074,6 +1345,30 @@ export default function CreatePage() {
     queryKey: ["catalog", "module-prices"],
     queryFn: () => catalogApi.modulePrices(),
   });
+
+  // 合成任务实时追踪：WS 推送（useTasks）优先，3s 轮询兜底
+  const liveTask = useTasks((s) =>
+    wiz.taskId ? s.tasks[wiz.taskId] : undefined,
+  );
+  const { data: fetchedTask, refetch: refetchTask } = useQuery({
+    queryKey: ["task", wiz.taskId],
+    queryFn: () => pipelineApi.get(wiz.taskId),
+    enabled: Boolean(wiz.taskId),
+    refetchInterval: (q) => {
+      // 首拉失败时也持续重试，避免 WS 不可用 + 首次拉取失败时面板永久卡住
+      if (!q.state.data) return 3000;
+      const s = q.state.data.status;
+      return s === "pending" || s === "running" || s === "waiting_confirm"
+        ? 3000
+        : false;
+    },
+  });
+  const task = wiz.taskId ? (liveTask ?? fetchedTask) : undefined;
+  const composeArtifacts = task?.steps.find(
+    (s) => s.step === "compose",
+  )?.artifacts;
+  const finalVideoKey = composeArtifacts?.final_video_key ?? "";
+  const coverKey = composeArtifacts?.cover_key ?? "";
 
   useEffect(() => {
     setQuote(null);
@@ -1136,6 +1431,8 @@ export default function CreatePage() {
     if (step === "script") return wiz.scriptText.trim().length >= 10;
     if (step === "voice") return Boolean(wiz.voiceId);
     if (step === "avatar") return Boolean(wiz.avatarId);
+    // 合成步：成片生成后才能进入后续剪辑/发布
+    if (step === "compose") return Boolean(finalVideoKey);
     return true;
   };
 
@@ -1148,7 +1445,8 @@ export default function CreatePage() {
     if (s) goStep(s.key);
   };
 
-  const submit = async () => {
+  /** 合成步提交：创建流水线任务后原地展示实时进度，发布在成片预览后单独配置 */
+  const startCompose = async () => {
     if (!current) {
       setError("请先在左侧栏选择 IP");
       return;
@@ -1173,18 +1471,58 @@ export default function CreatePage() {
         voiceId: wiz.voiceId || undefined,
         avatarId: wiz.avatarId || undefined,
         mode: wiz.mode,
-        platforms: wiz.platforms,
-        publishAt: wiz.publishAt
-          ? new Date(wiz.publishAt).toISOString()
-          : undefined,
+        platforms: [],
         randomize: wiz.randomize,
         count: wiz.count,
         quoteId: quote.quoteId,
       });
       const first = tasks[0];
-      navigate(first ? `/tasks/${first.id}` : "/tasks");
+      if (!first) {
+        setError("任务创建失败，请重试");
+        return;
+      }
+      setBatchCount(tasks.length);
+      // 函数式更新，避免覆盖提交期间用户对向导的其它修改
+      setWiz((w) => ({ ...w, taskId: first.id }));
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "创建失败，请重试");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** 发布步提交：对已生成的成片创建发布任务；未选平台则直接完成 */
+  const publishVideo = async () => {
+    if (!finalVideoKey) {
+      setError("成片尚未生成，请先完成合成步");
+      return;
+    }
+    if (wiz.platforms.length === 0) {
+      navigate(wiz.taskId ? `/tasks/${wiz.taskId}` : "/tasks");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      await publishApi.createJobs({
+        taskId: wiz.taskId || undefined,
+        platforms: wiz.platforms,
+        title: (
+          wiz.title.trim() ||
+          wiz.scriptText.split(/[。！？!?\n]/)[0] ||
+          "口播成片"
+        ).slice(0, 30),
+        videoKey: finalVideoKey,
+        coverKey: coverKey || undefined,
+        publishAt: wiz.publishAt
+          ? new Date(wiz.publishAt).toISOString()
+          : undefined,
+      });
+      navigate("/publish/jobs");
+    } catch (e) {
+      setError(
+        e instanceof HttpError ? e.body.message : "创建发布任务失败，请重试",
+      );
       setSubmitting(false);
     }
   };
@@ -1223,17 +1561,44 @@ export default function CreatePage() {
         {step === "script" && <StepScript wiz={wiz} setWiz={setWiz} />}
         {step === "voice" && <StepVoice wiz={wiz} setWiz={setWiz} />}
         {step === "avatar" && <StepAvatar wiz={wiz} setWiz={setWiz} />}
-        {step === "compose" && <StepCompose wiz={wiz} setWiz={setWiz} />}
+        {step === "compose" &&
+          (wiz.taskId ? (
+            task ? (
+              <ComposeRunPanel
+                task={task}
+                batchCount={batchCount}
+                finalVideoKey={finalVideoKey}
+                onRefresh={() => void refetchTask()}
+                onReset={() => {
+                  setWiz((w) => ({ ...w, taskId: "" }));
+                  setQuote(null);
+                  setBatchCount(1);
+                }}
+              />
+            ) : (
+              <div className="py-10 text-center text-sm text-text-3">
+                任务已创建，正在加载实时进度…
+              </div>
+            )
+          ) : (
+            <StepCompose wiz={wiz} setWiz={setWiz} />
+          ))}
         {step === "edit" && <StepEdit onSkip={next} />}
-        {step === "publish" && <StepPublish wiz={wiz} setWiz={setWiz} />}
-
         {step === "publish" && (
+          <StepPublish
+            wiz={wiz}
+            setWiz={setWiz}
+            finalVideoKey={finalVideoKey}
+          />
+        )}
+
+        {step === "compose" && !wiz.taskId && (
           <section className="mt-5 rounded-xl border border-stroke bg-white/[0.03] p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-sm font-medium">任务积分报价</h2>
+                <h2 className="text-sm font-medium">合成积分报价</h2>
                 <p className="mt-1 text-xs text-text-3">
-                  报价有效 10 分钟，创建任务时冻结预计积分，失败或取消自动释放。
+                  报价有效 10 分钟，开始合成时冻结预计积分，失败或取消自动释放。
                 </p>
               </div>
               <button
@@ -1288,18 +1653,10 @@ export default function CreatePage() {
             >
               ← 上一步
             </button>
-            {step !== "publish" ? (
-              <button
-                className="btn-primary"
-                onClick={next}
-                disabled={!canNext()}
-              >
-                下一步 →
-              </button>
-            ) : (
+            {step === "compose" && !wiz.taskId ? (
               <button
                 className="btn-primary flex items-center gap-1.5 px-8"
-                onClick={submit}
+                onClick={startCompose}
                 disabled={submitting || !quote}
               >
                 {submitting ? (
@@ -1307,8 +1664,35 @@ export default function CreatePage() {
                 ) : (
                   <>
                     <Zap className="h-4 w-4" />
-                    {wiz.count > 1 ? `批量成片 ×${wiz.count}` : "开始成片"}
+                    {wiz.count > 1 ? `开始合成 ×${wiz.count}` : "开始合成"}
                   </>
+                )}
+              </button>
+            ) : step !== "publish" ? (
+              <button
+                className="btn-primary"
+                onClick={next}
+                disabled={!canNext()}
+              >
+                {step === "compose" && !finalVideoKey
+                  ? "等待成片生成…"
+                  : "下一步 →"}
+              </button>
+            ) : (
+              <button
+                className="btn-primary flex items-center gap-1.5 px-8"
+                onClick={publishVideo}
+                disabled={submitting || !finalVideoKey}
+              >
+                {submitting ? (
+                  "提交中…"
+                ) : wiz.platforms.length > 0 ? (
+                  <>
+                    <Zap className="h-4 w-4" />
+                    创建发布任务 ×{wiz.platforms.length}
+                  </>
+                ) : (
+                  "完成，稍后手动发布"
                 )}
               </button>
             )}

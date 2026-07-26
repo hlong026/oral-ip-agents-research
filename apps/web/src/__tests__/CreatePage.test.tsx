@@ -1,7 +1,24 @@
-import { contentApi } from "@oral/api-client";
-import { useQuota } from "@oral/stores";
+import {
+  billingApi,
+  catalogApi,
+  contentApi,
+  pipelineApi,
+} from "@oral/api-client";
+import { useIp, useQuota, useTasks } from "@oral/stores";
+import type {
+  ModulePrice,
+  Persona,
+  PipelineTask,
+  PricePreview,
+} from "@oral/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { StrictMode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +41,22 @@ vi.mock("@oral/api-client", async (importOriginal) => {
     catalogApi: {
       ...actual.catalogApi,
       modulePrices: vi.fn().mockResolvedValue({ items: [] }),
+    },
+    billingApi: {
+      ...actual.billingApi,
+      pricePreview: vi.fn(),
+    },
+    pipelineApi: {
+      ...actual.pipelineApi,
+      create: vi.fn(),
+      get: vi.fn(),
+      confirm: vi.fn(),
+      cancel: vi.fn(),
+    },
+    publishApi: {
+      ...actual.publishApi,
+      capabilities: vi.fn().mockResolvedValue([]),
+      createJobs: vi.fn(),
     },
   };
 });
@@ -381,5 +414,193 @@ describe("CreatePage 来源模式切换", () => {
     expect(
       screen.getByText("结构分析、IP 大纲、完整改写与质量校验均在后台执行。"),
     ).toBeInTheDocument();
+  });
+});
+
+// ---------------- 合成步：就地提交 + 实时进度 + 成片预览 ----------------
+
+const testPersona = {
+  id: "ip-1",
+  name: "测试 IP",
+  isActive: true,
+  voiceId: "voice-1",
+  avatarId: "avatar-1",
+  videoDuration: 60,
+} as unknown as Persona;
+
+const modulePriceItems = [
+  { module: "tts", billingUnit: "per_minute", unitSize: 1 },
+  { module: "digital_human", billingUnit: "per_minute", unitSize: 1 },
+] as unknown as ModulePrice[];
+
+const composeQuote = {
+  quoteId: "quote-compose",
+  priceVersion: "v1",
+  expiresAt: new Date(Date.now() + 600_000).toISOString(),
+  items: [
+    { module: "tts", name: "语音合成", points: 60 },
+    { module: "digital_human", name: "数字人渲染", points: 120 },
+  ],
+  estimatedPoints: 180,
+  availablePoints: 10_000,
+} as unknown as PricePreview;
+
+function makeTask(overrides: Partial<PipelineTask> = {}): PipelineTask {
+  return {
+    id: "task-compose-1",
+    ipId: "ip-1",
+    title: "测试成片",
+    mode: "auto",
+    status: "running",
+    steps: [
+      { step: "voice", status: "done", progress: 100 },
+      { step: "compose", status: "running", progress: 10 },
+      { step: "publish", status: "pending", progress: 0 },
+    ],
+    compute: "cloud",
+    quotaCost: 0,
+    ...overrides,
+  } as unknown as PipelineTask;
+}
+
+function renderStep(step: "compose" | "publish") {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[`/create?step=${step}`]}>
+        <CreatePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+/** 等模块价格目录写入缓存后触发一次报价，保证单次点击对应单次报价请求 */
+async function requestComposeQuote() {
+  await waitFor(() => expect(catalogApi.modulePrices).toHaveBeenCalled());
+  // 让 React Query 将已解析的目录写入缓存并完成重渲染
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "计算预计积分" }));
+  await screen.findByText("预计合计");
+  expect(billingApi.pricePreview).toHaveBeenCalledTimes(1);
+}
+
+describe("CreatePage 合成步就地提交", () => {
+  beforeEach(() => {
+    vi.mocked(catalogApi.modulePrices).mockResolvedValue({
+      items: modulePriceItems,
+    } as Awaited<ReturnType<typeof catalogApi.modulePrices>>);
+    vi.mocked(billingApi.pricePreview).mockReset();
+    vi.mocked(pipelineApi.create).mockReset();
+    vi.mocked(pipelineApi.get).mockReset();
+    useIp.setState({ current: testPersona, personas: [testPersona] });
+    useTasks.setState({ tasks: {} });
+    useQuota.setState({ quota: null, load: vi.fn() });
+  });
+
+  it("报价前禁止开始合成，计算积分后展示明细并解锁", async () => {
+    vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
+    renderStep("compose");
+
+    expect(screen.getByRole("button", { name: "开始合成" })).toBeDisabled();
+
+    await requestComposeQuote();
+
+    expect(screen.getByText("数字人渲染")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始合成" })).toBeEnabled();
+  });
+
+  it("开始合成以「暂不发布」方式提交，并原地展示实时进度面板", async () => {
+    vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
+    vi.mocked(pipelineApi.create).mockResolvedValue([makeTask()]);
+    vi.mocked(pipelineApi.get).mockResolvedValue(makeTask());
+    renderStep("compose");
+
+    await requestComposeQuote();
+    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
+
+    await screen.findByText("流水线时间线（实时）");
+    expect(pipelineApi.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ipId: "ip-1",
+        platforms: [],
+        quoteId: "quote-compose",
+      }),
+    );
+    expect(screen.getByText("合成中")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "等待成片生成…" }),
+    ).toBeDisabled();
+  });
+
+  it("成片生成后原地出现视频预览并解锁下一步", async () => {
+    const doneTask = makeTask({
+      status: "done",
+      steps: [
+        { step: "voice", status: "done", progress: 100 },
+        {
+          step: "compose",
+          status: "done",
+          progress: 100,
+          artifacts: { final_video_key: "final/task-1.mp4" },
+        },
+        {
+          step: "publish",
+          status: "skipped",
+          progress: 100,
+          message: "未选择发布平台，成片已就绪",
+        },
+      ] as PipelineTask["steps"],
+    });
+    vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
+    vi.mocked(pipelineApi.create).mockResolvedValue([doneTask]);
+    vi.mocked(pipelineApi.get).mockResolvedValue(doneTask);
+    renderStep("compose");
+
+    await requestComposeQuote();
+    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
+
+    const video = await screen.findByLabelText("成片预览");
+    expect(video).toHaveAttribute("src", "/media/final/task-1.mp4");
+    expect(screen.getByRole("button", { name: "下一步 →" })).toBeEnabled();
+  });
+
+  it("未生成成片时发布步给出警告并禁用提交", () => {
+    renderStep("publish");
+
+    expect(
+      screen.getByText(
+        "成片尚未生成，请先回到「合成」步完成合成后再配置发布。",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "完成，稍后手动发布" }),
+    ).toBeDisabled();
+  });
+
+  it("任务取消后可重新调整参数并回到报价表单", async () => {
+    const canceledTask = makeTask({
+      status: "canceled",
+      steps: [
+        { step: "voice", status: "done", progress: 100 },
+        { step: "compose", status: "pending", progress: 0 },
+        { step: "publish", status: "pending", progress: 0 },
+      ] as PipelineTask["steps"],
+    });
+    vi.mocked(billingApi.pricePreview).mockResolvedValue(composeQuote);
+    vi.mocked(pipelineApi.create).mockResolvedValue([canceledTask]);
+    vi.mocked(pipelineApi.get).mockResolvedValue(canceledTask);
+    renderStep("compose");
+
+    await requestComposeQuote();
+    fireEvent.click(screen.getByRole("button", { name: "开始合成" }));
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "重新调整参数并合成" }),
+    );
+
+    expect(screen.getByText("合成积分报价")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始合成" })).toBeDisabled();
   });
 });
