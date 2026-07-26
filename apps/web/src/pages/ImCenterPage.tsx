@@ -6,6 +6,7 @@ import {
 } from "@oral/api-client";
 import type { PublishAccount } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 
@@ -384,7 +385,9 @@ function MessageBubble({
             })}
           </span>
           {msg.autoReplied && (
-            <span className="text-brand-to">⚡ 自动回复</span>
+            <span className="inline-flex items-center gap-0.5 text-brand-to">
+              <Zap className="h-2.5 w-2.5" /> 自动回复
+            </span>
           )}
           {isOut && msg.sendStatus === "pending" && <span>发送中</span>}
           {isOut && msg.sendStatus === "sent" && <span>已发送</span>}

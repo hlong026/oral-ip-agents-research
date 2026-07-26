@@ -19,6 +19,17 @@ import {
   type RewriteIntensity,
 } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
+import {
+  ChartColumn,
+  ChevronDown,
+  ChevronUp,
+  Hand,
+  Music,
+  Scissors,
+  Smile,
+  TriangleAlert,
+  Zap,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -602,8 +613,8 @@ function StepScript({
       )}
       {progress && <OperationProgressPanel progress={progress} />}
       {degraded && !error && (
-        <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          ⚠️
+        <div className="flex items-start gap-1.5 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           链接解析已降级处理（第三方服务不可用），结果可能不完整。请稍后重试或上传本地视频。
         </div>
       )}
@@ -615,8 +626,20 @@ function StepScript({
             className="flex w-full items-center justify-between px-4 py-2.5 text-xs text-text-2"
             onClick={() => setShowAnalysis(!showAnalysis)}
           >
-            <span>📊 AI 结构拆解 & IP化大纲</span>
-            <span>{showAnalysis ? "▲ 收起" : "▼ 展开"}</span>
+            <span className="flex items-center gap-1.5">
+              <ChartColumn className="h-3.5 w-3.5" /> AI 结构拆解 & IP化大纲
+            </span>
+            <span className="flex items-center gap-1">
+              {showAnalysis ? (
+                <>
+                  <ChevronUp className="h-3 w-3" /> 收起
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3 w-3" /> 展开
+                </>
+              )}
+            </span>
           </button>
           {showAnalysis && (
             <div className="space-y-3 border-t border-stroke px-4 py-3 text-xs text-text-3">
@@ -762,7 +785,7 @@ function StepVoice({
         >
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white">
-              ♪
+              <Music className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{v.name}</div>
@@ -807,7 +830,7 @@ function StepAvatar({
         >
           <div className="flex items-center gap-2">
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">
-              ☺
+              <Smile className="h-4 w-4" />
             </span>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{a.name}</div>
@@ -842,7 +865,9 @@ function StepCompose({
             onClick={() => setWiz({ ...wiz, mode: "auto" })}
             className={`rounded-xl border p-4 text-left ${wiz.mode === "auto" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
           >
-            <div className="font-medium">⚡ 全自动</div>
+            <div className="flex items-center gap-1.5 font-medium">
+              <Zap className="h-4 w-4" /> 全自动
+            </div>
             <div className="mt-1 text-xs text-text-3">
               8 步流水线一气呵成，适合成熟 IP
             </div>
@@ -851,7 +876,9 @@ function StepCompose({
             onClick={() => setWiz({ ...wiz, mode: "manual" })}
             className={`rounded-xl border p-4 text-left ${wiz.mode === "manual" ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
           >
-            <div className="font-medium">✋ 逐步确认</div>
+            <div className="flex items-center gap-1.5 font-medium">
+              <Hand className="h-4 w-4" /> 逐步确认
+            </div>
             <div className="mt-1 text-xs text-text-3">
               每步完成暂停，可人工干预/覆盖产物
             </div>
@@ -908,7 +935,9 @@ function StepEdit({ onSkip }: { onSkip: () => void }) {
   const navigate = useNavigate();
   return (
     <div className="glass flex flex-col items-center gap-4 py-10 text-center">
-      <span className="text-4xl">✂</span>
+      <span className="text-text-2">
+        <Scissors className="h-9 w-9" />
+      </span>
       <div>
         <div className="font-medium">剪辑步可在成片后精修</div>
         <p className="mt-1 text-sm text-text-3">
@@ -1224,15 +1253,18 @@ export default function CreatePage() {
               </button>
             ) : (
               <button
-                className="btn-primary px-8"
+                className="btn-primary flex items-center gap-1.5 px-8"
                 onClick={submit}
                 disabled={submitting || !quote}
               >
-                {submitting
-                  ? "创建中…"
-                  : wiz.count > 1
-                    ? `⚡ 批量成片 ×${wiz.count}`
-                    : "⚡ 开始成片"}
+                {submitting ? (
+                  "创建中…"
+                ) : (
+                  <>
+                    <Zap className="h-4 w-4" />
+                    {wiz.count > 1 ? `批量成片 ×${wiz.count}` : "开始成片"}
+                  </>
+                )}
               </button>
             )}
           </div>

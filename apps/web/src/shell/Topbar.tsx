@@ -1,6 +1,7 @@
 import { notifyApi } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -33,7 +34,7 @@ function NotificationBell() {
         onClick={() => setOpen((v) => !v)}
         className="relative flex h-9 w-9 items-center justify-center rounded-xl border border-stroke bg-white/5 text-text-2 hover:text-text-1"
       >
-        🔔
+        <Bell className="h-4 w-4" />
         {(unread?.count ?? 0) > 0 && (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold text-white">
             {unread!.count > 99 ? "99+" : unread!.count}
@@ -124,7 +125,7 @@ export default function Topbar() {
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-stroke px-6">
       <div className="relative w-80 max-w-full">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-text-3">
-          ⌕
+          <Search className="h-4 w-4" />
         </span>
         <input
           className="input h-9 pl-9"

@@ -2,6 +2,7 @@ import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type { PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
+import { Play } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -165,7 +166,9 @@ export default function EditorPage() {
             {/* 预览 */}
             <div className="glass p-4">
               <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
-                <span className="text-4xl">▶</span>
+                <span className="text-text-3">
+                  <Play className="h-9 w-9" />
+                </span>
                 <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
                   1080P
                 </span>

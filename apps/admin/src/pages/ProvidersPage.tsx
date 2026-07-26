@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   adminApi,
@@ -278,8 +279,12 @@ function ProbeToast({
       : feedback.tone === "warning"
         ? "border-warning/50 bg-warning/10"
         : "border-danger/50 bg-danger/10";
-  const icon =
-    feedback.tone === "success" ? "✓" : feedback.tone === "warning" ? "!" : "×";
+  const Icon =
+    feedback.tone === "success"
+      ? Check
+      : feedback.tone === "warning"
+        ? TriangleAlert
+        : X;
 
   return (
     <div
@@ -288,8 +293,8 @@ function ProbeToast({
       className={`fixed right-6 top-6 z-50 w-[min(26rem,calc(100vw-3rem))] rounded-2xl border p-4 shadow-2xl backdrop-blur-xl ${toneClass}`}
     >
       <div className="flex items-start gap-3">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-current text-lg font-semibold">
-          {icon}
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-current">
+          <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="font-semibold">
@@ -300,10 +305,10 @@ function ProbeToast({
         <button
           type="button"
           aria-label="关闭连接测试提示"
-          className="text-xl leading-none text-text-3 hover:text-text-1"
+          className="text-text-3 hover:text-text-1"
           onClick={onClose}
         >
-          ×
+          <X className="h-4 w-4" />
         </button>
       </div>
     </div>

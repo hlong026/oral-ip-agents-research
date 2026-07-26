@@ -8,6 +8,15 @@ import { useRelativeTime } from "@oral/hooks";
 import { useIp, useTasks } from "@oral/stores";
 import { STEP_LABELS, type PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
+import {
+  type LucideIcon,
+  Music,
+  PenLine,
+  Send,
+  TrendingDown,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import LinkSourceInput from "../components/LinkSourceInput";
@@ -68,7 +77,7 @@ function HeroInput() {
         粘贴爆款链接，<span className="text-grad">30 秒</span>复刻你的口播视频
       </h1>
       <p className="mt-1.5 text-sm text-text-3">
-        支持抖音 / 快手 / 小红书 / 视频号链接，或直接输入选题
+        支持抖音 / 小红书 / B站链接，或直接输入选题
       </p>
       <div className="mt-4 flex gap-2">
         <div className="flex-1">
@@ -147,7 +156,12 @@ function StatCards() {
             <div
               className={`mt-1 text-xs ${c.delta >= 0 ? "text-success" : "text-danger"}`}
             >
-              {c.delta >= 0 ? "▲" : "▼"} {Math.abs(c.delta)} 较昨/上周
+              {c.delta >= 0 ? (
+                <TrendingUp className="mr-0.5 inline h-3 w-3" />
+              ) : (
+                <TrendingDown className="mr-0.5 inline h-3 w-3" />
+              )}
+              {Math.abs(c.delta)} 较昨/上周
             </div>
           )}
         </div>
@@ -286,11 +300,11 @@ function IpPanel() {
 }
 
 function QuickLinks() {
-  const links = [
-    { to: "/create", icon: "⚡", label: "一键成片" },
-    { to: "/scripts", icon: "✎", label: "文案工坊" },
-    { to: "/assets/voices", icon: "♪", label: "克隆声音" },
-    { to: "/publish/accounts", icon: "⇪", label: "授权账号" },
+  const links: { to: string; icon: LucideIcon; label: string }[] = [
+    { to: "/create", icon: Zap, label: "一键成片" },
+    { to: "/scripts", icon: PenLine, label: "文案工坊" },
+    { to: "/assets/voices", icon: Music, label: "克隆声音" },
+    { to: "/publish/accounts", icon: Send, label: "授权账号" },
   ];
   return (
     <div className="glass p-4">
@@ -302,7 +316,9 @@ function QuickLinks() {
             to={l.to}
             className="card-hover flex flex-col items-center gap-1.5 rounded-xl border border-stroke bg-white/[0.03] py-3 text-sm"
           >
-            <span className="text-lg">{l.icon}</span>
+            <span className="text-text-2">
+              <l.icon className="h-5 w-5" />
+            </span>
             <span className="text-xs text-text-2">{l.label}</span>
           </Link>
         ))}

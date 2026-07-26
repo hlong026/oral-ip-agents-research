@@ -2,15 +2,25 @@ import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import { STEP_LABELS, type PipelineTask, type StepState } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Circle,
+  CircleCheck,
+  Clapperboard,
+  Hand,
+  LoaderCircle,
+  type LucideIcon,
+  Minus,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-const STEP_STATUS_ICON: Record<string, { icon: string; cls: string }> = {
-  pending: { icon: "○", cls: "text-text-3" },
-  running: { icon: "◉", cls: "animate-pulse text-info" },
-  done: { icon: "●", cls: "text-success" },
-  skipped: { icon: "—", cls: "text-text-3" },
-  failed: { icon: "✕", cls: "text-danger" },
+const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
+  pending: { icon: Circle, cls: "text-text-3" },
+  running: { icon: LoaderCircle, cls: "animate-spin text-info" },
+  done: { icon: CircleCheck, cls: "text-success" },
+  skipped: { icon: Minus, cls: "text-text-3" },
+  failed: { icon: X, cls: "text-danger" },
 };
 
 /** 单步时间线节点（重跑/人工覆盖入口） */
@@ -97,8 +107,10 @@ function StepNode({
       {!isLast && (
         <span className="absolute left-[11px] top-7 h-full w-px bg-stroke" />
       )}
-      <span className={`z-10 mt-0.5 w-6 text-center text-lg ${meta.cls}`}>
-        {meta.icon}
+      <span
+        className={`z-10 mt-0.5 flex w-6 justify-center pt-0.5 ${meta.cls}`}
+      >
+        <meta.icon className="h-4 w-4" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -269,7 +281,9 @@ export default function TaskDetailPage() {
       {/* manual 模式确认条 */}
       {task.status === "waiting_confirm" && (
         <div className="glass-strong flex items-center gap-3 border-warning/40 p-4">
-          <span className="text-warning">✋</span>
+          <span className="text-warning">
+            <Hand className="h-4 w-4" />
+          </span>
           <span className="flex-1 text-sm">
             当前步骤已完成，检查产物后确认继续（或直接重跑/覆盖）
           </span>
@@ -287,7 +301,9 @@ export default function TaskDetailPage() {
 
       {task.status === "failed" && (
         <div className="glass flex items-center gap-3 border-danger/40 p-4">
-          <span className="text-danger">✕</span>
+          <span className="text-danger">
+            <X className="h-4 w-4" />
+          </span>
           <span className="flex-1 text-sm text-danger">
             任务失败：{task.error || "可从失败步骤重新报价后续跑"}
           </span>
@@ -329,7 +345,9 @@ export default function TaskDetailPage() {
             <div className="glass p-4">
               <div className="mb-2 text-xs font-medium text-text-3">成片</div>
               <div className="rounded-xl border border-stroke bg-black/40 p-3 text-center text-xs text-text-3">
-                <div className="mb-2 text-3xl">🎬</div>
+                <div className="mb-2 flex justify-center text-text-2">
+                  <Clapperboard className="h-8 w-8" />
+                </div>
                 <div className="break-all">{finalVideo}</div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">

@@ -2,6 +2,7 @@ import { activationApi, catalogApi, HttpError } from "@oral/api-client";
 import { useQuota } from "@oral/stores";
 import type { BillingUnit, ModulePrice, PlanSku } from "@oral/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check } from "lucide-react";
 import { useState } from "react";
 
 const UNIT_LABELS: Record<BillingUnit, string> = {
@@ -78,7 +79,9 @@ function PlanCard({ plan, current }: { plan: PlanSku; current: boolean }) {
       <ul className="mt-4 flex-1 space-y-2 text-sm text-text-2">
         {plan.entitlements.slice(0, 6).map((feature) => (
           <li key={feature} className="flex gap-2">
-            <span className="text-success">✓</span>
+            <span className="mt-0.5 text-success">
+              <Check className="h-3.5 w-3.5" />
+            </span>
             <span>{feature}</span>
           </li>
         ))}

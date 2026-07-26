@@ -1,4 +1,5 @@
 import { useIp } from "@oral/stores";
+import { Info, PenLine } from "lucide-react";
 import AssetNav from "../components/AssetNav";
 
 const TEMPLATES = [
@@ -50,8 +51,9 @@ export default function TemplatesPage() {
       <AssetNav />
 
       <div className="flex items-center justify-between rounded-card border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
-        <span>
-          ℹ 模板中心为 V1.1
+        <span className="flex items-center gap-1.5">
+          <Info className="h-4 w-4 shrink-0" />
+          模板中心为 V1.1
           能力，当前为效果预览；合成参数模板化与从成片反建模板将随后开放
         </span>
         <span className="chip border-info/40 text-info">V1.1 上线</span>
@@ -83,11 +85,11 @@ export default function TemplatesPage() {
         </div>
         <div className="flex flex-col gap-2">
           <button
-            className="btn-primary px-3 py-1 text-xs"
+            className="btn-primary flex items-center justify-center gap-1 px-3 py-1 text-xs"
             disabled
             title="V1.1 开放"
           >
-            ✎ 编辑模板
+            <PenLine className="h-3 w-3" /> 编辑模板
           </button>
           <button
             className="btn-ghost px-3 py-1 text-xs"

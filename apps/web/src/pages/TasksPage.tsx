@@ -2,6 +2,7 @@ import { pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type { PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
+import { Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import TaskCard from "../components/TaskCard";
@@ -46,8 +47,8 @@ export default function TasksPage() {
             8 步流水线实时进度 · 单步重跑 / 人工覆盖 / 批量队列
           </p>
         </div>
-        <Link to="/create" className="btn-primary">
-          ⚡ 一键成片
+        <Link to="/create" className="btn-primary flex items-center gap-1.5">
+          <Zap className="h-4 w-4" /> 一键成片
         </Link>
       </div>
 

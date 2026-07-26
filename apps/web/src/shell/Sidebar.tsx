@@ -1,6 +1,22 @@
 import { pipelineApi, publishApi } from "@oral/api-client";
 import { useIp, useQuota } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
+import {
+  Bot,
+  ChartColumn,
+  Check,
+  ChevronDown,
+  CircleUserRound,
+  Cloud,
+  House,
+  ListChecks,
+  type LucideIcon,
+  Mail,
+  Music,
+  PenLine,
+  Send,
+  Zap,
+} from "lucide-react";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { IM_ENABLED } from "../config/features";
@@ -8,7 +24,7 @@ import { IM_ENABLED } from "../config/features";
 interface NavItem {
   to: string;
   label: string;
-  icon: string;
+  icon: LucideIcon;
   badge?: number;
   badgeTone?: "brand" | "danger";
 }
@@ -29,12 +45,12 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
     {
       title: "创作",
       items: [
-        { to: "/", label: "工作台", icon: "⌂" },
-        { to: "/scripts", label: "文案工坊", icon: "✎" },
+        { to: "/", label: "工作台", icon: House },
+        { to: "/scripts", label: "文案工坊", icon: PenLine },
         {
           to: "/tasks",
           label: "任务中心",
-          icon: "☰",
+          icon: ListChecks,
           badge: taskActive,
           badgeTone: "brand",
         },
@@ -43,9 +59,11 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
     {
       title: "资产",
       items: [
-        { to: "/assets/personas", label: "IP 档案", icon: "◉" },
+        { to: "/assets/personas", label: "IP 档案", icon: CircleUserRound },
+        { to: "/assets/voices", label: "IP 声音", icon: Music },
+        { to: "/assets/avatars", label: "IP 数字人", icon: Bot },
         // V1.1 未上架：素材库入口暂时隐藏，路由保留可直达；上线时恢复
-        // { to: "/assets/materials", label: "素材库", icon: "▦" },
+        // { to: "/assets/materials", label: "素材库", icon: LayoutGrid },
       ],
     },
     {
@@ -54,12 +72,12 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
         {
           to: "/publish/jobs",
           label: "发布管理",
-          icon: "⇪",
+          icon: Send,
           badge: publishFailed,
           badgeTone: "danger",
         },
-        ...(IM_ENABLED ? [{ to: "/im", label: "私信中心", icon: "✉" }] : []),
-        { to: "/analytics", label: "数据看板", icon: "▲" },
+        ...(IM_ENABLED ? [{ to: "/im", label: "私信中心", icon: Mail }] : []),
+        { to: "/analytics", label: "数据看板", icon: ChartColumn },
       ],
     },
   ];
@@ -93,7 +111,9 @@ function IpSwitcher() {
             {current?.domain ?? "—"}
           </span>
         </span>
-        <span className="text-text-3">▾</span>
+        <span className="text-text-3">
+          <ChevronDown className="h-4 w-4" />
+        </span>
       </button>
       {open && (
         <div className="glass-strong absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden p-1">
@@ -115,7 +135,7 @@ function IpSwitcher() {
                 {p.avatarChar}
               </span>
               <span className="flex-1 truncate">{p.name}</span>
-              {p.id === current?.id && <span>✓</span>}
+              {p.id === current?.id && <Check className="h-4 w-4" />}
             </button>
           ))}
           <button
@@ -141,7 +161,9 @@ function QuotaCard() {
   return (
     <div className="glass px-3.5 py-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-text-2">☁ 云端算力 · 额度</span>
+        <span className="flex items-center gap-1 text-xs text-text-2">
+          <Cloud className="h-3.5 w-3.5" /> 云端算力 · 额度
+        </span>
         <NavLink
           to="/pricing"
           title="套餐与积分"
@@ -206,8 +228,11 @@ export default function Sidebar() {
       <IpSwitcher />
 
       {/* 一键成片 CTA */}
-      <NavLink to="/create" className="btn-primary w-full py-2.5 text-base">
-        ⚡ 一键成片
+      <NavLink
+        to="/create"
+        className="btn-primary flex w-full items-center justify-center gap-1.5 py-2.5 text-base"
+      >
+        <Zap className="h-4 w-4" /> 一键成片
       </NavLink>
 
       {/* 导航分组 */}
@@ -231,8 +256,8 @@ export default function Sidebar() {
                     }`
                   }
                 >
-                  <span className="w-4 text-center opacity-80">
-                    {item.icon}
+                  <span className="flex w-4 justify-center opacity-80">
+                    <item.icon className="h-4 w-4" />
                   </span>
                   {item.label}
                   {item.badge ? (

@@ -1,6 +1,7 @@
 import { contentApi, HttpError } from "@oral/api-client";
 import { useRelativeTime } from "@oral/hooks";
 import { useQuery } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import LinkSourceInput from "../components/LinkSourceInput";
@@ -131,8 +132,11 @@ function NewScriptPanel({ onClose }: { onClose: () => void }) {
     <div className="glass-strong space-y-4 p-5">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">新建文案</h2>
-        <button className="btn-ghost px-2.5 py-1 text-xs" onClick={onClose}>
-          收起 ✕
+        <button
+          className="btn-ghost flex items-center gap-1 px-2.5 py-1 text-xs"
+          onClick={onClose}
+        >
+          收起 <X className="h-3 w-3" />
         </button>
       </div>
       <div className="grid grid-cols-3 gap-1 rounded-xl bg-white/5 p-1">

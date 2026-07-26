@@ -1,9 +1,12 @@
 import { useIp } from "@oral/stores";
+import type { Platform } from "@oral/types";
+import { Info, TrendingDown, TrendingUp } from "lucide-react";
+import PlatformIcon from "../components/PlatformIcon";
 
 const STATS = [
-  { k: "总播放", v: "28.6w", d: "↑ +41% vs 上周", up: true },
-  { k: "新增粉丝", v: "1,204", d: "↑ +18% vs 上周", up: true },
-  { k: "平均完播率", v: "34%", d: "↓ -2% 需优化开头", up: false },
+  { k: "总播放", v: "28.6w", d: "+41% vs 上周", up: true },
+  { k: "新增粉丝", v: "1,204", d: "+18% vs 上周", up: true },
+  { k: "平均完播率", v: "34%", d: "-2% 需优化开头", up: false },
   { k: "发布条数", v: "21", d: "日更 3 条 · 全勤", up: true },
 ] as const;
 
@@ -17,11 +20,11 @@ const WEEK_BARS = [
   { day: "今天", h: 58 },
 ] as const;
 
-const PLATFORM_SHARE = [
-  { name: "🎵 抖音", pct: 52 },
-  { name: "📕 小红书", pct: 31 },
-  { name: "⚡ 快手", pct: 17 },
-] as const;
+const PLATFORM_SHARE: { platform: Platform; name: string; pct: number }[] = [
+  { platform: "douyin", name: "抖音", pct: 52 },
+  { platform: "xiaohongshu", name: "小红书", pct: 31 },
+  { platform: "kuaishou", name: "快手", pct: 17 },
+];
 
 const TOP_VIDEOS = [
   { title: "新公司法 5 大变化", platform: "小红书", views: "21.7w 播放" },
@@ -36,8 +39,9 @@ export default function AnalyticsPage() {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between rounded-card border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
-        <span>
-          ℹ 数据看板为 V1.1 能力（依赖平台数据回流核验 G3），以下为效果预览
+        <span className="flex items-center gap-1.5">
+          <Info className="h-4 w-4 shrink-0" />
+          数据看板为 V1.1 能力（依赖平台数据回流核验 G3），以下为效果预览
         </span>
         <span className="chip border-info/40 text-info">V1.1 上线</span>
       </div>
@@ -61,8 +65,13 @@ export default function AnalyticsPage() {
             <div className="text-xs text-text-3">{s.k}</div>
             <div className="mt-1 text-2xl font-black">{s.v}</div>
             <div
-              className={`mt-1 text-xs ${s.up ? "text-success" : "text-danger"}`}
+              className={`mt-1 flex items-center gap-1 text-xs ${s.up ? "text-success" : "text-danger"}`}
             >
+              {s.up ? (
+                <TrendingUp className="h-3 w-3" />
+              ) : (
+                <TrendingDown className="h-3 w-3" />
+              )}
               {s.d}
             </div>
           </div>
@@ -104,7 +113,10 @@ export default function AnalyticsPage() {
             {PLATFORM_SHARE.map((p) => (
               <div key={p.name}>
                 <div className="mb-1.5 flex justify-between text-xs">
-                  <span>{p.name}</span>
+                  <span className="flex items-center gap-1.5">
+                    <PlatformIcon platform={p.platform} size={14} />
+                    {p.name}
+                  </span>
                   <span className="text-text-3">{p.pct}%</span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/5">

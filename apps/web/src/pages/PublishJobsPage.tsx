@@ -5,6 +5,7 @@ import {
   type PublishJob,
 } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -229,12 +230,14 @@ export default function PublishJobsPage({
       {/* 登录态失效告警（首屏最重要） */}
       {expired.length > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3">
-          <span className="text-sm text-danger">
-            ⚠{" "}
-            {expired
-              .map((a) => `${a.platformName}账号「${a.nickname}」`)
-              .join("、")}
-            登录态已过期，待发布任务被阻塞。
+          <span className="flex items-center gap-1.5 text-sm text-danger">
+            <TriangleAlert className="h-4 w-4 shrink-0" />
+            <span>
+              {expired
+                .map((a) => `${a.platformName}账号「${a.nickname}」`)
+                .join("、")}
+              登录态已过期，待发布任务被阻塞。
+            </span>
           </span>
           <button
             className="btn-primary px-3 py-1 text-xs"

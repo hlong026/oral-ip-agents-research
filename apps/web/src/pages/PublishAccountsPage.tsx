@@ -12,6 +12,7 @@ import {
   type PublishAccount,
 } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Info, PenLine, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 import { IM_ENABLED } from "../config/features";
@@ -103,7 +104,9 @@ function QrPanel({
             {status === "waiting" &&
               "请使用手机 App 扫码，并按平台提示完成授权（二维码过期会自动刷新）"}
             {status === "success" && (
-              <span className="text-success">✓ 授权成功，正在写入账号…</span>
+              <span className="inline-flex items-center gap-1 text-success">
+                <Check className="h-3.5 w-3.5" /> 授权成功，正在写入账号…
+              </span>
             )}
             {status === "expired" && (
               <span className="text-warning">
@@ -257,12 +260,14 @@ export default function PublishAccountsPage() {
       {/* 登录态失效红色告警 */}
       {expired.length > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-card border border-danger/40 bg-danger/10 px-4 py-3">
-          <span className="text-sm text-danger">
-            ⚠{" "}
-            {expired
-              .map((a) => `${a.platformName}账号「${a.nickname}」`)
-              .join("、")}
-            登录态已过期，关联发布任务被阻塞。
+          <span className="flex items-center gap-1.5 text-sm text-danger">
+            <TriangleAlert className="h-4 w-4 shrink-0" />
+            <span>
+              {expired
+                .map((a) => `${a.platformName}账号「${a.nickname}」`)
+                .join("、")}
+              登录态已过期，关联发布任务被阻塞。
+            </span>
           </span>
           <button
             className="btn-primary px-3 py-1 text-xs"
@@ -346,7 +351,7 @@ export default function PublishAccountsPage() {
                           title="重命名账号（用于多账号辨识）"
                           onClick={() => setEditingId(a.id)}
                         >
-                          ✎
+                          <PenLine className="h-3 w-3" />
                         </button>
                       </span>
                     )}
@@ -437,10 +442,12 @@ export default function PublishAccountsPage() {
               );
             })}
           </div>
-          <div className="mt-4 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-            ℹ
-            只有真实账号验收通过的平台开放扫码绑定；未验收平台仅生成完整人工发布包。
-            Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。
+          <div className="mt-4 flex items-start gap-1.5 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              只有真实账号验收通过的平台开放扫码绑定；未验收平台仅生成完整人工发布包。
+              Cookie 仅保存在您的账户中并加密存储，可随时解绑清除。
+            </span>
           </div>
         </div>
 
@@ -672,9 +679,11 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
           );
         })}
       </div>
-      <div className="mt-3 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
-        ℹ
-        启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
+      <div className="mt-3 flex items-start gap-1.5 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
+        </span>
       </div>
     </div>
   );

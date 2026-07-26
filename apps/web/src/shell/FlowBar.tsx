@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 
@@ -70,7 +71,7 @@ export default function FlowBar() {
                       : "bg-white/5"
                 }`}
               >
-                {done ? "✓" : i + 1}
+                {done ? <Check className="h-2.5 w-2.5" /> : i + 1}
               </span>
               {step.label}
             </Link>
