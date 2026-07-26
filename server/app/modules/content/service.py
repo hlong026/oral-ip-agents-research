@@ -1,22 +1,31 @@
 """
 content 业务编排（F-101~F-106）
 降级链：自建解析 → 第三方解析 API → 手动上传/粘贴文案（C2，全链路 100% 可用）
-文案优先策略：Douyidou 返回 text 非空时直接使用（跳过ASR，零成本）
+链接转写策略：优先转写 Douyidou 音频直链，音频缺失时转写视频，平台 text 仅兜底
 ASR 智能分流：短音频(≤5min)走Flash同步 / 长音频走异步轮询
 日志：LLM 调用完成（§10.6.8-B #3）
 """
 
+import base64
+import ipaddress
 import json
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
-from app.core.storage import save_bytes
+from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
+from app.core.white_label import public_model_name
+from app.providers.base import ProviderError
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
-from app.providers.duration_probe import probe_duration
+from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
 from app.providers.registry import registry
 from app.providers.url_resolver import resolve_input
 
@@ -24,6 +33,8 @@ from . import repository as repo
 from .models import Script, ScriptVersion
 from .prompts import PROMPT_VERSION
 from .schemas import (
+    BatchRewriteItemOut,
+    BatchRewriteOut,
     ParseOut,
     RewriteOut,
     ScriptOut,
@@ -35,6 +46,73 @@ from .schemas import (
 )
 
 logger = get_logger("oral.content")
+settings = get_settings()
+_VARIANT_STRATEGIES = (
+    ("强化开头钩子，表达稳健", 0.7),
+    ("调整叙事节奏，增加口语变化", 0.9),
+    ("转换表达视角，提升创意差异", 1.1),
+    ("强化案例与细节，减少抽象表述", 0.8),
+    ("压缩冗余内容，突出行动引导", 1.0),
+)
+_UPLOAD_MEDIA_TYPES = {
+    ".aac": "audio/aac",
+    ".avi": "video/x-msvideo",
+    ".m4a": "audio/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".mp3": "audio/mpeg",
+    ".mp4": "video/mp4",
+    ".wav": "audio/wav",
+}
+_MAX_ASR_DATA_URI_BYTES = 20 * 1024 * 1024
+_PROBE_RESULT_TTL_SECONDS = 60.0
+_probe_result_cache: dict[str, tuple[float, DouyidouParseResult]] = {}
+
+
+def _cache_probe_result(url: str, result: DouyidouParseResult) -> None:
+    now = time.monotonic()
+    expired = [
+        key for key, (cached_at, _) in _probe_result_cache.items() if now - cached_at > _PROBE_RESULT_TTL_SECONDS
+    ]
+    for key in expired:
+        _probe_result_cache.pop(key, None)
+    _probe_result_cache[url] = (now, result)
+
+
+def _recent_probe_result(url: str) -> DouyidouParseResult | None:
+    cached = _probe_result_cache.get(url)
+    if cached is None:
+        return None
+    cached_at, result = cached
+    if time.monotonic() - cached_at > _PROBE_RESULT_TTL_SECONDS:
+        _probe_result_cache.pop(url, None)
+        return None
+    return result
+
+
+def _is_public_media_url(value: str) -> bool:
+    parsed = urlparse(value)
+    hostname = parsed.hostname or ""
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        return False
+    try:
+        return ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        return hostname != "localhost" and not hostname.endswith((".local", ".internal"))
+
+
+def _media_data_uri(filename: str, data: bytes) -> str:
+    media_type = _UPLOAD_MEDIA_TYPES.get(Path(filename).suffix.lower(), "application/octet-stream")
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{media_type};base64,{encoded}"
+
+
+async def _embedded_asr_input(filename: str, data: bytes) -> str:
+    media_input = _media_data_uri(filename, data)
+    if len(media_input) <= _MAX_ASR_DATA_URI_BYTES:
+        return media_input
+    audio = await extract_audio_bytes(data, Path(filename).suffix.lower())
+    return _media_data_uri("audio.mp3", audio)
 
 
 async def parse_url(
@@ -45,38 +123,49 @@ async def parse_url(
     verified_duration_seconds: float | None = None,
     require_verified_duration: bool = False,
 ) -> ParseOut:
-    """链接解析 → 文案优先 / ASR 转写 → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
+    """链接解析 → 音频优先 ASR → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
     logger.info(f"解析输入: platform={resolved.platform.value}, is_id={resolved.is_id}, url={resolved.url[:80]}")
 
     # 尝试 Douyidou 完整解析（获取文案+视频直链）
-    douyidou_result: DouyidouParseResult | None = None
-    if await registry.provider_enabled("douyidou"):
+    douyidou_result = _recent_probe_result(resolved.url)
+    if douyidou_result is not None:
+        logger.info("复用时长探测阶段的 Douyidou 解析结果，避免重复请求上游")
+    elif await registry.provider_enabled("douyidou"):
         try:
             parser = DouyidouParser()
             douyidou_result = await parser.parse_url_full(resolved.url)
         except Exception as e:
             logger.warning(f"Douyidou 完整解析失败，走降级链: {e}")
 
-    # 文案优先策略：Douyidou 已返回 text 时直接使用（跳过ASR，零成本）
-    if douyidou_result and douyidou_result.text:
-        return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
-
-    # 无文案：走 ASR 转写（需要视频直链）
+    # 平台 text 往往只是发布说明；完整口播必须优先从原始音频识别。
+    audio_url = next(
+        (
+            value
+            for value in (douyidou_result.audio if douyidou_result else [])
+            if isinstance(value, str) and _is_public_media_url(value)
+        ),
+        None,
+    )
     video_url = douyidou_result.video_url if douyidou_result else None
     platform = douyidou_result.platform if douyidou_result else resolved.platform.value
     title = douyidou_result.title if douyidou_result else ""
     cover = douyidou_result.cover if douyidou_result else None
 
-    if not video_url:
+    if not audio_url and not video_url:
         # 降级链兜底
         parse_result, _ = await registry.run_with_fallback("parse", registry.parse_chain, "parse_url", resolved.url)
         video_url = parse_result.video_key
         platform = parse_result.platform
         title = parse_result.title
 
-    if not video_url:
+    media_url = audio_url or video_url
+    if not media_url and douyidou_result and douyidou_result.text:
+        logger.warning("音视频直链不可用，降级使用平台发布文本")
+        return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
+
+    if not media_url:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
@@ -88,7 +177,7 @@ async def parse_url(
 
     known_dur = douyidou_result.duration_sec if douyidou_result else None
     duration_sec = verified_duration_seconds or await probe_duration(
-        video_url,
+        media_url,
         platform=platform,
         known_duration=known_dur,
     )
@@ -102,9 +191,11 @@ async def parse_url(
         )
     logger.info(f"ASR 分流决策: duration={duration_sec}, threshold={300}s")
 
-    # ASR 转写（直传视频URL，按时长智能分流）
+    logger.info(f"ASR 媒体选择: source={'audio' if audio_url else 'video'}")
+
+    # ASR 转写（优先直传音频URL，按时长智能分流）
     tr, provider_name = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", video_url, duration_sec=duration_sec
+        "asr", registry.asr_chain, "transcribe", media_url, duration_sec=duration_sec
     )
     transcript = TranscriptOut(
         text=tr.text,
@@ -138,7 +229,7 @@ async def parse_url(
 async def _save_text_result(
     db: AsyncSession, user_id: str, persona_id: str | None, source_url: str, result: DouyidouParseResult
 ) -> ParseOut:
-    """Douyidou 已返回文案时直接落库（跳过ASR，零成本）"""
+    """音视频不可用时，将 Douyidou 平台文本作为最后兜底。"""
     text = result.text or ""
     script = await _create_script_with_source_version(
         db,
@@ -150,7 +241,7 @@ async def _save_text_result(
         original_text=text,
         words_json="[]",
     )
-    logger.info(f"文案优先命中，跳过ASR: platform={result.platform}, text_len={len(text)}")
+    logger.info(f"平台文本兜底命中: platform={result.platform}, text_len={len(text)}")
     return ParseOut(
         transcript=TranscriptOut(text=text, words=[], duration=0, language="zh"),
         degraded=False,
@@ -193,8 +284,10 @@ async def parse_by_id(
 async def probe_url_duration(url: str, *, required: bool) -> float | None:
     """在报价前解析直链，并只返回供应商值或 ffprobe 验证值。"""
     resolved = resolve_input(url)
-    result: DouyidouParseResult | None = None
-    if await registry.provider_enabled("douyidou"):
+    result = _recent_probe_result(resolved.url)
+    fallback_chain = registry.parse_chain
+    if result is None and await registry.provider_enabled("douyidou"):
+        fallback_chain = [provider for provider in registry.parse_chain if provider.name != "douyidou"]
         try:
             result = await DouyidouParser().parse_url_full(resolved.url)
         except Exception as exc:
@@ -206,7 +299,7 @@ async def probe_url_duration(url: str, *, required: bool) -> float | None:
         try:
             parsed, _ = await registry.run_with_fallback(
                 "parse",
-                registry.parse_chain,
+                fallback_chain,
                 "parse_url",
                 resolved.url,
             )
@@ -228,6 +321,8 @@ async def probe_url_duration(url: str, *, required: bool) -> float | None:
                 "message": "无法验证链接媒体时长，请上传本地文件后重试",
             },
         )
+    if result is not None:
+        _cache_probe_result(resolved.url, result)
     return duration
 
 
@@ -238,12 +333,54 @@ async def parse_upload(
     data: bytes,
     persona_id: str | None,
     duration_seconds: float | None = None,
+    storage_key: str | None = None,
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
-    key = await save_bytes("uploads", filename, data)
-    tr, _ = await registry.run_with_fallback(
-        "asr", registry.asr_chain, "transcribe", key, duration_sec=duration_seconds
-    )
+    key = storage_key or await save_bytes("uploads", filename, data)
+    try:
+        threshold = await get_config_int("asr_flash_threshold_sec", 300)
+        if duration_seconds is not None and duration_seconds <= threshold:
+            accessible_url = await get_accessible_url(key, require_public=False)
+            media_input = (
+                accessible_url if _is_public_media_url(accessible_url) else await _embedded_asr_input(filename, data)
+            )
+        else:
+            media_input = await get_accessible_url(key, require_public=True)
+    except StorageConfigurationError as exc:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "MEDIA_PUBLIC_URL_REQUIRED",
+                "message": "媒体处理服务暂不可用，请联系管理员检查存储配置",
+            },
+        ) from exc
+    except MediaProcessingError as exc:
+        logger.warning("upload_audio_extraction_failed", filename=filename, error=str(exc)[:300])
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "MEDIA_AUDIO_EXTRACTION_FAILED",
+                "message": "无法从上传文件提取有效音轨，请检查文件后重试",
+            },
+        ) from exc
+    try:
+        tr, _ = await registry.run_with_fallback(
+            "asr", registry.asr_chain, "transcribe", media_input, duration_sec=duration_seconds
+        )
+    except ProviderError as exc:
+        logger.warning(
+            "upload_asr_failed",
+            filename=filename,
+            error=str(exc)[:200],
+        )
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "ASR_FAILED",
+                "message": "语音转写暂时不可用，请重试上传或直接粘贴正文",
+                "fallbacks": ["paste_text", "retry_upload"],
+            },
+        ) from exc
     script = await _create_script_with_source_version(
         db,
         user_id=user_id,
@@ -304,7 +441,13 @@ async def parse_text(
 
 
 async def rewrite(
-    db: AsyncSession, user_id: str, text: str, intensity: str, prompt: str | None, script_id: str | None
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    intensity: str,
+    prompt: str | None,
+    script_id: str | None,
+    progress_callback: Callable[[int, str], Awaitable[None]] | None = None,
 ) -> RewriteOut:
     """三阶段IP仿写引擎：结构拆解 → IP化大纲 → 全文生成+校验闭环"""
     start_time = time.perf_counter()
@@ -339,14 +482,20 @@ async def rewrite(
     taboo_words = "、".join(json.loads(persona.taboo_words or "[]")) if persona else "无"
     cta_style = persona.cta_style if persona else "关注收藏"
     avoid_topics = json.loads(persona.avoid_topics or "[]") if persona else []
+    custom_prompt = (prompt or "").strip()
 
     # ---- Light 模式：单步人设润色 ----
     if intensity == "light":
+        if progress_callback:
+            await progress_callback(35, "正在结合当前 IP 润色文案")
         if persona_ctx:
-            result = await llm.polish_light(text, persona_ctx)
+            light_persona_ctx = persona_ctx
+            if custom_prompt:
+                light_persona_ctx += f"\n\n【用户自定义改写要求】\n{custom_prompt}"
+            result = await llm.polish_light(text, light_persona_ctx)
         else:
             result, provider_name = await registry.run_with_fallback(
-                "llm", registry.llm_chain, "rewrite", text, "light", prompt
+                "llm", registry.llm_chain, "rewrite", text, "light", custom_prompt or None
             )
         # 禁忌词校验
         result, passed = _validate_taboo(result, taboo_words, avoid_topics)
@@ -355,21 +504,30 @@ async def rewrite(
         return RewriteOut(text=result, validationPassed=passed)
 
     # ---- Stage 1: 结构拆解 ----
+    if progress_callback:
+        await progress_callback(20, "正在分析原文结构")
     mode = "theme" if intensity == "theme" else "full"
     structure = await llm.analyze_structure(text, mode=mode)
 
     # ---- Stage 2: IP化大纲 ----
+    if progress_callback:
+        await progress_callback(45, "正在生成 IP 化大纲")
     outline = await llm.generate_outline(structure, persona_ctx, intensity, duration)
 
     # ---- Stage 3: 全文生成 ----
+    if progress_callback:
+        await progress_callback(65, "正在生成完整改写文案")
     constraints = {
         "duration": duration,
         "cta_style": cta_style or "关注收藏",
-        "taboo_words": taboo_words,
+        "taboo_words": taboo_words or "无",
+        "extra_prompt": custom_prompt,
     }
     result = await llm.generate_script(outline, persona_ctx, constraints)
 
     # ---- 校验闭环：禁忌词 + 去重检测（最多2轮再改写） ----
+    if progress_callback:
+        await progress_callback(82, "正在执行禁忌词和重复度校验")
     validation_passed = True
     final_score = 0.0
     for _round in range(2):
@@ -439,6 +597,110 @@ async def rewrite(
         similarity=final_score,
         validationPassed=validation_passed,
     )
+
+
+async def batch_rewrite(
+    db: AsyncSession,
+    user_id: str,
+    text: str,
+    intensity: str,
+    count: int,
+    prompt: str | None,
+    script_id: str | None,
+) -> BatchRewriteOut:
+    """共享一次结构与大纲分析，生成 2~5 条可排序候选文案。"""
+    if not 2 <= count <= 5:
+        raise ValueError("count 必须在 2 到 5 之间")
+
+    persona = None
+    persona_ctx = ""
+    if script_id:
+        script = await repo.get(db, script_id, user_id)
+        if script and script.persona_id:
+            from app.modules.ipasset.repository import get as get_persona
+
+            persona = await get_persona(db, script.persona_id, user_id)
+    if persona is None:
+        from app.modules.ipasset.repository import get as get_persona
+        from app.modules.ipasset.service import get_active_persona_id
+
+        active_id = await get_active_persona_id(db, user_id)
+        if active_id:
+            persona = await get_persona(db, active_id, user_id)
+    if persona:
+        from app.modules.ipasset.service import persona_prompt_context
+
+        persona_ctx = persona_prompt_context(persona)
+
+    mode = "theme" if intensity == "theme" else "full"
+    structure, _ = await registry.run_with_fallback(
+        "llm",
+        registry.llm_chain,
+        "analyze_structure",
+        text,
+        mode=mode,
+    )
+    duration = persona.video_duration if persona else 60
+    outline, _ = await registry.run_with_fallback(
+        "llm",
+        registry.llm_chain,
+        "generate_outline",
+        structure,
+        persona_ctx,
+        intensity,
+        duration,
+    )
+    taboo_words = "、".join(json.loads(persona.taboo_words or "[]")) if persona else "无"
+    constraints = {
+        "duration": duration,
+        "cta_style": persona.cta_style if persona else "关注收藏",
+        "taboo_words": taboo_words,
+        "extra_prompt": prompt or "",
+    }
+
+    candidates: list[tuple[BatchRewriteItemOut, str]] = []
+    for strategy, temperature in _VARIANT_STRATEGIES[:count]:
+        candidate, provider_name = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "generate_script_variant",
+            outline,
+            persona_ctx,
+            constraints,
+            temperature,
+            strategy,
+        )
+        similarity_result, _ = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "check_similarity",
+            candidate,
+            text,
+        )
+        candidates.append(
+            (
+                BatchRewriteItemOut(
+                    text=candidate,
+                    similarity=similarity_result.score,
+                    strategy=strategy,
+                    providerName=public_model_name(provider_name),
+                ),
+                provider_name,
+            )
+        )
+
+    candidates.sort(key=lambda candidate: candidate[0].similarity)
+    items = [item for item, _provider_name in candidates]
+    if script_id and candidates:
+        best, best_provider_name = candidates[0]
+        await _append_generated_version(db, user_id, script_id, best.text, best_provider_name, best.similarity)
+    logger.info(
+        "batch_rewrite_done",
+        user_id=user_id,
+        count=count,
+        best_similarity=items[0].similarity,
+    )
+    return BatchRewriteOut(items=items, structure=structure, outline=outline)
 
 
 def _validate_taboo(text: str, taboo_words: str, avoid_topics: list[str]) -> tuple[str, bool]:
@@ -543,7 +805,7 @@ def to_out(s: Script) -> ScriptOut:
         rewrittenText=s.rewritten_text,
         similarityScore=s.similarity_score,
         currentVersion=s.current_version,
-        modelName=s.model_name,
+        modelName=public_model_name(s.model_name),
         promptVersion=s.prompt_version,
         status=s.status,
         createdAt=s.created_at.astimezone(UTC).isoformat(),
@@ -556,7 +818,7 @@ def version_to_out(version: ScriptVersion) -> ScriptVersionOut:
         version=version.version,
         kind=version.kind,
         text=version.text,
-        modelName=version.model_name,
+        modelName=public_model_name(version.model_name),
         promptVersion=version.prompt_version,
         createdAt=version.created_at.astimezone(UTC).isoformat(),
     )

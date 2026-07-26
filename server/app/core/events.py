@@ -63,11 +63,20 @@ def _broadcast_local(channel: str, payload: dict) -> None:
             pass
 
 
-async def subscribe(channel: str) -> tuple[Callable[[], Awaitable[dict | None]], Callable[[], None]]:
+async def subscribe(
+    channel: str,
+) -> tuple[Callable[[], Awaitable[dict | None]], Callable[[], Awaitable[None]]]:
     """返回 (get_fn, unsubscribe_fn)；WS 网关在 finally 中调用 unsubscribe 防止内存泄漏"""
     if _redis is not None:
         pubsub = _redis.pubsub()
-        await pubsub.subscribe(channel)
+        try:
+            await pubsub.subscribe(channel)
+        except BaseException:
+            try:
+                await pubsub.aclose()
+            except Exception:
+                logger.exception("redis pubsub cleanup failed after subscribe error")
+            raise
 
         async def get_redis() -> dict | None:
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -78,16 +87,11 @@ async def subscribe(channel: str) -> tuple[Callable[[], Awaitable[dict | None]],
                     return None
             return None
 
-        def unsub_redis() -> None:
+        async def unsub_redis() -> None:
             try:
-                loop = asyncio.get_running_loop()
-
-                async def unsubscribe() -> None:
-                    await pubsub.unsubscribe(channel)
-
-                loop.create_task(unsubscribe())
-            except RuntimeError:
-                pass
+                await pubsub.unsubscribe(channel)
+            finally:
+                await pubsub.aclose()
 
         return get_redis, unsub_redis
 
@@ -100,7 +104,7 @@ async def subscribe(channel: str) -> tuple[Callable[[], Awaitable[dict | None]],
         except TimeoutError:
             return None
 
-    def unsub_local() -> None:
+    async def unsub_local() -> None:
         _local_subs.get(channel, set()).discard(q)
 
     return get_local, unsub_local

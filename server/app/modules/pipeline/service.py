@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.white_label import public_metadata
 
 from . import repository as repo
 from .engine import schedule_run
@@ -349,7 +350,7 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
             step_name = "语音" if from_step == "voice" else "数字人"
             task.status = "failed"
             task.queue_message_id = ""
-            task.error = f"{from_step}: 供应商结果未知，为避免重复调用已停止自动恢复，请重新报价后重试"
+            task.error = f"{from_step}: 外部服务结果未知，为避免重复调用已停止自动恢复，请重新报价后重试"
             if task.reservation_id:
                 from app.modules.billing.service import release_reservation
 
@@ -367,7 +368,7 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
                 task.user_id,
                 "error",
                 f"任务需要人工确认：{task.title}",
-                f"{step_name}供应商结果未知，为避免重复调用已停止自动恢复；请重新报价后从该步骤重试。",
+                f"{step_name}外部服务结果未知，为避免重复调用已停止自动恢复；请重新报价后从该步骤重试。",
             )
             continue
         task.status = "pending"
@@ -437,6 +438,15 @@ def to_out(t: PipelineTask) -> TaskOut:
     steps_raw = json.loads(t.steps_json or "[]") or _default_steps()
     ctx = json.loads(t.artifacts_json or "{}")
     cover = ctx.get("cover_key")
+    public_steps: list[StepStateOut] = []
+    for step in steps_raw:
+        public_step = {
+            **step,
+            "provider": "",
+            "message": "处理失败，请稍后重试" if step.get("status") == "failed" else step.get("message", ""),
+            "artifacts": public_metadata(step.get("artifacts", {}), redact_values=True),
+        }
+        public_steps.append(StepStateOut(**public_step))
     return TaskOut(
         id=t.id,
         ipId=t.ip_id,
@@ -445,12 +455,12 @@ def to_out(t: PipelineTask) -> TaskOut:
         sourceUrl=t.source_url,
         mode=t.mode,
         status=t.status,
-        steps=[StepStateOut(**s) for s in steps_raw],
+        steps=public_steps,
         currentStep=t.current_step or None,
         compute=t.compute,
         quotaCost=t.quota_cost,
-        error=t.error,
-        artifacts=ctx,
+        error="处理失败，请稍后重试" if t.error else "",
+        artifacts=public_metadata(ctx, redact_values=True),
         batchId=t.batch_id,
         createdAt=t.created_at.astimezone(UTC).isoformat(),
         updatedAt=t.updated_at.astimezone(UTC).isoformat(),

@@ -9,11 +9,18 @@ import type { FeedEvent } from "@oral/types";
 
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
+  | {
+      kind: "content_job_updated";
+      jobId: string;
+      userId?: string;
+      status: string;
+      progress: number;
+      stage: string;
+    }
   | { kind: "publish_updated"; jobId: string; userId?: string; status: string }
   | {
       kind: "provider_fallback";
       provider_kind?: string;
-      to?: string;
       taskId?: string;
       message?: string;
     }
@@ -56,6 +63,7 @@ export class TaskSocket {
     }
     this.ws.onopen = () => {
       this.retries = 0;
+      if (this.closedByUser) this.ws?.close();
     };
     this.ws.onmessage = (msg) => {
       try {
@@ -87,6 +95,6 @@ export class TaskSocket {
 
   close() {
     this.closedByUser = true;
-    this.ws?.close();
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.close();
   }
 }

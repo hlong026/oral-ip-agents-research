@@ -294,7 +294,7 @@ export default function PublishAccountsPage() {
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-medium">已绑定账号（{list.length}）</h2>
           <span className="text-xs text-text-3">
-            Cookie 加密存 PG · 会话态 Redis
+            登录凭据加密存储 · 会话安全托管
           </span>
         </div>
         <div className="overflow-x-auto">

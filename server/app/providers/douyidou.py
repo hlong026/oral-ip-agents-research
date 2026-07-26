@@ -9,7 +9,7 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import urlencode
 
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
@@ -72,10 +72,13 @@ class DouyidouParser:
 
     def _sign(self, params: dict[str, str], app_secret: str) -> str:
         """MD5签名：参数按key排序 → k=v& 拼接 → 末尾追加 appSecret → MD5"""
-        sorted_keys = sorted(params.keys())
-        parts = [f"{k}={quote(str(params[k]))}" for k in sorted_keys]
-        pre_str = "&".join(parts) + app_secret
+        pre_str = self._encode_params(params) + app_secret
         return hashlib.md5(pre_str.encode()).hexdigest()
+
+    @staticmethod
+    def _encode_params(params: dict[str, str]) -> str:
+        """与官方 SDK 一致，排序后使用 quote_plus 规则编码完整参数。"""
+        return urlencode(sorted(params.items()))
 
     @retry(
         stop=stop_after_attempt(2),
@@ -94,10 +97,7 @@ class DouyidouParser:
 
         sign = self._sign(params, app_secret)
 
-        # 构造排序后的查询字符串
-        sorted_keys = sorted(params.keys())
-        query_parts = [f"{k}={quote(str(params[k]))}" for k in sorted_keys]
-        query_string = "&".join(query_parts)
+        query_string = self._encode_params(params)
         full_url = f"{base_url}/api/parse?{query_string}"
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
@@ -120,8 +120,9 @@ class DouyidouParser:
         完整解析：返回视频直链 + 文案 + 封面 + 作者等全部信息。
 
         核心逻辑：
-        - text 非空 → 已有文案，可跳过 ASR
-        - video 非空 → 视频直链，可传给 ASR 转写
+        - audio 非空 → 原始音频直链，优先传给 ASR
+        - video 非空 → 音频缺失时传给 ASR
+        - text 非空 → 音视频均不可用时作为降级文本
         """
         app_id, app_secret, _ = await self._get_credentials()
         if not app_id or not app_secret:
@@ -199,9 +200,11 @@ class DouyidouParser:
                     return num / 1000.0 if num > 10000 else num
                 except (ValueError, TypeError):
                     continue
-        # 尝试嵌套在 video_info 中
-        video_info = payload.get("video_info") or {}
-        if isinstance(video_info, dict):
+        # 抖音响应把时长放在 other，其他平台可能放在 video_info
+        for nested_key in ("other", "video_info"):
+            video_info = payload.get(nested_key) or {}
+            if not isinstance(video_info, dict):
+                continue
             for key in ("duration", "time"):
                 val = video_info.get(key)
                 if val is not None:

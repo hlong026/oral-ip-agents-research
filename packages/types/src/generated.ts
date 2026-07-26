@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-21T10:01:55.293Z
+ * API 版本：1.0.0 · 生成时间：2026-07-24T14:42:39.333Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -84,6 +84,28 @@ export interface BatchGenerateOut {
   codes: string[];
 }
 
+export interface BatchRewriteIn {
+  text: string;
+  intensity?: string;
+  count?: number;
+  prompt?: string | null;
+  scriptId?: string | null;
+  quoteId?: string | null;
+}
+
+export interface BatchRewriteItemOut {
+  text: string;
+  similarity: number;
+  strategy: string;
+  providerName: string;
+}
+
+export interface BatchRewriteOut {
+  items: BatchRewriteItemOut[];
+  structure: Record<string, unknown>;
+  outline: string;
+}
+
 export interface Body_api_clone_api_v1_voices_clone_post {
   name: string;
   consentToken: string;
@@ -116,6 +138,12 @@ export interface Body_api_parse_api_v1_content_parse_post {
   file?: string | null;
 }
 
+export interface Body_api_submit_parse_job_api_v1_content_jobs_parse_post {
+  url?: string | null;
+  quoteId?: string | null;
+  file?: string | null;
+}
+
 export interface CloneStatusOut {
   id: string;
   status: string;
@@ -136,6 +164,18 @@ export interface CodeStatsOut {
   used?: number;
   expired?: number;
   revoked?: number;
+}
+
+export interface ContentJobOut {
+  id: string;
+  kind: string;
+  status: string;
+  progress: number;
+  stage: string;
+  result?: Record<string, unknown> | null;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ConversationOut {
@@ -513,6 +553,25 @@ export interface ProbeUrlIn {
 
 export interface ProbeUrlOut {
   durationSeconds: number;
+}
+
+export interface ProviderProbeOut {
+  provider: string;
+  status: "verified" | "failed" | "incomplete" | "needs_sample";
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ProviderStatusItem {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  missingFields: string[];
+  probeMode: "credential" | "sample";
+}
+
+export interface ProviderStatusOut {
+  items: ProviderStatusItem[];
 }
 
 export interface PublishCapabilityOut {

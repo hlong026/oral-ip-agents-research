@@ -119,6 +119,22 @@ async def test_s3_media_is_materialized_before_ffmpeg(monkeypatch, tmp_path: Pat
     assert await asyncio.to_thread(Path(probe_path).read_bytes) == b"remote-media"
 
 
+async def test_media_route_reads_from_active_storage_driver(client, monkeypatch) -> None:
+    from app.core import storage
+
+    async def remote_bytes(key: str) -> bytes:
+        assert key == "renders/final video.mp4"
+        return b"stored-video"
+
+    monkeypatch.setattr(storage, "read_bytes", remote_bytes)
+
+    response = await client.get("/media/renders/final%20video.mp4")
+
+    assert response.status_code == 200
+    assert response.content == b"stored-video"
+    assert response.headers["content-type"] == "video/mp4"
+
+
 async def test_avatar_clone_persists_consent_evidence_without_plaintext(monkeypatch) -> None:
     from app.modules.avatar import repository as avatar_repo
     from app.modules.avatar import service as avatar_service

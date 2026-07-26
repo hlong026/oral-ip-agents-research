@@ -52,6 +52,13 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
+export async function restoreSession(): Promise<boolean> {
+  if (accessToken) return true;
+  if (!refreshToken) return false;
+  refreshing ??= doRefresh().finally(() => (refreshing = null));
+  return refreshing;
+}
+
 export class HttpError extends Error {
   constructor(
     public status: number,

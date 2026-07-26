@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import consent_fingerprint
+from app.core.white_label import public_error_message
 from app.providers.hifly import HiFlyAPIError, get_client
 from app.providers.registry import registry
 
@@ -62,7 +63,8 @@ async def clone_voice(
         )
     except HiFlyAPIError as e:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"code": "CLONE_FAILED", "message": e.user_message}
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
         ) from e
 
     v = await repo.create(
@@ -233,7 +235,8 @@ async def edit_voice_params(db: AsyncSession, user_id: str, voice_id: str, rate:
         )
     except HiFlyAPIError as e:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, detail={"code": "EDIT_FAILED", "message": e.user_message}
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "EDIT_FAILED", "message": public_error_message(e)},
         ) from e
 
     v.rate = rate

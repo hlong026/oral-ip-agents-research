@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     # 存储
     storage_driver: str = "local"  # local | s3
     local_storage_dir: str = "./storage"
+    media_public_base_url: str = ""  # 真实云端 ASR 回源地址，例如 https://api.example.com
     s3_endpoint: str = "http://localhost:9000"
     s3_access_key: str = "oral"
     s3_secret_key: str = "oral_dev_minio"
@@ -82,6 +83,7 @@ class Settings(BaseSettings):
 
     # 流水线并发闸门（F-406）
     pipeline_max_concurrency: int = 5
+    provider_mock_fallback_enabled: bool = True
 
     # 发布模块（social-auto-upload 浏览器自动化）
     # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口

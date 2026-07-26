@@ -295,6 +295,85 @@ async def test_provider_backed_content_operation_requires_and_settles_quote(
     assert balance_after_settlement_failure.json()["balance"] == 19
 
 
+async def test_upload_transcription_only_deducts_points_after_success(
+    client: AsyncClient,
+    monkeypatch,
+):
+    headers = await _login(client, role="user")
+    token = headers["Authorization"].removeprefix("Bearer ")
+    user_id = str(decode_token(token)["sub"])
+
+    from app.modules.billing.service import grant_points
+
+    async with SessionLocal() as db:
+        await grant_points(
+            db,
+            user_id,
+            10,
+            source_type="manual",
+            source_id=f"test-{uuid.uuid4().hex}",
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            commit=True,
+        )
+
+    async def create_quote() -> str:
+        response = await client.post(
+            "/api/v1/billing/price-preview",
+            headers=headers,
+            json={"items": [{"module": "asr", "quantity": 1}]},
+        )
+        assert response.status_code == 200, response.text
+        return str(response.json()["quoteId"])
+
+    failed_quote_id = await create_quote()
+    successful_quote_id = await create_quote()
+
+    from app.modules.content import router as content_router
+    from app.modules.content.schemas import ParseOut, TranscriptOut
+
+    async def verified_duration(_data: bytes, _suffix: str) -> float:
+        return 60
+
+    async def failing_parse(*_args, **_kwargs):
+        raise HTTPException(502, detail={"code": "ASR_FAILED", "message": "语音识别失败"})
+
+    monkeypatch.setattr(content_router, "probe_media_bytes", verified_duration)
+    monkeypatch.setattr(content_router, "parse_upload", failing_parse)
+
+    failed = await client.post(
+        "/api/v1/content/parse",
+        headers=headers,
+        data={"quoteId": failed_quote_id},
+        files={"file": ("sample.mp4", b"video", "video/mp4")},
+    )
+    assert failed.status_code == 502, failed.text
+    balance_after_failure = await client.get("/api/v1/billing/balance", headers=headers)
+    usage_after_failure = await client.get("/api/v1/billing/usage", headers=headers)
+    assert balance_after_failure.json()["balance"] == 10
+    assert usage_after_failure.json()["items"] == []
+
+    async def successful_parse(*_args, **_kwargs) -> ParseOut:
+        return ParseOut(
+            transcript=TranscriptOut(text="转写成功", words=[], duration=60),
+            degraded=False,
+        )
+
+    monkeypatch.setattr(content_router, "parse_upload", successful_parse)
+    succeeded = await client.post(
+        "/api/v1/content/parse",
+        headers=headers,
+        data={"quoteId": successful_quote_id},
+        files={"file": ("sample.mp4", b"video", "video/mp4")},
+    )
+    assert succeeded.status_code == 200, succeeded.text
+
+    balance_after_success = await client.get("/api/v1/billing/balance", headers=headers)
+    usage_after_success = await client.get("/api/v1/billing/usage", headers=headers)
+    assert balance_after_success.json()["balance"] == 8
+    assert usage_after_success.json()["items"][0]["step"] == "asr"
+    assert usage_after_success.json()["items"][0]["points"] == 2
+
+
 async def test_async_voice_clone_settles_only_after_provider_success(
     client: AsyncClient,
     monkeypatch,
@@ -876,6 +955,50 @@ async def test_quote_reservation_freezes_and_idempotently_releases_points(client
     assert repeated.json()["availablePoints"] == 500
 
 
+async def test_admin_reservation_is_zero_cost_and_does_not_write_billing_usage(client: AsyncClient):
+    admin_tokens = await _user_login_for_role(client, role="admin")
+    admin_headers = {"Authorization": f"Bearer {admin_tokens['accessToken']}"}
+    admin_id = str(decode_token(admin_tokens["accessToken"])["sub"])
+
+    quote = await client.post(
+        "/api/v1/billing/price-preview",
+        headers=admin_headers,
+        json={"items": [{"module": "tts", "quantity": 1}]},
+    )
+    assert quote.status_code == 200, quote.text
+
+    reserved = await client.post(
+        "/api/v1/billing/reservations",
+        headers=admin_headers,
+        json={"quoteId": quote.json()["quoteId"]},
+    )
+    assert reserved.status_code == 201, reserved.text
+    reservation_id = reserved.json()["items"][0]["id"]
+    assert reserved.json()["items"][0]["reservedPoints"] == 0
+
+    from sqlalchemy import func, select
+
+    from app.modules.billing.models import (
+        CreditLedger,
+        CreditReservation,
+        QuotaAccount,
+        QuotaUsage,
+    )
+    from app.modules.billing.service import settle_reservation
+
+    async with SessionLocal() as db:
+        reservation = await db.get(CreditReservation, reservation_id)
+        assert reservation is not None and reservation.reserved_points == 0
+        assert await settle_reservation(db, reservation_id, "admin-task") == 1
+        account_count = await db.scalar(select(func.count(QuotaAccount.id)).where(QuotaAccount.user_id == admin_id))
+        ledger_count = await db.scalar(select(func.count(CreditLedger.id)).where(CreditLedger.user_id == admin_id))
+        usage_count = await db.scalar(select(func.count(QuotaUsage.id)).where(QuotaUsage.user_id == admin_id))
+
+    assert account_count == 0
+    assert ledger_count == 0
+    assert usage_count == 0
+
+
 async def test_same_quote_can_only_be_reserved_once_under_concurrency(client: AsyncClient):
     admin_headers = await _login(client, role="admin")
     user_headers = await _login(client, role="user")
@@ -1436,6 +1559,41 @@ async def test_provider_secrets_are_admin_only_masked_and_encrypted(client: Asyn
         ).scalar_one()
     assert stored != secret
     assert stored.startswith("enc:v1:")
+
+
+async def test_provider_settings_reject_invalid_dashscope_routing(client: AsyncClient):
+    admin_headers = await _login(client, role="admin")
+
+    invalid_settings = [
+        {"dashscope_region": "moon-base"},
+        {"dashscope_workspace_id": "workspace/invalid"},
+        {"asr_flash_threshold_sec": "0"},
+        {"asr_model": "fun asr"},
+        {"dashscope_enabled": "yes"},
+    ]
+    for settings in invalid_settings:
+        response = await client.put(
+            "/api/admin/v1/providers",
+            headers=admin_headers,
+            json={"settings": settings},
+        )
+        assert response.status_code == 400, settings
+
+    valid = await client.put(
+        "/api/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "settings": {
+                "dashscope_workspace_id": "workspace_123",
+                "dashscope_region": "ap-southeast-1",
+                "asr_model": "fun-asr",
+                "asr_flash_model": "fun-asr-flash-2026-06-15",
+                "asr_flash_threshold_sec": "180",
+                "dashscope_enabled": "true",
+            }
+        },
+    )
+    assert valid.status_code == 200, valid.text
 
 
 async def test_activation_batch_uses_published_sku_version(client: AsyncClient):

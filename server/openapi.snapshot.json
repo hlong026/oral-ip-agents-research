@@ -1362,6 +1362,49 @@
         ]
       }
     },
+    "/api/v1/content/jobs/parse": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Parse Job",
+        "operationId": "api_submit_parse_job_api_v1_content_jobs_parse_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_api_submit_parse_job_api_v1_content_jobs_parse_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/content/parse/json": {
       "post": {
         "tags": ["content"],
@@ -1450,6 +1493,94 @@
         ]
       }
     },
+    "/api/v1/content/jobs/rewrite": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Rewrite Job",
+        "operationId": "api_submit_rewrite_job_api_v1_content_jobs_rewrite_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RewriteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/content/rewrite/batch": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Batch Rewrite",
+        "operationId": "api_batch_rewrite_api_v1_content_rewrite_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchRewriteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchRewriteOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/v1/content/similarity": {
       "post": {
         "tags": ["content"],
@@ -1492,6 +1623,95 @@
             "HTTPBearer": []
           }
         ]
+      }
+    },
+    "/api/v1/content/jobs/similarity": {
+      "post": {
+        "tags": ["content"],
+        "summary": "Api Submit Similarity Job",
+        "operationId": "api_submit_similarity_job_api_v1_content_jobs_similarity_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimilarityIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/content/jobs/{job_id}": {
+      "get": {
+        "tags": ["content"],
+        "summary": "Api Content Job",
+        "operationId": "api_content_job_api_v1_content_jobs__job_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentJobOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/content/topics": {
@@ -2973,12 +3193,12 @@
         }
       }
     },
-    "/api/v1/webhooks/hifly": {
+    "/api/v1/webhooks/provider-callback": {
       "post": {
         "tags": ["webhook"],
-        "summary": "Webhook Hifly",
+        "summary": "Webhook Provider Callback",
         "description": "供应商任务完成回调统一入口\n按 type 分发：1=创作 2=数字人克隆 3=声音克隆\n幂等处理：event_id + task_id 双重去重\n安全：生产环境强制 HMAC-SHA256 验签",
-        "operationId": "webhook_hifly_api_v1_webhooks_hifly_post",
+        "operationId": "webhook_provider_callback_api_v1_webhooks_provider_callback_post",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4650,6 +4870,75 @@
         ]
       }
     },
+    "/api/admin/v1/providers/status": {
+      "get": {
+        "tags": ["admin-providers"],
+        "summary": "Get Provider Status Api",
+        "operationId": "get_provider_status_api_api_admin_v1_providers_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderStatusOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/v1/providers/{provider}/probe": {
+      "post": {
+        "tags": ["admin-providers"],
+        "summary": "Probe Provider Api",
+        "operationId": "probe_provider_api_api_admin_v1_providers__provider__probe_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/users": {
       "get": {
         "tags": ["admin"],
@@ -5161,6 +5450,43 @@
           }
         ]
       }
+    },
+    "/media/{key}": {
+      "get": {
+        "summary": "Media",
+        "operationId": "media_media__key__get",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5521,6 +5847,111 @@
         "title": "BatchGenerateOut",
         "description": "批量生成返回"
       },
+      "BatchRewriteIn": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "intensity": {
+            "type": "string",
+            "title": "Intensity",
+            "default": "structure"
+          },
+          "count": {
+            "type": "integer",
+            "maximum": 5,
+            "minimum": 2,
+            "title": "Count",
+            "default": 3
+          },
+          "prompt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt"
+          },
+          "scriptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scriptid"
+          },
+          "quoteId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quoteid"
+          }
+        },
+        "type": "object",
+        "required": ["text"],
+        "title": "BatchRewriteIn"
+      },
+      "BatchRewriteItemOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "similarity": {
+            "type": "number",
+            "title": "Similarity"
+          },
+          "strategy": {
+            "type": "string",
+            "title": "Strategy"
+          },
+          "providerName": {
+            "type": "string",
+            "title": "Providername"
+          }
+        },
+        "type": "object",
+        "required": ["text", "similarity", "strategy", "providerName"],
+        "title": "BatchRewriteItemOut"
+      },
+      "BatchRewriteOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchRewriteItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "structure": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Structure"
+          },
+          "outline": {
+            "type": "string",
+            "title": "Outline"
+          }
+        },
+        "type": "object",
+        "required": ["items", "structure", "outline"],
+        "title": "BatchRewriteOut"
+      },
       "Body_api_clone_api_v1_voices_clone_post": {
         "properties": {
           "name": {
@@ -5692,6 +6123,46 @@
         "type": "object",
         "title": "Body_api_parse_api_v1_content_parse_post"
       },
+      "Body_api_submit_parse_job_api_v1_content_jobs_parse_post": {
+        "properties": {
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "quoteId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quoteid"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "title": "Body_api_submit_parse_job_api_v1_content_jobs_parse_post"
+      },
       "CloneStatusOut": {
         "properties": {
           "id": {
@@ -5781,6 +6252,66 @@
         "type": "object",
         "title": "CodeStatsOut",
         "description": "码统计"
+      },
+      "ContentJobOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "progress": {
+            "type": "integer",
+            "title": "Progress"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "progress",
+          "stage",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ContentJobOut"
       },
       "ConversationOut": {
         "properties": {
@@ -7717,6 +8248,82 @@
         "type": "object",
         "required": ["durationSeconds"],
         "title": "ProbeUrlOut"
+      },
+      "ProviderProbeOut": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["verified", "failed", "incomplete", "needs_sample"],
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": ["provider", "status", "message"],
+        "title": "ProviderProbeOut"
+      },
+      "ProviderStatusItem": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "missingFields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missingfields"
+          },
+          "probeMode": {
+            "type": "string",
+            "enum": ["credential", "sample"],
+            "title": "Probemode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "enabled",
+          "configured",
+          "missingFields",
+          "probeMode"
+        ],
+        "title": "ProviderStatusItem"
+      },
+      "ProviderStatusOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderStatusItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": ["items"],
+        "title": "ProviderStatusOut"
       },
       "PublishCapabilityOut": {
         "properties": {

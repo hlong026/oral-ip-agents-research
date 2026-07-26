@@ -110,6 +110,7 @@ SCRIPT_GENERATION_USER = """\
 - 目标时长：{duration}秒（约{word_count}字）
 - CTA风格：{cta_style}
 - 禁忌词：{taboo_words}
+- 用户自定义要求：{extra_prompt}
 
 请直接输出口播全文："""
 

@@ -135,7 +135,7 @@ function TrainForm({ onDone }: { onDone: () => void }) {
     <div className="glass-strong space-y-3 p-5">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">训练一个新的数字分身</h2>
-        <span className="text-xs text-text-3">飞影 API · 约 2 小时</span>
+        <span className="text-xs text-text-3">安全训练 · 约 2 小时</span>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
@@ -355,9 +355,7 @@ export default function AvatarsPage() {
       <div className="glass p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-medium">公共形象库（{publics.length}）</h2>
-          <span className="text-xs text-text-3">
-            飞影公共库 · 点击卡片绑定到当前 IP
-          </span>
+          <span className="text-xs text-text-3">点击卡片绑定到当前 IP</span>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
           {publics.map((a) => (

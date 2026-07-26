@@ -60,6 +60,40 @@ class RewriteOut(BaseModel):
     validationPassed: bool = True  # 校验是否通过
 
 
+class ContentJobOut(BaseModel):
+    id: str
+    kind: str
+    status: str
+    progress: int
+    stage: str
+    result: dict | None = None
+    error: str = ""
+    createdAt: str
+    updatedAt: str
+
+
+class BatchRewriteIn(BaseModel):
+    text: str = Field(min_length=1, max_length=50_000)
+    intensity: str = "structure"
+    count: int = Field(default=3, ge=2, le=5)
+    prompt: str | None = Field(default=None, max_length=4_000)
+    scriptId: str | None = None
+    quoteId: str | None = None
+
+
+class BatchRewriteItemOut(BaseModel):
+    text: str
+    similarity: float
+    strategy: str
+    providerName: str
+
+
+class BatchRewriteOut(BaseModel):
+    items: list[BatchRewriteItemOut]
+    structure: dict
+    outline: str
+
+
 class SimilarityIn(BaseModel):
     text: str
     quoteId: str | None = None

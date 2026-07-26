@@ -67,10 +67,24 @@ export interface ProviderConfig {
   displayName: string;
   enabled: boolean;
   baseUrl: string;
+  appId?: string;
   model?: string;
-  priority?: number;
+  workspaceId?: string;
+  region?: string;
+  flashModel?: string;
+  flashThresholdSec?: number;
   apiKeyConfigured?: boolean;
   apiKey?: string;
+  configured?: boolean;
+  missingFields?: string[];
+  probeMode?: "credential" | "sample";
+}
+
+export interface ProviderProbeResult {
+  provider: string;
+  status: "verified" | "failed" | "incomplete" | "needs_sample";
+  message: string;
+  details: Record<string, unknown>;
 }
 
 export interface AdminUser {
@@ -142,6 +156,16 @@ interface ProviderSettingsResponse {
   settings: Record<string, string>;
 }
 
+interface ProviderStatusResponse {
+  items: Array<{
+    provider: string;
+    enabled: boolean;
+    configured: boolean;
+    missingFields: string[];
+    probeMode: "credential" | "sample";
+  }>;
+}
+
 const providerDefinitions = [
   {
     provider: "deepseek",
@@ -150,15 +174,17 @@ const providerDefinitions = [
     baseUrl: "deepseek_base_url",
     model: "deepseek_model",
     enabled: "deepseek_enabled",
-    priority: "deepseek_priority",
   },
   {
     provider: "dashscope_asr",
     displayName: "DashScope ASR",
     key: "dashscope_api_key",
+    workspaceId: "dashscope_workspace_id",
+    region: "dashscope_region",
     model: "asr_model",
+    flashModel: "asr_flash_model",
+    flashThresholdSec: "asr_flash_threshold_sec",
     enabled: "dashscope_enabled",
-    priority: "dashscope_priority",
     defaultBaseUrl: "https://dashscope.aliyuncs.com",
   },
   {
@@ -167,15 +193,14 @@ const providerDefinitions = [
     key: "feiying_api_key",
     baseUrl: "feiying_base_url",
     enabled: "feiying_enabled",
-    priority: "feiying_priority",
   },
   {
     provider: "douyidou",
     displayName: "Douyidou 视频解析",
+    appId: "douyidou_app_id",
     key: "douyidou_app_secret",
     baseUrl: "douyidou_base_url",
     enabled: "douyidou_enabled",
-    priority: "douyidou_priority",
   },
 ] as const;
 
@@ -184,7 +209,18 @@ function providerFromSettings(
   settings: Record<string, string>,
 ): ProviderConfig {
   const baseUrlKey = "baseUrl" in definition ? definition.baseUrl : undefined;
+  const appIdKey = "appId" in definition ? definition.appId : undefined;
   const modelKey = "model" in definition ? definition.model : undefined;
+  const workspaceIdKey =
+    "workspaceId" in definition ? definition.workspaceId : undefined;
+  const regionKey = "region" in definition ? definition.region : undefined;
+  const flashModelKey =
+    "flashModel" in definition ? definition.flashModel : undefined;
+  const flashThresholdSecKey =
+    "flashThresholdSec" in definition
+      ? definition.flashThresholdSec
+      : undefined;
+  const appId = (appIdKey && settings[appIdKey]) || "";
   return {
     provider: definition.provider,
     displayName: definition.displayName,
@@ -192,9 +228,17 @@ function providerFromSettings(
     baseUrl:
       (baseUrlKey && settings[baseUrlKey]) ||
       ("defaultBaseUrl" in definition ? definition.defaultBaseUrl : ""),
+    appId,
     model: (modelKey && settings[modelKey]) || "",
-    priority: Number(settings[definition.priority] || 0),
-    apiKeyConfigured: settings[definition.key] === "configured",
+    workspaceId: (workspaceIdKey && settings[workspaceIdKey]) || "",
+    region: (regionKey && settings[regionKey]) || "",
+    flashModel: (flashModelKey && settings[flashModelKey]) || "",
+    flashThresholdSec: Number(
+      (flashThresholdSecKey && settings[flashThresholdSecKey]) || 0,
+    ),
+    apiKeyConfigured:
+      settings[definition.key] === "configured" &&
+      (!appIdKey || Boolean(appId)),
   };
 }
 
@@ -343,10 +387,22 @@ export const adminApi = {
     }),
 
   async listProviders(): Promise<ProviderConfig[]> {
-    const response = await adminFetch<ProviderSettingsResponse>("/providers");
-    return providerDefinitions.map((definition) =>
-      providerFromSettings(definition, response.settings),
-    );
+    const [response, statusResponse] = await Promise.all([
+      adminFetch<ProviderSettingsResponse>("/providers"),
+      adminFetch<ProviderStatusResponse>("/providers/status"),
+    ]);
+    return providerDefinitions.map((definition) => {
+      const provider = providerFromSettings(definition, response.settings);
+      const status = statusResponse.items.find(
+        (item) => item.provider === definition.provider,
+      );
+      return {
+        ...provider,
+        configured: status?.configured ?? provider.apiKeyConfigured,
+        missingFields: status?.missingFields ?? [],
+        probeMode: status?.probeMode ?? "credential",
+      };
+    });
   },
   async saveProvider(
     provider: string,
@@ -358,13 +414,22 @@ export const adminApi = {
     if (!definition) throw new AdminApiError("未知 Provider", 400);
     const settings: Record<string, string> = {
       [definition.enabled]: String(body.enabled),
-      [definition.priority]: String(body.priority || 0),
     };
+    if ("appId" in definition && body.appId)
+      settings[definition.appId] = body.appId;
     if (body.apiKey) settings[definition.key] = body.apiKey;
     if ("baseUrl" in definition && body.baseUrl)
       settings[definition.baseUrl] = body.baseUrl;
     if ("model" in definition && body.model)
       settings[definition.model] = body.model;
+    if ("workspaceId" in definition)
+      settings[definition.workspaceId] = body.workspaceId || "";
+    if ("region" in definition && body.region)
+      settings[definition.region] = body.region;
+    if ("flashModel" in definition && body.flashModel)
+      settings[definition.flashModel] = body.flashModel;
+    if ("flashThresholdSec" in definition && body.flashThresholdSec)
+      settings[definition.flashThresholdSec] = String(body.flashThresholdSec);
     await adminFetch<ProviderSettingsResponse>("/providers", {
       method: "PUT",
       body: JSON.stringify({ settings }),
@@ -375,4 +440,8 @@ export const adminApi = {
       apiKeyConfigured: body.apiKeyConfigured || Boolean(body.apiKey),
     };
   },
+  probeProvider: (provider: string) =>
+    adminFetch<ProviderProbeResult>(`/providers/${provider}/probe`, {
+      method: "POST",
+    }),
 };

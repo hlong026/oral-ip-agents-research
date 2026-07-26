@@ -2,7 +2,7 @@
 真实 Provider 实现骨架
 - DeepSeek（LLM 主力，OpenAI 兼容协议）
 - 声音克隆 + 数字人已迁移到 hifly.py（HiFlyVoice / HiFlyAvatar）
-- 超时 30s + 重试 2 次（tenacity），失败抛 StepRecoverableError 触发降级链
+- 生成读取超时 90s + 重试 2 次（tenacity），失败抛 StepRecoverableError 触发降级链
 - 凭据从前端设置页动态读取（dynamic_config），保存即时生效无需重启
 """
 
@@ -29,7 +29,7 @@ from .base import (
 from .media_quality import inspect_media
 
 settings = get_settings()
-TIMEOUT = httpx.Timeout(30.0)
+TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
 
 
 class DeepSeekLLM:
@@ -39,7 +39,7 @@ class DeepSeekLLM:
 
     def __init__(self) -> None:
         self._client: httpx.AsyncClient | None = None
-        self._client_key: str = ""  # 用于检测凭据变更时重建 client
+        self._client_config: tuple[str, str] | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """动态获取 HTTP 客户端（凭据变更时自动重建）"""
@@ -47,8 +47,8 @@ class DeepSeekLLM:
         base_url = await get_config("deepseek_base_url", "https://api.deepseek.com/v1")
         if not api_key:
             raise StepRecoverableError("deepseek key 未配置，请在设置页填写")
-        # 凭据变更时重建 client
-        if self._client is None or self._client_key != api_key:
+        client_config = (api_key, base_url)
+        if self._client is None or self._client_config != client_config:
             if self._client:
                 await self._client.aclose()
             self._client = httpx.AsyncClient(
@@ -56,14 +56,14 @@ class DeepSeekLLM:
                 headers={"Authorization": f"Bearer {api_key}"},
                 timeout=TIMEOUT,
             )
-            self._client_key = api_key
+            self._client_config = client_config
         return self._client
 
     async def _get_model(self) -> str:
         return await get_config("deepseek_model", "deepseek-chat")
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8))
-    async def _chat(self, system: str, user: str) -> str:
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8), reraise=True)
+    async def _chat(self, system: str, user: str, temperature: float = 0.8) -> str:
         client = await self._get_client()
         model = await self._get_model()
         try:
@@ -75,7 +75,7 @@ class DeepSeekLLM:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
-                    "temperature": 0.8,
+                    "temperature": temperature,
                 },
             )
             resp.raise_for_status()
@@ -177,8 +177,34 @@ class DeepSeekLLM:
             word_count=word_count,
             cta_style=constraints.get("cta_style", "关注收藏"),
             taboo_words=constraints.get("taboo_words", "无"),
+            extra_prompt=constraints.get("extra_prompt", "") or "无",
         )
         return await self._chat(SCRIPT_GENERATION_SYSTEM, user)
+
+    async def generate_script_variant(
+        self,
+        outline: str,
+        persona_ctx: str,
+        constraints: dict,
+        temperature: float,
+        strategy: str,
+    ) -> str:
+        duration = constraints.get("duration", 60)
+        extra_prompt = constraints.get("extra_prompt", "")
+        user = (
+            f"人设：\n{persona_ctx or '保持自然、可信的中文口播表达'}\n\n"
+            f"大纲：\n{outline}\n\n"
+            f"本候选策略：{strategy}\n"
+            f"目标时长：{duration} 秒\n"
+            f"CTA 风格：{constraints.get('cta_style', '关注收藏')}\n"
+            f"禁忌词：{constraints.get('taboo_words', '无')}\n"
+            f"额外要求：{extra_prompt or '无'}"
+        )
+        return await self._chat(
+            "你是短视频口播文案专家。请严格沿用给定大纲，但按候选策略生成一篇完整且可直接拍摄的独立文案。",
+            user,
+            temperature=temperature,
+        )
 
     async def polish_light(self, text: str, persona_ctx: str) -> str:
         from app.modules.content.prompts import LIGHT_POLISH_SYSTEM, LIGHT_POLISH_USER

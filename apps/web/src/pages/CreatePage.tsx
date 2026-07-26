@@ -8,7 +8,7 @@ import {
   publishApi,
   voiceApi,
 } from "@oral/api-client";
-import { useIp } from "@oral/stores";
+import { useIp, useQuota } from "@oral/stores";
 import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
@@ -19,7 +19,7 @@ import {
   type RewriteIntensity,
 } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import LinkSourceInput from "../components/LinkSourceInput";
@@ -45,7 +45,10 @@ type StepKey = (typeof STEPS)[number]["key"];
 interface Wizard {
   sourceUrl: string;
   topic: string;
+  originalText: string;
+  rewrittenText: string;
   scriptText: string;
+  scriptId: string;
   similarity: number | null;
   voiceId: string;
   avatarId: string;
@@ -60,7 +63,10 @@ interface Wizard {
 const initialWizard: Wizard = {
   sourceUrl: "",
   topic: "",
+  originalText: "",
+  rewrittenText: "",
   scriptText: "",
+  scriptId: "",
   similarity: null,
   voiceId: "",
   avatarId: "",
@@ -71,6 +77,45 @@ const initialWizard: Wizard = {
   publishAt: "",
   title: "",
 };
+
+interface OperationProgress {
+  value: number;
+  label: string;
+  ariaLabel?: string;
+  hint?: string;
+}
+
+function OperationProgressPanel({ progress }: { progress: OperationProgress }) {
+  return (
+    <div
+      className="rounded-xl border border-brand-to/25 bg-brand-to/5 p-3"
+      aria-live="polite"
+    >
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span className="text-text-2">{progress.label}</span>
+        <span className="font-mono text-brand-to">{progress.value}%</span>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={progress.ariaLabel ?? "视频转写进度"}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress.value}
+        className="h-2 overflow-hidden rounded-full bg-white/10"
+      >
+        <div
+          className="h-full rounded-full bg-brand-grad transition-[width] duration-500"
+          style={{ width: `${progress.value}%` }}
+        />
+      </div>
+      {progress.value < 100 && (
+        <p className="mt-2 text-[11px] text-text-3">
+          {progress.hint ?? "页面可以保持打开，失败不会扣除积分。"}
+        </p>
+      )}
+    </div>
+  );
+}
 
 export function buildPricePreviewRequest(
   input: Pick<Wizard, "sourceUrl" | "topic" | "scriptText" | "count">,
@@ -127,26 +172,68 @@ function StepLink({
     wiz.topic ? "topic" : wiz.scriptText ? "script" : "url",
   );
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const [progress, setProgress] = useState<OperationProgress | null>(null);
+  const loadQuota = useQuota((state) => state.load);
+
+  const selectTab = (nextTab: "url" | "topic" | "script") => {
+    setTab(nextTab);
+    setWiz({
+      ...wiz,
+      sourceUrl: nextTab === "url" ? wiz.sourceUrl : "",
+      topic: nextTab === "topic" ? wiz.topic : "",
+      originalText: nextTab === "script" ? wiz.originalText : "",
+      rewrittenText: nextTab === "script" ? wiz.rewrittenText : "",
+      scriptText: nextTab === "script" ? wiz.scriptText : "",
+      scriptId: nextTab === "script" ? wiz.scriptId : "",
+    });
+  };
 
   const upload = async (file: File) => {
     setUploading(true);
+    setError("");
+    setProgress({ value: 8, label: "正在读取媒体信息" });
     try {
       const seconds = await mediaDurationSeconds(file);
+      setProgress({ value: 20, label: "正在获取本次转写报价" });
       const quoteId = await confirmMeteredOperation("asr", "上传转写", {
         seconds,
         assets: 1,
       });
-      if (!quoteId) return;
-      const res = await contentApi.parse(undefined, file, quoteId);
-      if (res.transcript)
+      const res = await contentApi.parse(undefined, file, quoteId, (job) =>
+        setProgress({
+          value: job.progress,
+          label: job.stage,
+          ariaLabel: "视频转写真实进度",
+        }),
+      );
+      if (res.transcript) {
         setWiz({
           ...wiz,
+          originalText: res.transcript.text,
+          rewrittenText: "",
           scriptText: res.transcript.text,
+          scriptId: res.scriptId ?? "",
           sourceUrl: "",
           topic: "",
         });
+        setProgress({ value: 100, label: "转写完成，文案已提取" });
+      } else {
+        setProgress(null);
+        setError("未提取到文案，请检查文件是否包含清晰音轨");
+      }
+    } catch (e) {
+      setProgress(null);
+      setError(
+        e instanceof HttpError
+          ? e.body.message
+          : e instanceof Error
+            ? e.message
+            : "视频转写失败，请稍后重试",
+      );
     } finally {
       setUploading(false);
+      void loadQuota();
     }
   };
 
@@ -162,7 +249,7 @@ function StepLink({
         ).map(([k, label]) => (
           <button
             key={k}
-            onClick={() => setTab(k)}
+            onClick={() => selectTab(k)}
             className={`rounded-lg py-2 text-sm transition-colors ${tab === k ? "bg-brand-grad text-white" : "text-text-3 hover:text-text-1"}`}
           >
             {label}
@@ -175,7 +262,15 @@ function StepLink({
           <LinkSourceInput
             value={wiz.sourceUrl}
             onChange={(v) =>
-              setWiz({ ...wiz, sourceUrl: v, topic: "", scriptText: "" })
+              setWiz({
+                ...wiz,
+                sourceUrl: v,
+                topic: "",
+                originalText: "",
+                rewrittenText: "",
+                scriptText: "",
+                scriptId: "",
+              })
             }
             onUpload={(f) => void upload(f)}
             uploading={uploading}
@@ -185,6 +280,12 @@ function StepLink({
               ? "解析上传中…"
               : "粘贴链接直接解析，或点输入框左侧图标上传本地视频/音频（视频号、解析失败时降级转写）"}
           </p>
+          {progress && <OperationProgressPanel progress={progress} />}
+          {error && (
+            <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {error}
+            </div>
+          )}
         </div>
       )}
 
@@ -200,7 +301,10 @@ function StepLink({
                 ...wiz,
                 topic: e.target.value,
                 sourceUrl: "",
+                originalText: "",
+                rewrittenText: "",
                 scriptText: "",
+                scriptId: "",
               })
             }
           />
@@ -217,7 +321,10 @@ function StepLink({
             onChange={(e) =>
               setWiz({
                 ...wiz,
+                originalText: e.target.value,
+                rewrittenText: "",
                 scriptText: e.target.value,
+                scriptId: "",
                 sourceUrl: "",
                 topic: "",
               })
@@ -239,26 +346,39 @@ function StepScript({
   setWiz: (w: Wizard) => void;
 }) {
   const [loading, setLoading] = useState(false);
+  const [operation, setOperation] = useState<
+    "initial" | "rewrite" | "similarity" | null
+  >(null);
   const [error, setError] = useState("");
   const [degraded, setDegraded] = useState(false);
   const [intensity, setIntensity] = useState<RewriteIntensity>("structure");
+  const [customPrompt, setCustomPrompt] = useState("");
   const [structure, setStructure] = useState<Record<string, unknown> | null>(
     null,
   );
   const [outline, setOutline] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [progress, setProgress] = useState<OperationProgress | null>(null);
+  const startedInitialGeneration = useRef(false);
+  const loadQuota = useQuota((state) => state.load);
+  const currentIp = useIp((state) => state.current);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
     if (wiz.scriptText || (!wiz.sourceUrl && !wiz.topic)) return;
+    if (startedInitialGeneration.current) return;
+    startedInitialGeneration.current = true;
     setLoading(true);
+    setOperation("initial");
     setError("");
     setDegraded(false);
     const run = async () => {
       try {
         if (wiz.sourceUrl) {
+          setProgress({ value: 10, label: "正在解析视频链接" });
           const durationSeconds = (await contentApi.probe(wiz.sourceUrl))
             .durationSeconds;
+          setProgress({ value: 22, label: "正在获取本次转写报价" });
           const parseQuoteId = await confirmMeteredOperation(
             "asr",
             "链接转写",
@@ -267,38 +387,34 @@ function StepScript({
               assets: 1,
             },
           );
-          if (!parseQuoteId) return;
+          setProgress({ value: 50, label: "正在提取视频文案" });
           const res = await contentApi.parse(
             wiz.sourceUrl,
             undefined,
             parseQuoteId,
+            (job) =>
+              setProgress({
+                value: job.progress,
+                label: job.stage,
+                ariaLabel: "视频转写真实进度",
+              }),
           );
           if (res.degraded) setDegraded(true);
           const text = res.transcript?.text ?? "";
           if (!text) {
             setError("未提取到文案，请检查链接是否有效，或尝试上传本地视频");
+            setProgress(null);
             return;
           }
-          const rewriteQuoteId = await confirmMeteredOperation(
-            "script_generation",
-            "生成仿写文案",
-            textOperationUsage(text),
-          );
-          if (!rewriteQuoteId) return;
-          const rw = await contentApi.rewrite(
-            text,
-            "structure",
-            undefined,
-            undefined,
-            rewriteQuoteId,
-          );
           setWiz({
             ...wiz,
-            scriptText: rw.text,
-            similarity: rw.similarity ?? null,
+            originalText: text,
+            rewrittenText: "",
+            scriptText: text,
+            scriptId: res.scriptId ?? "",
+            similarity: null,
           });
-          if (rw.structure) setStructure(rw.structure);
-          if (rw.outline) setOutline(rw.outline);
+          setProgress({ value: 100, label: "完整原文提取完成" });
         } else {
           const prompt = `请围绕选题「${wiz.topic}」生成 60 秒口播文案`;
           const quoteId = await confirmMeteredOperation(
@@ -306,16 +422,23 @@ function StepScript({
             "生成口播文案",
             textOperationUsage(prompt),
           );
-          if (!quoteId) return;
           const rw = await contentApi.rewrite(
             prompt,
             "theme",
             undefined,
             undefined,
             quoteId,
+            (job) =>
+              setProgress({
+                value: job.progress,
+                label: job.stage,
+                ariaLabel: "文案生成真实进度",
+              }),
           );
           setWiz({
             ...wiz,
+            originalText: rw.text,
+            rewrittenText: "",
             scriptText: rw.text,
             similarity: rw.similarity ?? null,
           });
@@ -323,6 +446,7 @@ function StepScript({
           if (rw.outline) setOutline(rw.outline);
         }
       } catch (e) {
+        setProgress(null);
         setError(
           e instanceof HttpError
             ? e.body.message
@@ -330,6 +454,8 @@ function StepScript({
         );
       } finally {
         setLoading(false);
+        setOperation(null);
+        void loadQuota();
       }
     };
     void run();
@@ -338,34 +464,67 @@ function StepScript({
 
   const rewrite = async () => {
     setLoading(true);
+    setOperation("rewrite");
+    setError("");
     try {
+      const requirement = customPrompt.trim();
+      const sourceText = wiz.originalText || wiz.scriptText;
       const quoteId = await confirmMeteredOperation(
         "script_generation",
         "仿写文案",
-        textOperationUsage(wiz.scriptText),
+        textOperationUsage(
+          requirement ? `${sourceText}\n${requirement}` : sourceText,
+        ),
       );
-      if (!quoteId) return;
+      if (!quoteId) {
+        setProgress(null);
+        return;
+      }
       const rw = await contentApi.rewrite(
-        wiz.scriptText,
+        sourceText,
         intensity,
-        undefined,
-        undefined,
+        requirement || undefined,
+        wiz.scriptId || undefined,
         quoteId,
+        (job) =>
+          setProgress({
+            value: job.progress,
+            label: job.stage,
+            ariaLabel: "IP 改写真实进度",
+            hint: "结构分析、IP 大纲、完整改写与质量校验均在后台执行。",
+          }),
       );
       setWiz({
         ...wiz,
+        originalText: sourceText,
+        rewrittenText: rw.text,
         scriptText: rw.text,
         similarity: rw.similarity ?? null,
       });
       if (rw.structure) setStructure(rw.structure);
       if (rw.outline) setOutline(rw.outline);
+      setProgress({
+        value: 100,
+        label: "IP 改写完成",
+        ariaLabel: "IP 改写真实进度",
+      });
+    } catch (e) {
+      setProgress(null);
+      setError(
+        e instanceof HttpError
+          ? e.body.message
+          : "文案改写失败，请检查配置后重试",
+      );
     } finally {
       setLoading(false);
+      setOperation(null);
+      void loadQuota();
     }
   };
 
   const checkSim = async () => {
     setLoading(true);
+    setOperation("similarity");
     try {
       const quoteId = await confirmMeteredOperation(
         "script_generation",
@@ -373,10 +532,22 @@ function StepScript({
         textOperationUsage(wiz.scriptText),
       );
       if (!quoteId) return;
-      const sim = await contentApi.similarity(wiz.scriptText, quoteId);
+      const sim = await contentApi.similarity(wiz.scriptText, quoteId, (job) =>
+        setProgress({
+          value: job.progress,
+          label: job.stage,
+          ariaLabel: "文案分析真实进度",
+        }),
+      );
       setWiz({ ...wiz, similarity: sim.score });
+      setProgress({
+        value: 100,
+        label: "文案分析完成",
+        ariaLabel: "文案分析真实进度",
+      });
     } finally {
       setLoading(false);
+      setOperation(null);
     }
   };
 
@@ -411,13 +582,6 @@ function StepScript({
         ))}
         <div className="flex-1" />
         <button
-          onClick={rewrite}
-          disabled={loading || !wiz.scriptText}
-          className="btn-ghost px-3 py-1 text-xs"
-        >
-          一键再改写
-        </button>
-        <button
           onClick={checkSim}
           disabled={loading || !wiz.scriptText}
           className="btn-ghost px-3 py-1 text-xs"
@@ -436,6 +600,7 @@ function StepScript({
           {error}
         </div>
       )}
+      {progress && <OperationProgressPanel progress={progress} />}
       {degraded && !error && (
         <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
           ⚠️
@@ -496,16 +661,75 @@ function StepScript({
         </div>
       )}
 
-      <textarea
-        className="input min-h-64 resize-y font-normal leading-relaxed"
-        placeholder={loading ? "AI 正在生成文案…" : "口播文案"}
-        value={wiz.scriptText}
-        onChange={(e) => setWiz({ ...wiz, scriptText: e.target.value })}
-        disabled={loading && !wiz.scriptText}
-      />
+      <div>
+        <label className="label">提取原文（保留，可编辑）</label>
+        <textarea
+          aria-label="提取原文"
+          className="input min-h-64 resize-y font-normal leading-relaxed"
+          placeholder={loading ? "AI 正在生成文案…" : "口播文案"}
+          value={wiz.originalText || wiz.scriptText}
+          onChange={(e) => {
+            const originalText = e.target.value;
+            setWiz({
+              ...wiz,
+              originalText,
+              scriptText: wiz.rewrittenText ? wiz.scriptText : originalText,
+            });
+          }}
+          disabled={loading && !wiz.originalText && !wiz.scriptText}
+        />
+      </div>
+      {wiz.rewrittenText && (
+        <div className="rounded-xl border border-brand-to/30 bg-brand-to/5 p-3">
+          <label className="label">IP 改写结果（后续成片使用）</label>
+          <textarea
+            aria-label="IP 改写结果"
+            className="input min-h-64 resize-y font-normal leading-relaxed"
+            value={wiz.rewrittenText}
+            onChange={(event) =>
+              setWiz({
+                ...wiz,
+                rewrittenText: event.target.value,
+                scriptText: event.target.value,
+              })
+            }
+          />
+        </div>
+      )}
       <div className="text-right text-xs text-text-3">
         {wiz.scriptText.length} 字 · 约{" "}
         {Math.ceil(wiz.scriptText.length * 0.28)} 秒
+      </div>
+
+      <div className="rounded-xl border border-stroke bg-white/[0.02] p-3">
+        <div className="mb-2 text-xs text-text-2">
+          当前 IP：
+          <span className="font-medium text-text-1">
+            {currentIp?.name ?? "未选择（将使用通用风格）"}
+          </span>
+        </div>
+        <label className="label">自定义改写要求（可选）</label>
+        <textarea
+          className="input min-h-20 resize-y"
+          placeholder="补充改写要求，如：保留案例，语气更克制"
+          value={customPrompt}
+          onChange={(event) => setCustomPrompt(event.target.value)}
+        />
+        <button
+          onClick={rewrite}
+          disabled={loading || !wiz.scriptText}
+          className="btn-primary mt-3 w-full"
+        >
+          {operation === "initial"
+            ? wiz.sourceUrl
+              ? "等待原文提取完成"
+              : "等待初稿生成完成"
+            : operation === "rewrite"
+              ? "正在按 IP 改写…"
+              : operation === "similarity"
+                ? "等待去重检测完成"
+                : "按当前 IP 改写"}
+        </button>
       </div>
     </div>
   );
@@ -671,8 +895,8 @@ function StepCompose({
       </div>
 
       <div className="rounded-xl border border-stroke bg-white/[0.02] p-4 text-xs text-text-3">
-        合成内核：FFmpeg 云端 Worker · 字幕双模式（TTS 字级时间戳优先，ASR
-        校准兜底）· BGM 自动闪避 · 1080p
+        云端智能合成 · 字幕双模式（语音时间戳优先，自动校准兜底）·
+        背景音乐自动闪避 · 1080p
       </div>
     </div>
   );
@@ -816,7 +1040,10 @@ export default function CreatePage() {
       void contentApi.script(scriptId).then((s) => {
         setWiz((w) => ({
           ...w,
+          originalText: s.originalText,
+          rewrittenText: s.rewrittenText || "",
           scriptText: s.rewrittenText || s.originalText,
+          scriptId: s.id,
         }));
       });
       return;

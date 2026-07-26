@@ -222,7 +222,6 @@ export interface Voice {
   id: string;
   name: string;
   source: "clone" | "builtin";
-  provider: string;
   gender: string;
   emotion: string;
   sampleUrl?: string | null;
@@ -235,7 +234,6 @@ export interface Avatar {
   id: string;
   name: string;
   source: "clone" | "public";
-  provider: string;
   style?: string;
   coverUrl?: string | null;
   previewUrl?: string | null;
@@ -281,6 +279,29 @@ export interface RewriteResult {
   outline?: string | null;
   similarity?: number | null;
   validationPassed: boolean;
+}
+
+export interface BatchRewriteResult {
+  items: {
+    text: string;
+    similarity: number;
+    strategy: string;
+    providerName: string;
+  }[];
+  structure: Record<string, unknown>;
+  outline: string;
+}
+
+export interface ContentJob<TResult = Record<string, unknown>> {
+  id: string;
+  kind: "parse_url" | "parse_upload" | "rewrite" | "similarity";
+  status: "pending" | "running" | "done" | "failed";
+  progress: number;
+  stage: string;
+  result?: TResult | null;
+  error: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** 文案资产（文案工坊） */

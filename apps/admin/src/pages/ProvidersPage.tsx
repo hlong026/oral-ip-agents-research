@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { adminApi, type ProviderConfig } from "../lib/adminHttp";
+import {
+  adminApi,
+  type ProviderConfig,
+  type ProviderProbeResult,
+} from "../lib/adminHttp";
 
 const fallbackProviders: ProviderConfig[] = [
   {
@@ -9,7 +13,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
-    priority: 10,
   },
   {
     provider: "dashscope_asr",
@@ -17,7 +20,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://dashscope.aliyuncs.com",
     model: "fun-asr",
-    priority: 20,
   },
   {
     provider: "hifly",
@@ -25,7 +27,6 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://hfw-api.hifly.cc",
     model: "",
-    priority: 30,
   },
   {
     provider: "douyidou",
@@ -33,9 +34,15 @@ const fallbackProviders: ProviderConfig[] = [
     enabled: false,
     baseUrl: "https://gateway.diadi.cn",
     model: "",
-    priority: 40,
   },
 ];
+
+type ProbeFeedback = {
+  providerName: string;
+  title: string;
+  message: string;
+  tone: "success" | "warning" | "error";
+};
 
 export default function ProvidersPage() {
   const queryClient = useQueryClient();
@@ -45,6 +52,9 @@ export default function ProvidersPage() {
   });
   const [items, setItems] = useState(fallbackProviders);
   const [message, setMessage] = useState("");
+  const [probeFeedback, setProbeFeedback] = useState<ProbeFeedback | null>(
+    null,
+  );
 
   useEffect(() => {
     if (data && data.length > 0) setItems(data);
@@ -58,6 +68,32 @@ export default function ProvidersPage() {
       await queryClient.invalidateQueries({ queryKey: ["admin-providers"] });
     },
   });
+  const probe = useMutation({
+    mutationFn: adminApi.probeProvider,
+    onSuccess: (result) => {
+      const providerName =
+        items.find((item) => item.provider === result.provider)?.displayName ||
+        result.provider;
+      const presentation = probePresentation(result);
+      setProbeFeedback({
+        providerName,
+        message: result.message,
+        ...presentation,
+      });
+    },
+    onError: (probeError, provider) => {
+      const providerName =
+        items.find((item) => item.provider === provider)?.displayName ||
+        provider;
+      setProbeFeedback({
+        providerName,
+        title: "连接测试失败",
+        message:
+          probeError instanceof Error ? probeError.message : "连接测试失败",
+        tone: "error",
+      });
+    },
+  });
 
   function update(index: number, patch: Partial<ProviderConfig>) {
     setItems((providers) =>
@@ -69,10 +105,16 @@ export default function ProvidersPage() {
 
   return (
     <div className="space-y-5">
+      {probeFeedback && (
+        <ProbeToast
+          feedback={probeFeedback}
+          onClose={() => setProbeFeedback(null)}
+        />
+      )}
       <div>
         <h1 className="text-2xl font-semibold">Provider 配置</h1>
         <p className="mt-2 text-sm text-text-3">
-          密钥由管理员维护；用户端只消费业务能力，不接触供应商凭据。
+          密钥会加密保存在本地数据库；用户端只消费业务能力，不接触供应商凭据。
         </p>
       </div>
       {isLoading && <p className="text-sm text-text-3">加载中...</p>}
@@ -93,8 +135,14 @@ export default function ProvidersPage() {
                 <h2 className="font-semibold">{provider.displayName}</h2>
                 <p className="mt-1 text-xs text-text-3">{provider.provider}</p>
                 <span className="chip mt-2">
-                  {provider.apiKeyConfigured ? "密钥已配置" : "密钥未配置"}
+                  {provider.configured ? "配置完整" : "配置不完整"}
                 </span>
+                {provider.missingFields &&
+                  provider.missingFields.length > 0 && (
+                    <p className="mt-2 text-xs text-warning">
+                      缺少：{provider.missingFields.join("、")}
+                    </p>
+                  )}
               </div>
               <label className="flex items-center gap-2 text-sm text-text-2">
                 <input
@@ -107,37 +155,74 @@ export default function ProvidersPage() {
                 启用
               </label>
             </div>
-            <Field
-              label="Base URL"
-              value={provider.baseUrl}
-              onChange={(baseUrl) => update(index, { baseUrl })}
-            />
-            <Field
-              label="模型"
-              value={provider.model || ""}
-              onChange={(model) => update(index, { model })}
-            />
-            <Field
+            {provider.provider !== "dashscope_asr" && (
+              <Field
+                label="Base URL"
+                value={provider.baseUrl}
+                onChange={(baseUrl) => update(index, { baseUrl })}
+              />
+            )}
+            {provider.provider === "douyidou" && (
+              <Field
+                label="App ID"
+                value={provider.appId || ""}
+                onChange={(appId) => update(index, { appId })}
+              />
+            )}
+            {provider.provider === "deepseek" && (
+              <Field
+                label="模型"
+                value={provider.model || ""}
+                onChange={(model) => update(index, { model })}
+              />
+            )}
+            <SecretField
               label={
-                provider.apiKeyConfigured
-                  ? "API Key（已配置，留空不覆盖）"
-                  : "API Key"
+                provider.provider === "douyidou" ? "App Secret" : "API Key"
               }
-              type="password"
               value={provider.apiKey || ""}
+              configured={Boolean(provider.apiKeyConfigured)}
               onChange={(apiKey) => update(index, { apiKey })}
             />
-            <label className="block">
-              <span className="label">优先级</span>
-              <input
-                className="input"
-                type="number"
-                value={provider.priority || 0}
-                onChange={(event) =>
-                  update(index, { priority: Number(event.target.value) })
-                }
-              />
-            </label>
+            {provider.provider === "dashscope_asr" && (
+              <>
+                <Field
+                  label="Workspace ID（可选）"
+                  value={provider.workspaceId || ""}
+                  onChange={(workspaceId) => update(index, { workspaceId })}
+                />
+                <SelectField
+                  label="地域"
+                  value={provider.region || "cn-beijing"}
+                  options={[
+                    { value: "cn-beijing", label: "中国内地（北京）" },
+                    {
+                      value: "ap-southeast-1",
+                      label: "国际（新加坡）",
+                    },
+                  ]}
+                  onChange={(region) => update(index, { region })}
+                />
+                <Field
+                  label="异步模型"
+                  value={provider.model || ""}
+                  onChange={(model) => update(index, { model })}
+                />
+                <Field
+                  label="短音频同步模型"
+                  value={provider.flashModel || ""}
+                  onChange={(flashModel) => update(index, { flashModel })}
+                />
+                <Field
+                  label="同步分流阈值（秒）"
+                  type="number"
+                  value={String(provider.flashThresholdSec || 300)}
+                  onChange={(value) =>
+                    update(index, { flashThresholdSec: Number(value) })
+                  }
+                />
+              </>
+            )}
             <button
               className="btn-primary"
               disabled={save.isPending}
@@ -145,9 +230,130 @@ export default function ProvidersPage() {
             >
               保存配置
             </button>
+            <button
+              className="btn-ghost ml-2"
+              disabled={
+                probe.isPending && probe.variables === provider.provider
+              }
+              onClick={() => probe.mutate(provider.provider)}
+            >
+              {probe.isPending && probe.variables === provider.provider
+                ? "测试中..."
+                : provider.probeMode === "sample"
+                  ? "检查配置"
+                  : "测试连接"}
+            </button>
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+function probePresentation(
+  result: ProviderProbeResult,
+): Pick<ProbeFeedback, "title" | "tone"> {
+  if (result.status === "verified") {
+    return { title: "连接测试成功", tone: "success" };
+  }
+  if (result.status === "needs_sample") {
+    return { title: "需要真实样例", tone: "warning" };
+  }
+  if (result.status === "incomplete") {
+    return { title: "配置不完整", tone: "warning" };
+  }
+  return { title: "连接测试失败", tone: "error" };
+}
+
+function ProbeToast({
+  feedback,
+  onClose,
+}: {
+  feedback: ProbeFeedback;
+  onClose: () => void;
+}) {
+  const toneClass =
+    feedback.tone === "success"
+      ? "border-success/50 bg-success/10"
+      : feedback.tone === "warning"
+        ? "border-warning/50 bg-warning/10"
+        : "border-danger/50 bg-danger/10";
+  const icon =
+    feedback.tone === "success" ? "✓" : feedback.tone === "warning" ? "!" : "×";
+
+  return (
+    <div
+      role={feedback.tone === "error" ? "alert" : "status"}
+      aria-label={`${feedback.providerName}${feedback.title}`}
+      className={`fixed right-6 top-6 z-50 w-[min(26rem,calc(100vw-3rem))] rounded-2xl border p-4 shadow-2xl backdrop-blur-xl ${toneClass}`}
+    >
+      <div className="flex items-start gap-3">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-current text-lg font-semibold">
+          {icon}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-semibold">
+            {feedback.providerName} · {feedback.title}
+          </p>
+          <p className="mt-1 text-sm text-text-2">{feedback.message}</p>
+        </div>
+        <button
+          type="button"
+          aria-label="关闭连接测试提示"
+          className="text-xl leading-none text-text-3 hover:text-text-1"
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SecretField({
+  label,
+  value,
+  configured,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  configured: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const accessibleLabel = configured
+    ? `${label}（已保存，输入新密钥可替换）`
+    : label;
+
+  return (
+    <div>
+      <label className="block">
+        <span className="label">{accessibleLabel}</span>
+        <div className="flex gap-2">
+          <input
+            className="input"
+            type={revealed ? "text" : "password"}
+            value={value}
+            placeholder={configured ? "••••••••••••••••" : undefined}
+            autoComplete="new-password"
+            onChange={(event) => onChange(event.target.value)}
+          />
+          <button
+            type="button"
+            className="btn-ghost shrink-0"
+            disabled={!value}
+            onClick={() => setRevealed((current) => !current)}
+          >
+            {revealed ? "隐藏密钥" : "显示密钥"}
+          </button>
+        </div>
+      </label>
+      {configured && !value && (
+        <p className="mt-2 text-xs text-success">
+          密钥已安全保存，服务端不会回传明文。
+        </p>
+      )}
     </div>
   );
 }
@@ -172,6 +378,35 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
+    </label>
+  );
+}
+
+function SelectField({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="label">{label}</span>
+      <select
+        className="input"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

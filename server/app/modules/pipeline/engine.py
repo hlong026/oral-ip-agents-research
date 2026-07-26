@@ -17,6 +17,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
 from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
+from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.base import ComposeInput
 from app.providers.registry import registry
@@ -576,29 +577,27 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
 
                             await release_reservation(db, task.reservation_id, task.user_id)
                         step_ms = int((time.perf_counter() - step_start) * 1000)
+                        safe_error = public_error_message(e)
                         st.update(
                             {
                                 "status": "failed",
-                                "message": str(e)[:300],
+                                "message": safe_error,
                                 "durationMs": step_ms,
                                 "finishedAt": _now(),
                             }
                         )
                         task.status = "failed"
-                        task.error = f"{step_name}: {e}"[:500]
+                        task.error = safe_error
                         _dump_steps(task, steps)
                         await repo_save(db, task)
                         await _emit(task)
-                        await _feed(task.user_id, "err", f"「{task.title}」{step_name} 步失败：{str(e)[:60]}")
+                        await _feed(task.user_id, "err", f"「{task.title}」{step_name} 步失败：{safe_error}")
                         await notify_user(
                             db,
                             task.user_id,
                             "error",
                             f"任务失败：{task.title}",
-                            (
-                                f"步骤={step_name}；供应商={st.get('provider') or '未确定'}；"
-                                f"耗时={step_ms}ms；错误={str(e)[:160]}；可重新报价后从该步骤重试。"
-                            ),
+                            (f"步骤={step_name}；耗时={step_ms}ms；{safe_error}；可重新报价后从该步骤重试。"),
                         )
                         # 任务最终失败：记录 ERROR
                         logger.error(

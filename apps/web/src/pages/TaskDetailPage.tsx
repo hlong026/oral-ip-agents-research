@@ -104,9 +104,6 @@ function StepNode({
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{STEP_LABELS[step.step]}</span>
           <span className="chip text-[11px]">{step.status}</span>
-          {step.provider && (
-            <span className="chip text-[11px]">{step.provider}</span>
-          )}
           {(step.quotaCost ?? 0) > 0 && (
             <span className="chip text-[11px]">{step.quotaCost} 点</span>
           )}

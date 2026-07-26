@@ -34,7 +34,6 @@ const voice = (id: string, name: string, status: string, demoUrl: string) => ({
   id,
   name,
   source: "clone" as const,
-  provider: "",
   gender: "unknown",
   emotion: "neutral",
   sampleUrl: null,
