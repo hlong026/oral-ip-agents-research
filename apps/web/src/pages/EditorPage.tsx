@@ -94,10 +94,19 @@ export default function EditorPage() {
     detail?.status === "running" ||
     detail?.status === "waiting_confirm";
 
-  const videoKey = detail?.steps.find((s) => s.step === "compose")?.artifacts
-    ?.final_video_key;
+  // 任务级 artifacts 为全量产物；步骤级 artifacts 服务端截断至 200 字，仅供展示归因
+  const detailArt = (key: string) => {
+    const v = detail?.artifacts?.[key];
+    return typeof v === "string" && v ? v : undefined;
+  };
+  const videoKey =
+    detailArt("final_video_key") ??
+    detail?.steps.find((s) => s.step === "compose")?.artifacts
+      ?.final_video_key;
   const script =
-    detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ?? "";
+    detailArt("script") ??
+    detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ??
+    "";
   const subtitleLines = useMemo(
     () =>
       script

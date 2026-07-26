@@ -277,11 +277,18 @@ export default function TaskDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["task", id] });
   };
 
+  // 任务级 artifacts 为全量产物；步骤级 artifacts 服务端截断至 200 字，仅供展示归因
+  const art = (key: string) => {
+    const v = task.artifacts?.[key];
+    return typeof v === "string" && v ? v : undefined;
+  };
   const composeStep = task.steps.find((s) => s.step === "compose");
-  const finalVideo = composeStep?.artifacts?.final_video_key;
-  const coverKey = composeStep?.artifacts?.cover_key;
-  const script = task.steps.find((s) => s.step === "rewrite")?.artifacts
-    ?.script;
+  const finalVideo =
+    art("final_video_key") ?? composeStep?.artifacts?.final_video_key;
+  const coverKey = art("cover_key") ?? composeStep?.artifacts?.cover_key;
+  const script =
+    art("script") ??
+    task.steps.find((s) => s.step === "rewrite")?.artifacts?.script;
 
   // 总体进度：skipped 不计入分母，运行中步骤按自身百分比折算
   const activeSteps = task.steps.filter((s) => s.status !== "skipped");
