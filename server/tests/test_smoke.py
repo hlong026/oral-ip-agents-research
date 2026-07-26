@@ -120,7 +120,7 @@ async def test_auth_and_quota_flow(client: AsyncClient):
 async def test_login_invalid_code_rejected(client: AsyncClient):
     r = await client.post(
         "/api/v1/auth/login",
-        json={"code": "ORAL-AAAA-BBBB-CCCC-DDDD-EEEE", "deviceFingerprint": "fp.x"},
+        json={"code": "ORAL-AAAA-BBBB-CCCC-DDDD-EEEE", "deviceFingerprint": "fp-smoke.abcd1234"},
     )
     assert r.status_code == 400
     assert r.json()["detail"]["code"] == "INVALID_CODE"

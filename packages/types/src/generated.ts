@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-26T02:28:27.315Z
+ * API 版本：1.0.0 · 生成时间：2026-07-26T13:02:38.776Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -135,7 +135,7 @@ export interface CodeInfoOut {
 
 export interface CodeLoginIn {
   code: string;
-  deviceFingerprint?: string;
+  deviceFingerprint: string;
 }
 
 export interface CodeStatsOut {

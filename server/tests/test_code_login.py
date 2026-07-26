@@ -1,4 +1,4 @@
-"""激活码登录链路契约测试：开户 / 重复登录 / 设备绑定 / 到期拦截 / 解绑重绑 / 刷新指纹。"""
+"""激活码登录链路契约测试：开户 / 重复登录 / 设备绑定 / 到期拦截 / 解绑重绑 / 刷新指纹 / 指纹漂移。"""
 
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -87,6 +87,32 @@ async def test_login_rejected_when_device_fingerprint_mismatches(client: AsyncCl
     assert r.status_code == 403, r.text
     assert r.json()["detail"]["code"] == "DEVICE_MISMATCH"
     await reset_rate_limits()
+
+
+async def test_login_tolerates_feature_hash_drift_on_same_device(client: AsyncClient):
+    """uuid 段一致、featureHash 漂移（浏览器升级等）：登录与刷新均不应被锁，并重绑最新指纹。"""
+    code = await create_unused_code()
+    device = f"fp-{uuid.uuid4().hex[:12]}"
+    first = await code_login(client, code, fingerprint=f"{device}.hash-old")
+    drifted = await code_login(client, code, fingerprint=f"{device}.hash-new")
+    assert _user_id(first) == _user_id(drifted)
+
+    refreshed = await client.post(
+        "/api/v1/auth/refresh",
+        json={"refreshToken": drifted["refreshToken"], "deviceFingerprint": f"{device}.hash-newer"},
+    )
+    assert refreshed.status_code == 200, refreshed.text
+
+
+async def test_login_rejects_blank_or_short_fingerprint(client: AsyncClient):
+    """空/过短指纹直接 422：禁止绕过设备绑定防线。"""
+    code = await create_unused_code()
+    for bad in ("", "short"):
+        r = await client.post(
+            "/api/v1/auth/login",
+            json={"code": code, "deviceFingerprint": bad},
+        )
+        assert r.status_code == 422, r.text
 
 
 async def test_expired_or_revoked_code_cannot_login(client: AsyncClient):

@@ -7,7 +7,8 @@ class CodeLoginIn(BaseModel):
     """用户端激活码登录"""
 
     code: str = Field(min_length=10, max_length=40)
-    deviceFingerprint: str = Field(default="", max_length=128)
+    # 必填且有最短长度：禁止空指纹绕过设备绑定（防拷贝防线）
+    deviceFingerprint: str = Field(min_length=8, max_length=128)
 
 
 class AdminLoginIn(BaseModel):

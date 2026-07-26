@@ -260,15 +260,20 @@ async def _login_bound_user(db: AsyncSession, code: ActivationCode, device_finge
         )
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
-    # 设备绑定：空 = 未绑定（解绑后首次登录），自动重新绑定
-    if user.device_fingerprint and user.device_fingerprint != device_fingerprint:
+    # 设备绑定：空 = 未绑定（解绑后首次登录），自动重新绑定；featureHash 段容忍漂移
+    from app.modules.auth.service import fingerprint_matches
+
+    if user.device_fingerprint and not fingerprint_matches(user.device_fingerprint, device_fingerprint):
         logger.warning("code_login_failed", user_id=user.id, reason="DEVICE_MISMATCH")
         await write_audit("code_login_failed", user_id=user.id, detail="reason=DEVICE_MISMATCH")
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={"code": "DEVICE_MISMATCH", "message": "该激活码已绑定其他设备，请在原设备使用或联系管理员解绑"},
         )
-    if not user.device_fingerprint:
+    if user.device_fingerprint != device_fingerprint:
+        if user.device_fingerprint:
+            # featureHash 漂移：告警并重绑最新指纹
+            logger.warning("fingerprint_drift", user_id=user.id, source="code_login")
         user.device_fingerprint = device_fingerprint
 
     # 单端互踢 + 签发新会话
@@ -277,7 +282,7 @@ async def _login_bound_user(db: AsyncSession, code: ActivationCode, device_finge
     if settings.single_session_kick:
         await db.execute(
             update(RefreshSession)
-            .where(RefreshSession.user_id == user.id, RefreshSession.device_id == device_fingerprint)
+            .where(RefreshSession.user_id == user.id, RefreshSession.device_id == (device_fingerprint or "web"))
             .values(revoked=True)
         )
     tokens = _issue_tokens(db, user.id, device_fingerprint)

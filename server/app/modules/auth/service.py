@@ -26,6 +26,16 @@ settings = get_settings()
 logger = get_logger("oral.auth")
 
 
+def fingerprint_matches(stored: str, provided: str) -> bool:
+    """设备指纹比对：uuid 段严格一致，featureHash 段允许漂移
+    （浏览器升级/换显示器等会改变特征哈希，不应锁死合法用户）。"""
+    if stored == provided:
+        return True
+    stored_uuid = stored.partition(".")[0]
+    provided_uuid = provided.partition(".")[0]
+    return bool(stored_uuid) and stored_uuid == provided_uuid
+
+
 def _tokens(user_id: str, device_id: str | None, audience: str = "user") -> TokensOut:
     return TokensOut(
         accessToken=create_access_token(user_id, device_id, audience),
@@ -85,13 +95,26 @@ async def refresh(db: AsyncSession, refresh_token: str, device_fingerprint: str 
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
     audience = str(payload.get("aud") or "user")
     # 防拷贝：用户端刷新必须来自绑定设备（拷贝 refresh token 到其他机器无法续期）
-    if audience == "user" and user.device_fingerprint and device_fingerprint != user.device_fingerprint:
+    if (
+        audience == "user"
+        and user.device_fingerprint
+        and not fingerprint_matches(user.device_fingerprint, device_fingerprint)
+    ):
         logger.warning("refresh_failed", user_id=user_id, reason="DEVICE_MISMATCH")
         await write_audit("refresh_failed", user_id=user_id, detail="reason=DEVICE_MISMATCH")
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail={"code": "DEVICE_MISMATCH", "message": "设备校验失败，请在绑定设备上使用"},
         )
+    # featureHash 漂移：告警并重绑最新指纹（随后 rotate 同一事务提交）
+    if (
+        audience == "user"
+        and user.device_fingerprint
+        and device_fingerprint
+        and user.device_fingerprint != device_fingerprint
+    ):
+        logger.warning("fingerprint_drift", user_id=user_id, source="refresh")
+        user.device_fingerprint = device_fingerprint
     device = payload.get("dev", "web")
     tokens = _tokens(user_id, device, audience)
     await repo.rotate_refresh_session(db, str(payload["jti"]), user_id, device, _refresh_jti(tokens))

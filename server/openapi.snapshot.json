@@ -938,6 +938,45 @@
         }
       }
     },
+    "/api/v1/voices/{voice_id}": {
+      "delete": {
+        "tags": ["voice"],
+        "summary": "Api Delete",
+        "description": "删除声音（训练中释放预留积分，自动解绑 IP）",
+        "operationId": "api_delete_api_v1_voices__voice_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Voice Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/voices/{voice_id}/edit": {
       "post": {
         "tags": ["voice"],
@@ -5339,12 +5378,12 @@
           "deviceFingerprint": {
             "type": "string",
             "maxLength": 128,
-            "title": "Devicefingerprint",
-            "default": ""
+            "minLength": 8,
+            "title": "Devicefingerprint"
           }
         },
         "type": "object",
-        "required": ["code"],
+        "required": ["code", "deviceFingerprint"],
         "title": "CodeLoginIn",
         "description": "用户端激活码登录"
       },
