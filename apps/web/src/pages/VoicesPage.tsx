@@ -381,7 +381,9 @@ export default function VoicesPage() {
     queryFn: async () => {
       const listed = await voiceApi.list();
       const updates = await Promise.all(
-        listed.filter(needsStatusPoll).map((voice) => voiceApi.status(voice.id)),
+        listed
+          .filter(needsStatusPoll)
+          .map((voice) => voiceApi.status(voice.id)),
       );
       const byId = new Map(updates.map((voice) => [voice.id, voice]));
       return listed.map((voice) => {

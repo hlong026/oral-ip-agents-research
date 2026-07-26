@@ -332,8 +332,7 @@ export const adminApi = {
   },
 
   listPlans: () => adminFetch<PlanSku[]>("/plans"),
-  dashboard: (days = 30) =>
-    adminFetch<DashboardOut>(`/dashboard?days=${days}`),
+  dashboard: (days = 30) => adminFetch<DashboardOut>(`/dashboard?days=${days}`),
   createPlan: (body: Partial<PlanSku>) =>
     adminFetch<PlanSku>("/plans", {
       method: "POST",
