@@ -2,6 +2,7 @@
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
@@ -85,6 +86,55 @@ async def read_bytes(key: str) -> bytes:
         if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
             raise FileNotFoundError(key) from exc
         raise
+
+
+async def size(key: str) -> int:
+    """媒体文件字节数（Range 响应需要），不存在时抛 FileNotFoundError"""
+    key = _validated_key(key)
+    if settings.storage_driver == "local":
+        stat = await asyncio.to_thread(local_path(key).stat)
+        return stat.st_size
+
+    client = _s3_client()
+    try:
+        head = await asyncio.to_thread(client.head_object, Bucket=settings.s3_bucket, Key=key)
+        return int(head["ContentLength"])
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            raise FileNotFoundError(key) from exc
+        raise
+
+
+async def stream_range(key: str, start: int, end: int, chunk_size: int = 1024 * 1024) -> AsyncIterator[bytes]:
+    """流式读取 [start, end] 闭区间字节段，避免大视频整段进内存"""
+    key = _validated_key(key)
+    if settings.storage_driver == "local":
+        async with aiofiles.open(local_path(key), "rb") as f:
+            await f.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                data = await f.read(min(chunk_size, remaining))
+                if not data:
+                    break
+                remaining -= len(data)
+                yield data
+        return
+
+    client = _s3_client()
+    try:
+        obj = await asyncio.to_thread(
+            client.get_object, Bucket=settings.s3_bucket, Key=key, Range=f"bytes={start}-{end}"
+        )
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            raise FileNotFoundError(key) from exc
+        raise
+    body = obj["Body"]
+    while True:
+        data = await asyncio.to_thread(body.read, chunk_size)
+        if not data:
+            break
+        yield data
 
 
 async def get_accessible_url(key: str, *, require_public: bool = False) -> str:

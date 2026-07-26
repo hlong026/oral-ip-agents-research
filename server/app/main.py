@@ -7,12 +7,13 @@
 
 import mimetypes
 import os
+import re
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.core import storage
 from app.core.config import get_settings, validate_runtime_security
@@ -190,11 +191,45 @@ app.include_router(ws_router)
 
 
 # ---- 媒体文件（统一读取 local / s3 存储驱动）----
-@app.get("/media/{key:path}", name="media")
-async def media_file(key: str) -> Response:
+_RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
+
+
+@app.api_route("/media/{key:path}", methods=["GET", "HEAD"], name="media")
+async def media_file(key: str, request: Request) -> Response:
     try:
-        content = await storage.read_bytes(key)
+        total = await storage.size(key)
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "媒体文件不存在") from exc
     content_type = mimetypes.guess_type(key)[0] or "application/octet-stream"
-    return Response(content=content, media_type=content_type)
+    headers = {"accept-ranges": "bytes"}
+
+    # Range 支持：Safari 播放视频强依赖 206，拖进度条也靠它避免重新全量下载
+    start, end, response_status = 0, total - 1, status.HTTP_200_OK
+    range_header = request.headers.get("range")
+    m = _RANGE_RE.match(range_header.strip()) if range_header else None
+    if m:  # 语法不匹配（多区间/未知单位）按 RFC 9110 忽略该头，回落 200 全量
+        spec_start, spec_end = m.group(1), m.group(2)
+        if spec_start:
+            start = int(spec_start)
+            end = min(int(spec_end), total - 1) if spec_end else total - 1
+        elif spec_end:  # 后缀区间 bytes=-N：最后 N 字节
+            start = max(total - int(spec_end), 0)
+            end = total - 1
+        if (not spec_start and not spec_end) or start > end or start >= total:
+            return Response(
+                status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+                headers={"content-range": f"bytes */{total}"},
+            )
+        response_status = status.HTTP_206_PARTIAL_CONTENT
+        headers["content-range"] = f"bytes {start}-{end}/{total}"
+
+    headers["content-length"] = str(max(end - start + 1, 0))
+    # 空文件短路：s3 分支对 bytes=0--1 会报 InvalidRange，且流中途抛错时响应头已发出
+    if request.method == "HEAD" or total == 0:
+        return Response(status_code=response_status, headers=headers, media_type=content_type)
+    return StreamingResponse(
+        storage.stream_range(key, start, end),
+        status_code=response_status,
+        headers=headers,
+        media_type=content_type,
+    )

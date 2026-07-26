@@ -119,20 +119,69 @@ async def test_s3_media_is_materialized_before_ffmpeg(monkeypatch, tmp_path: Pat
     assert await asyncio.to_thread(Path(probe_path).read_bytes) == b"remote-media"
 
 
-async def test_media_route_reads_from_active_storage_driver(client, monkeypatch) -> None:
-    from app.core import storage
+async def test_media_route_reads_from_active_storage_driver(client) -> None:
+    key = await save_bytes("renders", "final video.mp4", b"stored-video")
 
-    async def remote_bytes(key: str) -> bytes:
-        assert key == "renders/final video.mp4"
-        return b"stored-video"
-
-    monkeypatch.setattr(storage, "read_bytes", remote_bytes)
-
-    response = await client.get("/media/renders/final%20video.mp4")
+    response = await client.get(f"/media/{key.replace(' ', '%20')}")
 
     assert response.status_code == 200
     assert response.content == b"stored-video"
     assert response.headers["content-type"] == "video/mp4"
+    assert response.headers["accept-ranges"] == "bytes"
+
+
+async def test_media_route_serves_partial_content_for_range(client) -> None:
+    key = await save_bytes("renders", "clip.mp4", b"0123456789")
+
+    response = await client.get(f"/media/{key}", headers={"Range": "bytes=2-5"})
+
+    assert response.status_code == 206
+    assert response.content == b"2345"
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["content-length"] == "4"
+
+    # 开放尾区间与后缀区间（Safari 探测常用）
+    tail = await client.get(f"/media/{key}", headers={"Range": "bytes=7-"})
+    assert tail.status_code == 206
+    assert tail.content == b"789"
+    suffix = await client.get(f"/media/{key}", headers={"Range": "bytes=-3"})
+    assert suffix.status_code == 206
+    assert suffix.content == b"789"
+
+
+async def test_media_route_rejects_unsatisfiable_range_and_supports_head(client) -> None:
+    key = await save_bytes("renders", "clip2.mp4", b"abcdef")
+
+    bad = await client.get(f"/media/{key}", headers={"Range": "bytes=99-"})
+    assert bad.status_code == 416
+    assert bad.headers["content-range"] == "bytes */6"
+
+    head = await client.head(f"/media/{key}")
+    assert head.status_code == 200
+    assert head.headers["content-length"] == "6"
+    assert head.headers["accept-ranges"] == "bytes"
+    assert head.content == b""
+
+
+async def test_media_route_ignores_unsupported_range_forms(client) -> None:
+    key = await save_bytes("renders", "clip3.mp4", b"abcdef")
+
+    # 多区间与未知单位按 RFC 9110 忽略，回落 200 全量
+    multi = await client.get(f"/media/{key}", headers={"Range": "bytes=0-1,4-5"})
+    assert multi.status_code == 200
+    assert multi.content == b"abcdef"
+    unknown = await client.get(f"/media/{key}", headers={"Range": "items=0-2"})
+    assert unknown.status_code == 200
+
+
+async def test_media_route_serves_empty_file_without_streaming(client) -> None:
+    key = await save_bytes("renders", "empty.mp4", b"")
+
+    response = await client.get(f"/media/{key}")
+
+    assert response.status_code == 200
+    assert response.content == b""
+    assert response.headers["content-length"] == "0"
 
 
 async def test_avatar_clone_persists_consent_evidence_without_plaintext(monkeypatch) -> None:
