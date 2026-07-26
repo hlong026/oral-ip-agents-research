@@ -11,7 +11,7 @@ import {
   mediaDurationSeconds,
 } from "../lib/meteredOperation";
 
-// 飞影数字人训练素材约束：mp4/mov（h264），≤500MB；产品侧收紧为 30 秒～3 分钟
+// 供应商数字人训练素材约束：mp4/mov（h264），≤500MB；产品侧收紧为 30 秒～3 分钟
 const VIDEO_MAX_BYTES = 500 * 1024 * 1024;
 const VIDEO_MIN_SECONDS = 30;
 const VIDEO_MAX_SECONDS = 180;

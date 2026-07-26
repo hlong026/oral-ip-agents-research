@@ -83,6 +83,7 @@ def test_legacy_price_catalog_preserves_existing_pipeline_step_prices():
         "asr": 2,
         "script_generation": 2,
         "tts": 8,
+        "voice_clone": 10,
         "digital_human": 20,
         "hd_export": 3,
     }
@@ -455,7 +456,8 @@ async def test_async_voice_clone_settles_only_after_provider_success(
     from app.modules.voice import service as voice_service
 
     async def fake_status(*_args, **_kwargs):
-        return {"status": 3, "voice_id": "mock-voice", "demo_url": ""}, "mock"
+        # mock 模式返回本地 demo 路径：demo 就绪后轮询侧才会转 pending_confirm
+        return {"status": 3, "voice_id": "mock-voice", "demo_url": "/media/voice-demos/demo.mp3"}, "mock"
 
     monkeypatch.setattr(voice_service.registry, "run_with_fallback", fake_status)
 

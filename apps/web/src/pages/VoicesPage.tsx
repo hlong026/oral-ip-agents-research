@@ -12,7 +12,7 @@ import {
   textOperationUsage,
 } from "../lib/meteredOperation";
 
-// 飞影声音克隆素材约束：mp3/m4a/wav，≤20MB，5 秒～3 分钟
+// 供应商声音克隆素材约束：mp3/m4a/wav，≤20MB，5 秒～3 分钟
 const SAMPLE_MAX_BYTES = 20 * 1024 * 1024;
 const SAMPLE_MIN_SECONDS = 5;
 const SAMPLE_MAX_SECONDS = 180;
