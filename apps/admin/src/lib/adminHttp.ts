@@ -111,6 +111,40 @@ export interface CostAnalysisItem {
   enabled: boolean;
 }
 
+export interface DashboardKpis {
+  totalUsers: number;
+  newUsersToday: number;
+  newUsersYesterday: number;
+  pointsConsumedToday: number;
+  pointsConsumedYesterday: number;
+  tasksCreatedToday: number;
+  tasksCreatedYesterday: number;
+  publishSuccessRate: number | null;
+  codesUnused: number;
+  codesActivatedTotal: number;
+  revenueCentsWindow: number;
+  costCentsWindow: number;
+}
+
+export interface DashboardOut {
+  rangeDays: number;
+  generatedAt: string;
+  dates: string[];
+  kpis: DashboardKpis;
+  users: { newUsers: number[]; cumulativeUsers: number[] };
+  activation: { created: number[]; activated: number[] };
+  credits: { granted: number[]; consumed: number[] };
+  production: {
+    tasksCreated: number[];
+    tasksSucceeded: number[];
+    tasksFailed: number[];
+    voiceClones: number[];
+    avatarTrainings: number[];
+  };
+  publishing: { created: number[]; succeeded: number[]; failed: number[] };
+  economics: { revenueCents: number[]; costCents: number[] };
+}
+
 export interface AuditItem {
   id: string;
   event: string;
@@ -298,6 +332,8 @@ export const adminApi = {
   },
 
   listPlans: () => adminFetch<PlanSku[]>("/plans"),
+  dashboard: (days = 30) =>
+    adminFetch<DashboardOut>(`/dashboard?days=${days}`),
   createPlan: (body: Partial<PlanSku>) =>
     adminFetch<PlanSku>("/plans", {
       method: "POST",
