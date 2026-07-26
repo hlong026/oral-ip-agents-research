@@ -11,11 +11,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog, write_audit
 from app.core.db import get_db
 from app.core.deps import require_admin
+from app.modules.admin.dashboard import build_dashboard
 from app.modules.auth.models import RefreshSession, User
 from app.modules.billing.models import QuotaAccount
 from app.modules.catalog import repository as catalog_repo
 
 router = APIRouter(tags=["admin"])
+
+
+@router.get("/dashboard")
+async def dashboard(
+    days: int = Query(30, ge=7, le=90),
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """运营总览驾驶舱：六大业务块按天时间序列，一次请求全量返回"""
+    return await build_dashboard(db, days)
 
 
 class UserUpdateIn(BaseModel):
