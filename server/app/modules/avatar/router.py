@@ -22,6 +22,12 @@ from .service import clone_avatar_by_image, clone_avatar_by_video, delete_avatar
 
 router = APIRouter(prefix="/avatars", tags=["avatar"])
 
+# 飞影数字人训练素材硬约束：mp4/mov（h264），≤500MB，官方 5s～30min；产品侧收紧为 30s～3min
+AVATAR_VIDEO_FORMATS = {"mp4", "mov"}
+AVATAR_VIDEO_MAX_BYTES = 500 * 1024 * 1024
+AVATAR_VIDEO_MIN_SECONDS = 30
+AVATAR_VIDEO_MAX_SECONDS = 180
+
 
 @router.get("", response_model=list[AvatarOut])
 async def api_list(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
@@ -47,12 +53,28 @@ async def api_clone_video(
             detail={"code": "CONSENT_REQUIRED", "message": "形象克隆须本人授权（consent_token 缺失）"},
         )
     data = await file.read()
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix.lstrip(".") not in AVATAR_VIDEO_FORMATS:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "VIDEO_FORMAT_UNSUPPORTED", "message": "训练视频仅支持 MP4/MOV（H264 编码）"},
+        )
+    if len(data) > AVATAR_VIDEO_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "VIDEO_TOO_LARGE", "message": "训练视频超过 500MB，请压缩后重试"},
+        )
     unit = await quote_operation_unit(db, user_id, quoteId, "digital_human")
-    duration = await probe_media_bytes(data, Path(file.filename or "").suffix)
+    duration = await probe_media_bytes(data, suffix)
     if unit in {"per_minute", "per_second"} and duration is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "MEDIA_DURATION_UNVERIFIED", "message": "无法验证训练视频时长"},
+        )
+    if duration is not None and not (AVATAR_VIDEO_MIN_SECONDS <= duration <= AVATAR_VIDEO_MAX_SECONDS):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "VIDEO_DURATION_INVALID", "message": "训练视频时长需在 30 秒～3 分钟之间"},
         )
     measures = {"seconds": max(1, math.ceil(duration or 1)), "assets": 1}
     reservation_id = await reserve_metered_operation(db, user_id, quoteId, "digital_human", measures)

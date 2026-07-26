@@ -235,6 +235,7 @@ export const voiceApi = {
     ),
   confirm: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/confirm`),
   reject: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/reject`),
+  remove: (voiceId: string) => http.delete<void>(`/voices/${voiceId}`),
   synthesize: (voiceId: string, text: string, speed = 1.0, quoteId?: string) =>
     http.post<{ audioUrl: string; words: WordTimestamp[] }>(
       "/voices/synthesize",
@@ -252,6 +253,10 @@ export const avatarApi = {
     if (quoteId) fd.append("quoteId", quoteId);
     return http.post<Avatar>("/avatars/clone", fd);
   },
+  status: (avatarId: string) =>
+    http.get<Pick<Avatar, "id" | "status"> & { progress: number }>(
+      `/avatars/${avatarId}/status`,
+    ),
 };
 
 // ---------- pipeline（F-405/406） ----------

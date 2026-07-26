@@ -55,6 +55,49 @@ async def extract_audio_bytes(data: bytes, suffix: str) -> bytes:
         return audio
 
 
+async def transcode_audio_to_m4a(data: bytes, suffix: str) -> bytes:
+    """将浏览器录音等不受支持格式（webm/ogg 等）转码为 m4a，满足供应商 mp3/m4a/wav 要求。"""
+    if not data:
+        raise MediaProcessingError("上传音频为空")
+    with tempfile.TemporaryDirectory(prefix="oral-voice-sample-") as directory:
+        source = Path(directory) / f"source{suffix or '.bin'}"
+        output = Path(directory) / "sample.m4a"
+        await asyncio.to_thread(source.write_bytes, data)
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-i",
+                str(source),
+                "-vn",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-movflags",
+                "+faststart",
+                str(output),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await asyncio.wait_for(process.communicate(), timeout=90)
+        except FileNotFoundError as exc:
+            raise MediaProcessingError("FFmpeg 未安装或不可执行") from exc
+        except TimeoutError as exc:
+            process.kill()
+            await process.communicate()
+            raise MediaProcessingError("音频转码超时") from exc
+        if process.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace")[-500:]
+            raise MediaProcessingError(f"音频转码失败(exit={process.returncode}): {detail}")
+        audio = await asyncio.to_thread(output.read_bytes)
+        if not audio:
+            raise MediaProcessingError("转码后音频为空")
+        return audio
+
+
 async def probe_media_bytes(data: bytes, suffix: str = ".bin") -> float | None:
     """用 ffprobe 读取上传媒体的真实时长；无法验证时返回 None。"""
     if not data:

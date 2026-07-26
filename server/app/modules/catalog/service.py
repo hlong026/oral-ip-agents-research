@@ -49,6 +49,7 @@ LEGACY_MODULE_PRICES = [
     ("asr", "ASR 音频转文字", "per_action", 2, "每次 2 积分"),
     ("script_generation", "AI 文案生成", "per_action", 2, "每次 2 积分"),
     ("tts", "TTS 文本生成语音", "per_action", 8, "每次 8 积分"),
+    ("voice_clone", "声音克隆训练", "per_asset", 10, "每个声音 10 积分"),
     ("digital_human", "数字人视频生成", "per_action", 20, "每次 20 积分"),
     ("hd_export", "视频合成导出", "per_action", 3, "每次 3 积分"),
 ]

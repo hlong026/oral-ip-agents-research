@@ -160,23 +160,47 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
                     client = get_client()
                     demo_key = await client.download_to_storage(demo_url, "voice-demos", "demo.mp3")
                 elif demo_url:
-                    demo_key = demo_url  # mock 模式已经是本地路径
+                    # mock 模式返回本地路径，去掉 /media/ 前缀后仅存储 key，避免输出时双重拼接
+                    demo_key = demo_url.removeprefix("/media/")
 
-                transitioned = await _transition_clone(
-                    db,
-                    v,
-                    succeeded=True,
-                    provider_voice_id=voice_id_remote,
-                    demo_key=demo_key,
-                )
-                if transitioned:
-                    logger.info("voice_clone_done", user_id=user_id, voice_id=v.id, provider_voice_id=voice_id_remote)
+                if demo_key:
+                    transitioned = await _transition_clone(
+                        db,
+                        v,
+                        succeeded=True,
+                        provider_voice_id=voice_id_remote,
+                        demo_key=demo_key,
+                    )
+                    if transitioned:
+                        logger.info(
+                            "voice_clone_done", user_id=user_id, voice_id=v.id, provider_voice_id=voice_id_remote
+                        )
+                else:
+                    # 供应商状态先于试听样音就绪（demo_url 暂为空）：保持 training，下一轮再查
+                    logger.info("voice_clone_demo_pending", user_id=user_id, voice_id=v.id)
             elif task_status == 4:
                 await _transition_clone(db, v, succeeded=False)
         except Exception as e:
             await db.rollback()
             await db.refresh(v)
             logger.warning(f"voice clone status poll failed: {e}")
+    elif v.status == "pending_confirm" and not v.demo_key and v.provider_task_id:
+        # 自愈：历史记录在 demo 未生成时已转 pending_confirm，回查供应商补存试听样音
+        try:
+            result, _ = await registry.run_with_fallback(
+                "voice", registry.voice_chain, "query_clone_task", v.provider_task_id
+            )
+            demo_url = result.get("demo_url", "")
+            if demo_url and demo_url.startswith("http"):
+                client = get_client()
+                v.demo_key = await client.download_to_storage(demo_url, "voice-demos", "demo.mp3")
+                await db.commit()
+                await db.refresh(v)
+                logger.info("voice_clone_demo_backfilled", user_id=user_id, voice_id=v.id)
+        except Exception as e:
+            await db.rollback()
+            await db.refresh(v)
+            logger.warning(f"voice demo backfill failed: {e}")
 
     return CloneStatusOut(
         id=v.id,
@@ -211,6 +235,24 @@ async def reject_voice(db: AsyncSession, user_id: str, voice_id: str) -> VoiceOu
     v.status = "rejected"
     await db.commit()
     return to_out(v)
+
+
+async def delete_voice(db: AsyncSession, user_id: str, voice_id: str) -> None:
+    """删除声音：训练中先释放计费预留，并解绑引用该声音的 IP"""
+    v = await repo.get(db, voice_id, user_id)
+    if not v:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
+    if v.status == "training" and v.reservation_id:
+        from app.modules.billing.service import release_reservation
+
+        await release_reservation(db, v.reservation_id, user_id)
+    from app.modules.ipasset.models import Persona
+
+    await db.execute(
+        update(Persona).where(Persona.user_id == user_id, Persona.voice_id == voice_id).values(voice_id=None)
+    )
+    await repo.delete(db, v)
+    logger.info("voice_deleted", user_id=user_id, voice_id=voice_id)
 
 
 async def edit_voice_params(db: AsyncSession, user_id: str, voice_id: str, rate: str, volume: str, pitch: str) -> None:

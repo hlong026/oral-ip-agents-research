@@ -1,5 +1,7 @@
 """voice HTTP 层：音色库 / 克隆 / 试听确认 / TTS（白标：不暴露供应商品牌）"""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,11 +14,17 @@ from app.modules.billing.service import (
     recover_reservation_after_failure,
     reserve_metered_operation,
 )
+from app.providers.duration_probe import (
+    MediaProcessingError,
+    probe_media_bytes,
+    transcode_audio_to_m4a,
+)
 
 from .schemas import CloneStatusOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, VoiceOut
 from .service import (
     clone_voice,
     confirm_voice,
+    delete_voice,
     edit_voice_params,
     get_clone_status,
     list_voices,
@@ -25,6 +33,12 @@ from .service import (
 )
 
 router = APIRouter(prefix="/voices", tags=["voice"])
+
+# 飞影声音克隆素材硬约束：mp3/m4a/wav，≤20MB，5秒～3分钟
+VOICE_SAMPLE_FORMATS = {"mp3", "m4a", "wav"}
+VOICE_SAMPLE_MAX_BYTES = 20 * 1024 * 1024
+VOICE_SAMPLE_MIN_SECONDS = 5
+VOICE_SAMPLE_MAX_SECONDS = 180
 
 
 @router.get("", response_model=list[VoiceOut])
@@ -50,9 +64,33 @@ async def api_clone(
             detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"},
         )
     data = await file.read()
+    suffix = Path(file.filename or "").suffix.lower()
+    filename = file.filename or "sample.wav"
+    # 浏览器录音（webm/ogg 等）不在供应商支持列表内，先转码为 m4a 再入库
+    if suffix.lstrip(".") not in VOICE_SAMPLE_FORMATS:
+        try:
+            data = await transcode_audio_to_m4a(data, suffix)
+        except MediaProcessingError as e:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={"code": "AUDIO_FORMAT_UNSUPPORTED", "message": f"音频格式不支持且转码失败：{e}"},
+            ) from e
+        suffix = ".m4a"
+        filename = f"{Path(filename).stem}.m4a"
+    if len(data) > VOICE_SAMPLE_MAX_BYTES:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "AUDIO_TOO_LARGE", "message": "声音样本超过 20MB，请压缩或剪短后重试"},
+        )
+    duration = await probe_media_bytes(data, suffix)
+    if duration is not None and not (VOICE_SAMPLE_MIN_SECONDS <= duration <= VOICE_SAMPLE_MAX_SECONDS):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "AUDIO_DURATION_INVALID", "message": "声音样本时长需在 5 秒～3 分钟之间"},
+        )
     reservation_id = await reserve_metered_operation(db, user_id, quoteId, "voice_clone", {"assets": 1})
     try:
-        key = await save_bytes("voice-samples", file.filename or "sample.wav", data)
+        key = await save_bytes("voice-samples", filename, data)
         return await clone_voice(db, user_id, name, consentToken, key, language, reservation_id)
     except BaseException:
         await recover_reservation_after_failure(db, reservation_id, user_id)
@@ -87,6 +125,17 @@ async def api_reject(
 ):
     """用户拒绝克隆结果"""
     return await reject_voice(db, user_id, voice_id)
+
+
+@router.delete("/{voice_id}", status_code=204)
+async def api_delete(
+    voice_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除声音（训练中释放预留积分，自动解绑 IP）"""
+    await delete_voice(db, user_id, voice_id)
+    return Response(status_code=204)
 
 
 @router.post("/{voice_id}/edit", status_code=204)
