@@ -2,7 +2,7 @@ import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type { PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
-import { Play } from "lucide-react";
+import { LoaderCircle, Play } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -76,8 +76,23 @@ export default function EditorPage() {
     queryKey: ["task", effectiveTaskId],
     queryFn: () => pipelineApi.get(effectiveTaskId),
     enabled: Boolean(effectiveTaskId),
+    refetchInterval: (q) => {
+      // 首拉失败时也持续重试，避免 WS 不可用 + 首次拉取失败时页面永久卡住
+      if (!q.state.data) return 3000;
+      // 「保存并重新合成」重跑期间持续轮询，新成片就绪后自动停止
+      const s = q.state.data.status;
+      return s === "pending" || s === "running" || s === "waiting_confirm"
+        ? 3000
+        : false;
+    },
+    // 标签页切后台时也保持轮询，切回即见最新进度
+    refetchIntervalInBackground: true,
   });
   const detail = liveTasks[effectiveTaskId] ?? taskDetail ?? task;
+  const rerunning =
+    detail?.status === "pending" ||
+    detail?.status === "running" ||
+    detail?.status === "waiting_confirm";
 
   const videoKey = detail?.steps.find((s) => s.step === "compose")?.artifacts
     ?.final_video_key;
@@ -163,20 +178,33 @@ export default function EditorPage() {
       {detail && (
         <>
           <div className="grid items-start gap-4 lg:grid-cols-[300px_1fr]">
-            {/* 预览 */}
+            {/* 预览：成片就绪后直接内嵌播放器，字幕样式叠加层实时预览 */}
             <div className="glass p-4">
               <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
-                <span className="text-text-3">
-                  <Play className="h-9 w-9" />
-                </span>
-                <span className="absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
+                {videoKey ? (
+                  <video
+                    src={`/media/${videoKey}`}
+                    poster={detail.coverUrl ?? undefined}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="h-full w-full bg-black object-contain"
+                    aria-label="剪辑成片预览"
+                  />
+                ) : (
+                  <span className="flex flex-col items-center gap-2 text-text-3">
+                    <Play className="h-9 w-9" />
+                    <span className="text-xs">成片生成后在此预览</span>
+                  </span>
+                )}
+                <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
                   1080P
                 </span>
-                {/* 字幕预览：随样式实时变化 */}
+                {/* 字幕预览：随样式实时变化（不拦截播放器控件点击） */}
                 <span
-                  className={`absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
+                  className={`pointer-events-none absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
                     cfg.position === "bottom"
-                      ? "bottom-6"
+                      ? "bottom-14"
                       : cfg.position === "middle"
                         ? "top-1/2 -translate-y-1/2"
                         : "top-6"
@@ -201,7 +229,16 @@ export default function EditorPage() {
                   </div>
                 </div>
                 <span className="chip shrink-0 text-[11px]">
-                  {videoKey ? "成片就绪" : "合成中"}
+                  {rerunning ? (
+                    <span className="flex items-center gap-1">
+                      <LoaderCircle className="h-3 w-3 animate-spin" />
+                      重新合成中
+                    </span>
+                  ) : videoKey ? (
+                    "成片就绪"
+                  ) : (
+                    "合成中"
+                  )}
                 </span>
               </div>
             </div>
@@ -321,14 +358,22 @@ export default function EditorPage() {
                       onClick={() => update({ cover: k })}
                       className={`rounded-xl border-2 p-1 ${cfg.cover === k ? "border-brand-to" : "border-transparent"}`}
                     >
-                      <div className="flex h-24 items-center justify-center rounded-lg bg-white/5 text-xs text-text-3">
-                        封面 {k} ·{" "}
-                        {k === "A"
-                          ? "大字标题"
-                          : k === "B"
-                            ? "人物特写"
-                            : "对比数字"}
-                      </div>
+                      {k === "A" && detail.coverUrl ? (
+                        <img
+                          src={detail.coverUrl}
+                          alt="封面 A · 成片首帧"
+                          className="h-24 w-full rounded-lg object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-24 items-center justify-center rounded-lg bg-white/5 text-xs text-text-3">
+                          封面 {k} ·{" "}
+                          {k === "A"
+                            ? "大字标题"
+                            : k === "B"
+                              ? "人物特写"
+                              : "对比数字"}
+                        </div>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -346,9 +391,19 @@ export default function EditorPage() {
                 >
                   导出剪映草稿
                 </button>
-                <button className="btn-ghost text-xs" disabled={!videoKey}>
-                  导出 MP4
-                </button>
+                {videoKey ? (
+                  <a
+                    className="btn-ghost text-xs"
+                    href={`/media/${videoKey}`}
+                    download
+                  >
+                    导出 MP4
+                  </a>
+                ) : (
+                  <button className="btn-ghost text-xs" disabled>
+                    导出 MP4
+                  </button>
+                )}
                 <button
                   className="btn-primary px-5"
                   disabled={busy || !dirty}
