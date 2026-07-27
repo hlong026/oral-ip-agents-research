@@ -77,6 +77,8 @@ interface Wizard {
   publishAt: string;
   title: string;
   taskId: string;
+  /** 创建任务时的入参指纹；持久化恢复后若入参已变则作废旧 taskId */
+  taskFingerprint: string;
 }
 
 const initialWizard: Wizard = {
@@ -96,7 +98,25 @@ const initialWizard: Wizard = {
   publishAt: "",
   title: "",
   taskId: "",
+  taskFingerprint: "",
 };
+
+/** 参与任务创建的入参指纹（含 ipId，与 startCompose 的 pipelineApi.create 入参对齐） */
+const composeFingerprint = (w: Wizard, ipId: string): string =>
+  [ipId, w.sourceUrl, w.topic, w.scriptText, w.voiceId, w.avatarId, w.mode, w.randomize, w.count].join("|");
+
+// 向导状态跨页面持久化（断点A修复）：跳转任务详情页后回到 ?step=edit 仍能恢复 taskId 与成片预览
+const WIZARD_STORAGE_KEY = "create-wizard-v1";
+
+function loadWizard(): Wizard {
+  try {
+    const raw = sessionStorage.getItem(WIZARD_STORAGE_KEY);
+    if (!raw) return initialWizard;
+    return { ...initialWizard, ...(JSON.parse(raw) as Partial<Wizard>) };
+  } catch {
+    return initialWizard;
+  }
+}
 
 interface OperationProgress {
   value: number;
@@ -950,9 +970,11 @@ function StepAvatar({
 
 function StepEdit({
   finalVideoUrl,
+  taskId,
   onSkip,
 }: {
   finalVideoUrl: string;
+  taskId: string;
   onSkip: () => void;
 }) {
   const navigate = useNavigate();
@@ -982,7 +1004,13 @@ function StepEdit({
           </p>
         </div>
         <div className="flex gap-3">
-          <button className="btn-ghost" onClick={() => navigate("/editor")}>
+          <button
+            className="btn-ghost"
+            onClick={() =>
+              // 携带当前任务上下文（断点B修复），避免剪辑台默认选中其它任务
+              navigate(taskId ? `/editor?task=${taskId}` : "/editor")
+            }
+          >
             先去剪辑台看看
           </button>
           <button className="btn-primary" onClick={onSkip}>
@@ -1100,7 +1128,7 @@ export default function CreatePage() {
   const [params, setParams] = useSearchParams();
   const step = (params.get("step") ?? "link") as StepKey;
   const stepIdx = STEPS.findIndex((s) => s.key === step);
-  const [wiz, setWiz] = useState<Wizard>(initialWizard);
+  const [wiz, setWiz] = useState<Wizard>(loadWizard);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [quote, setQuote] = useState<PricePreview | null>(null);
@@ -1117,6 +1145,24 @@ export default function CreatePage() {
 
   // 合成步全自动：进入即报价并创建任务，ref 防止 StrictMode/重渲染重复触发
   const autoStartRef = useRef(false);
+
+  // 向导状态实时落盘（断点A修复）：CreatePage 卸载后再进入仍可恢复
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(WIZARD_STORAGE_KEY, JSON.stringify(wiz));
+    } catch {
+      // 存储不可用（隐私模式/容量满）时静默跳过，不影响向导使用
+    }
+  }, [wiz]);
+
+  // 持久化配套防护：任务创建后若 IP/文案/声音/数字人等入参变更，旧任务作废，合成步重新创建
+  useEffect(() => {
+    // IP 列表异步加载中时跳过，避免用空 ipId 误判指纹失配
+    if (!current) return;
+    if (wiz.taskId && composeFingerprint(wiz, current.id) !== wiz.taskFingerprint) {
+      setWiz((w) => ({ ...w, taskId: "", taskFingerprint: "" }));
+    }
+  }, [wiz, current]);
 
   // 合成任务实时追踪：WS 推送（useTasks）优先，3s 轮询兜底
   const liveTask = useTasks((s) =>
@@ -1284,18 +1330,20 @@ export default function CreatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, wiz.taskId, composeGap, moduleCatalog]);
 
-  // 任务已创建：仅在未完成或无 URL 时跳转，避免跳转过早导致视频不可见
+  // 任务已创建：仅在任务数据已加载且未完成或无 URL 时跳转；
+  // 数据未到达前不跳，避免持久化恢复后首帧误跳、架空已完成任务的页内预览
   useEffect(() => {
     if (
       step === "compose" &&
       wiz.taskId &&
+      task &&
       // 如果任务已完成且有最终产物 URL，先在当前页显示预览，再决定是否跳转
-      (task?.status !== "done" || !finalVideoUrl)
+      (task.status !== "done" || !finalVideoUrl)
     ) {
       navigate(`/tasks/${wiz.taskId}`, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, wiz.taskId, task?.status, finalVideoUrl]);
+  }, [step, wiz.taskId, task, finalVideoUrl]);
 
   // 模块价格目录加载失败时给出可重试的错误，避免停留在「准备中…」死局
   useEffect(() => {
@@ -1395,13 +1443,19 @@ export default function CreatePage() {
         count: wiz.count,
         quoteId: freshQuote.quoteId,
       });
+      // 指纹取自真正参与创建的入参快照，提交期间的用户修改会触发作废防护
+      const createdFingerprint = composeFingerprint(wiz, current.id);
       const first = tasks[0];
       if (!first) {
         setError("任务创建失败，请重试");
         return;
       }
       // 函数式更新，避免覆盖提交期间用户对向导的其它修改；批量任务可在任务中心查看
-      setWiz((w) => ({ ...w, taskId: first.id }));
+      setWiz((w) => ({
+        ...w,
+        taskId: first.id,
+        taskFingerprint: createdFingerprint,
+      }));
       navigate(`/tasks/${first.id}`);
     } catch (e) {
       setError(
@@ -1412,6 +1466,16 @@ export default function CreatePage() {
     }
   };
 
+  /** 本轮创作结束：清理持久化状态，下次进入向导从全新状态开始 */
+  const finishWizard = () => {
+    try {
+      sessionStorage.removeItem(WIZARD_STORAGE_KEY);
+    } catch {
+      // 存储不可用时忽略，不影响跳转
+    }
+    setWiz(initialWizard);
+  };
+
   /** 发布步提交：对已生成的成片创建发布任务；未选平台则直接完成 */
   const publishVideo = async () => {
     if (!finalVideoKey || !wiz.taskId) {
@@ -1419,7 +1483,9 @@ export default function CreatePage() {
       return;
     }
     if (wiz.platforms.length === 0) {
-      navigate(wiz.taskId ? `/tasks/${wiz.taskId}` : "/tasks");
+      const doneTaskId = wiz.taskId;
+      finishWizard();
+      navigate(doneTaskId ? `/tasks/${doneTaskId}` : "/tasks");
       return;
     }
     setSubmitting(true);
@@ -1439,6 +1505,7 @@ export default function CreatePage() {
           ? new Date(wiz.publishAt).toISOString()
           : undefined,
       });
+      finishWizard();
       navigate("/publish/jobs");
     } catch (e) {
       setError(
@@ -1559,7 +1626,11 @@ export default function CreatePage() {
             </div>
           ))}
         {step === "edit" && (
-          <StepEdit finalVideoUrl={finalVideoUrl} onSkip={next} />
+          <StepEdit
+            finalVideoUrl={finalVideoUrl}
+            taskId={wiz.taskId}
+            onSkip={next}
+          />
         )}
         {step === "publish" && (
           <StepPublish

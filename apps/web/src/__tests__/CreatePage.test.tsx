@@ -69,6 +69,8 @@ vi.mock("../lib/meteredOperation", async (importOriginal) => {
 
 describe("CreatePage 来源模式切换", () => {
   beforeEach(() => {
+    // 向导状态已持久化到 sessionStorage，用例间必须清理避免 taskId 泄漏
+    sessionStorage.clear();
     vi.mocked(contentApi.probe).mockReset();
     vi.mocked(contentApi.parse).mockReset();
     vi.mocked(contentApi.rewrite).mockReset();
@@ -487,6 +489,8 @@ function renderStep(step: "compose" | "publish", opts?: { bare?: boolean }) {
 
 describe("CreatePage 视频合成步全自动", () => {
   beforeEach(() => {
+    // 向导状态已持久化到 sessionStorage，用例间必须清理避免 taskId 泄漏
+    sessionStorage.clear();
     vi.mocked(catalogApi.modulePrices).mockResolvedValue({
       items: modulePriceItems,
     } as Awaited<ReturnType<typeof catalogApi.modulePrices>>);
