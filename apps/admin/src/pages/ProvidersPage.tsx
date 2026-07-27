@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, TriangleAlert, X } from "lucide-react";
+import { Check, RefreshCw, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   adminApi,
   type ProviderConfig,
   type ProviderProbeResult,
+  type ProviderReadiness,
 } from "../lib/adminHttp";
 
 const fallbackProviders: ProviderConfig[] = [
@@ -118,6 +119,7 @@ export default function ProvidersPage() {
           密钥会加密保存在本地数据库；用户端只消费业务能力，不接触供应商凭据。
         </p>
       </div>
+      <ReadinessBoard />
       {isLoading && <p className="text-sm text-text-3">加载中...</p>}
       {(error instanceof Error || save.error instanceof Error || message) && (
         <p className="text-sm text-text-2">
@@ -248,6 +250,127 @@ export default function ProvidersPage() {
         ))}
       </div>
     </div>
+  );
+}
+
+const readinessNames: Record<string, string> = {
+  deepseek: "DeepSeek / LLM",
+  dashscope_asr: "DashScope ASR",
+  hifly: "数字人/声音",
+  douyidou: "视频解析",
+};
+
+function ReadinessBoard() {
+  const [withProbe, setWithProbe] = useState(false);
+  const { data, isLoading, isFetching, refetch } = useQuery<ProviderReadiness>({
+    queryKey: ["provider-readiness", withProbe],
+    queryFn: () => adminApi.providerReadiness(withProbe),
+  });
+
+  if (isLoading) {
+    return (
+      <section className="glass p-5">
+        <p className="text-sm text-text-3">就绪度检测中...</p>
+      </section>
+    );
+  }
+  if (!data) return null;
+
+  const mockLeaked = data.providerMode === "mock_fallback";
+  return (
+    <section className="glass space-y-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold">供应商就绪度看板</h2>
+          <p className="mt-1 text-xs text-text-3">
+            切生产前逐项核对：Key 已配置、开关已打开、连通性探测通过。
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-text-2">
+            <input
+              type="checkbox"
+              checked={withProbe}
+              onChange={(event) => setWithProbe(event.target.checked)}
+            />
+            含连通性探测
+          </label>
+          <button
+            type="button"
+            className="btn-ghost"
+            disabled={isFetching}
+            onClick={() => refetch()}
+          >
+            <RefreshCw
+              className={`mr-1 inline h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`}
+            />
+            刷新
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 text-xs">
+        <span className="chip">环境：{data.env}</span>
+        <span
+          className={`chip ${mockLeaked ? "border-warning/60 text-warning" : "border-success/60 text-success"}`}
+        >
+          Provider 模式：
+          {mockLeaked ? "含 Mock 降级（仅限开发/测试）" : "全真实链路"}
+        </span>
+        <span
+          className={`chip ${data.allReady ? "border-success/60 text-success" : "border-warning/60 text-warning"}`}
+        >
+          {data.allReady ? "全部就绪" : "存在未就绪项"}
+        </span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {data.items.map((item) => (
+          <div
+            key={item.provider}
+            className={`rounded-xl border p-3 ${
+              item.ready
+                ? "border-success/40 bg-success/5"
+                : "border-warning/40 bg-warning/5"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">
+                {readinessNames[item.provider] || item.provider}
+              </span>
+              {item.ready ? (
+                <Check className="h-4 w-4 text-success" />
+              ) : (
+                <TriangleAlert className="h-4 w-4 text-warning" />
+              )}
+            </div>
+            <ul className="mt-2 space-y-1 text-xs text-text-2">
+              <li>开关：{item.enabled ? "已启用" : "未启用"}</li>
+              <li>
+                配置：
+                {item.configured
+                  ? "完整"
+                  : `缺少 ${item.missingFields.join("、")}`}
+              </li>
+              {item.probeStatus && (
+                <li>
+                  探测：
+                  {item.probeStatus === "verified" ? "通过" : item.probeMessage}
+                </li>
+              )}
+            </ul>
+          </div>
+        ))}
+      </div>
+      <details className="text-xs text-text-3">
+        <summary className="cursor-pointer">运行时降级链名单</summary>
+        <ul className="mt-2 space-y-1">
+          {Object.entries(data.providerChains).map(([kind, names]) => (
+            <li key={kind}>
+              <span className="font-medium">{kind}</span>：{names.join(" → ")}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </section>
   );
 }
 

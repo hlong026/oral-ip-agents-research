@@ -84,6 +84,25 @@ class ProviderProbeOut(BaseModel):
     details: dict[str, object] = Field(default_factory=dict)
 
 
+class ProviderReadinessItem(BaseModel):
+    provider: str
+    enabled: bool
+    configured: bool
+    missingFields: list[str]
+    ready: bool  # 开关已开 + 必填项齐全
+    probeStatus: str = ""  # probe=true 时回填：verified | failed | incomplete | needs_sample
+    probeMessage: str = ""
+
+
+class ProviderReadinessOut(BaseModel):
+    env: str
+    providerMode: str  # real_only | mock_fallback
+    mockFallbackAllowed: bool
+    providerChains: dict[str, list[str]]
+    items: list[ProviderReadinessItem]
+    allReady: bool
+
+
 _PROVIDER_REQUIREMENTS = {
     "deepseek": {
         "enabled": "deepseek_enabled",
@@ -397,6 +416,49 @@ async def get_provider_status_api(
 ):
     settings = await _read_effective_settings(db)
     return ProviderStatusOut(items=[_build_provider_status(provider, settings) for provider in _PROVIDER_REQUIREMENTS])
+
+
+@provider_router.get("/readiness", response_model=ProviderReadinessOut)
+async def get_provider_readiness_api(
+    probe: bool = False,
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """供应商就绪度看板（切生产前人工核对清单）：
+    逐项汇总 Key 配置/开关状态，probe=true 时附带连通性探测；同时暴露运行时 provider 链名单。
+    """
+    from app.core.config import get_settings as get_static_settings
+    from app.providers.registry import registry
+
+    effective = await _read_effective_settings(db)
+    items: list[ProviderReadinessItem] = []
+    for provider in _PROVIDER_REQUIREMENTS:
+        st = _build_provider_status(provider, effective)
+        item = ProviderReadinessItem(
+            provider=provider,
+            enabled=st.enabled,
+            configured=st.configured,
+            missingFields=st.missingFields,
+            ready=st.enabled and st.configured,
+        )
+        if probe:
+            probe_out = await _probe_provider(provider, effective)
+            item.probeStatus = probe_out.status
+            item.probeMessage = probe_out.message
+            # 探测失败视为未就绪；needs_sample（douyidou）配置齐全即算就绪
+            if probe_out.status == "failed":
+                item.ready = False
+        items.append(item)
+    static = get_static_settings()
+    has_mock = registry.has_mock_providers()
+    return ProviderReadinessOut(
+        env=static.app_env,
+        providerMode="mock_fallback" if has_mock else "real_only",
+        mockFallbackAllowed=static.mock_fallback_allowed,
+        providerChains=registry.chain_snapshot(),
+        items=items,
+        allReady=all(item.ready for item in items),
+    )
 
 
 @provider_router.post("/{provider}/probe", response_model=ProviderProbeOut)

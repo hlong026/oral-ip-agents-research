@@ -87,6 +87,25 @@ export interface ProviderProbeResult {
   details: Record<string, unknown>;
 }
 
+export interface ProviderReadinessItem {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  missingFields: string[];
+  ready: boolean;
+  probeStatus: string;
+  probeMessage: string;
+}
+
+export interface ProviderReadiness {
+  env: string;
+  providerMode: "real_only" | "mock_fallback";
+  mockFallbackAllowed: boolean;
+  providerChains: Record<string, string[]>;
+  items: ProviderReadinessItem[];
+  allReady: boolean;
+}
+
 export interface AdminUser {
   id: string;
   phone: string | null;
@@ -485,4 +504,8 @@ export const adminApi = {
     adminFetch<ProviderProbeResult>(`/providers/${provider}/probe`, {
       method: "POST",
     }),
+  providerReadiness: (probe = false) =>
+    adminFetch<ProviderReadiness>(
+      `/providers/readiness${probe ? "?probe=true" : ""}`,
+    ),
 };
