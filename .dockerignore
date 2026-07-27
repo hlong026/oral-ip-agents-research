@@ -18,12 +18,11 @@
 **/*.pyc
 **/dist
 **/node_modules
-apps
+client
 docs
-e2e
+tools/e2e
 evidence
 node_modules
-packages
 reports
 screenshots
 server/storage

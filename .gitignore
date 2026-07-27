@@ -31,7 +31,7 @@ storage/
 minio-data/
 
 # tauri
-apps/desktop/src-tauri/target/
+client/apps/desktop-shell/src-tauri/target/
 
 # playwright
 test-results/

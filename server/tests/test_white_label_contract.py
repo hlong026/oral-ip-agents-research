@@ -51,12 +51,12 @@ def test_user_facing_web_sources_do_not_name_providers() -> None:
     web_sources = [
         path
         for pattern in ("*.ts", "*.tsx")
-        for path in (REPO_ROOT / "apps/web/src").rglob(pattern)
+        for path in (REPO_ROOT / "client/apps/web/src").rglob(pattern)
         if "__tests__" not in path.parts
     ]
     paths = [
         *sorted(web_sources),
-        *sorted((REPO_ROOT / "docs/ui-mockup").glob("*.html")),
+        *sorted((REPO_ROOT / "docs/design/prototypes/ui-mockup").glob("*.html")),
     ]
     leaks: list[str] = []
     for path in paths:

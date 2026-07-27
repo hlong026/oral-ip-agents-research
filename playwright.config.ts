@@ -13,7 +13,7 @@ process.env.E2E_API_BASE ??= `${e2eApiOrigin}/api`;
  * 默认使用隔离端口 28080/25173；可通过 E2E_API_PORT/E2E_WEB_PORT 覆盖。
  */
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: "./tools/e2e",
   timeout: 30_000,
   retries: 0,
   workers: 1,

@@ -81,7 +81,7 @@ jobs:
             curl -sf http://127.0.0.1:8000/healthz && break || sleep 1
           done
           curl -sf http://127.0.0.1:8000/healthz
-          node scripts/gen-api-types.mjs --check
+          node tools/scripts/gen-api-types.mjs --check
       - name: 8. 前端格式
         run: pnpm lint
       - name: 9. 前端类型检查
@@ -100,4 +100,4 @@ jobs:
           docker compose config --quiet
           docker build -f server/Dockerfile -t oral-ip-server:ci .
       - name: 14. 秘密扫描
-        run: node scripts/scan-secrets.mjs
+        run: node tools/scripts/scan-secrets.mjs

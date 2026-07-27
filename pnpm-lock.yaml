@@ -21,8 +21,11 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  apps/admin:
+  client/apps/admin:
     dependencies:
+      '@oral/admin-api-client':
+        specifier: workspace:*
+        version: link:../../packages/admin-api-client
       '@tanstack/react-query':
         specifier: ^5.51.0
         version: 5.101.2(react@19.2.8)
@@ -85,13 +88,13 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(jiti@1.21.7)(jsdom@24.1.3)
 
-  apps/desktop:
+  client/apps/desktop-shell:
     devDependencies:
       '@tauri-apps/cli':
         specifier: ^2.1.0
         version: 2.11.4
 
-  apps/web:
+  client/apps/web:
     dependencies:
       '@oral/api-client':
         specifier: workspace:*
@@ -170,7 +173,19 @@ importers:
         specifier: ^3.2.6
         version: 3.2.7(jiti@1.21.7)(jsdom@24.1.3)
 
-  packages/api-client:
+  client/packages/admin-api-client:
+    devDependencies:
+      '@oral/config':
+        specifier: workspace:*
+        version: link:../config
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vite:
+        specifier: ^6.4.3
+        version: 6.4.3(jiti@1.21.7)
+
+  client/packages/api-client:
     dependencies:
       '@oral/types':
         specifier: workspace:*
@@ -183,9 +198,9 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/config: {}
+  client/packages/config: {}
 
-  packages/hooks:
+  client/packages/hooks:
     dependencies:
       '@oral/types':
         specifier: workspace:*
@@ -204,7 +219,7 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/platform:
+  client/packages/platform:
     dependencies:
       '@oral/types':
         specifier: workspace:*
@@ -217,7 +232,7 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/stores:
+  client/packages/stores:
     dependencies:
       '@oral/api-client':
         specifier: workspace:*
@@ -236,7 +251,7 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/types:
+  client/packages/types:
     devDependencies:
       '@oral/config':
         specifier: workspace:*

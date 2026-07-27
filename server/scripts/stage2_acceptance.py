@@ -101,7 +101,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--body-file",
         type=Path,
-        default=Path(__file__).resolve().parents[2] / "e2e/fixtures/stage2-body.txt",
+        default=Path(__file__).resolve().parents[2] / "tools/e2e/fixtures/stage2-body.txt",
     )
     parser.add_argument("--platform", default=os.getenv("STAGE2_PLATFORM", "douyin"))
     parser.add_argument("--runs", type=int, default=3)
