@@ -17,6 +17,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config
+from app.core.logging import get_logger
 from app.core.storage import exists, local_path, read_bytes, save_bytes
 
 from .base import (
@@ -26,8 +27,10 @@ from .base import (
     SimilarityResult,
     StepRecoverableError,
 )
+from .cover import render_cover
 from .media_quality import inspect_media
 
+logger = get_logger("oral.providers.real")
 settings = get_settings()
 TIMEOUT = httpx.Timeout(connect=10.0, read=90.0, write=30.0, pool=10.0)
 
@@ -261,7 +264,9 @@ class FFmpegCompose:
             logo_path = await _materialize(inp.logo_key, workdir, "logo") if inp.logo_key else None
             subtitle_path = workdir / "subtitles.ass"
             if inp.subtitle_words:
-                subtitle_path.write_text(_build_ass(inp.subtitle_words, width, height), encoding="utf-8")
+                subtitle_path.write_text(
+                    _build_ass(inp.subtitle_words, width, height, inp.subtitle_style), encoding="utf-8"
+                )
 
             output_path = workdir / "final.mp4"
             cover_path = workdir / "cover.jpg"
@@ -276,12 +281,19 @@ class FFmpegCompose:
                 height,
             )
             await _run_ffmpeg(command, limit_seconds=300)
-            await _run_ffmpeg(
-                ["ffmpeg", "-y", "-i", str(output_path), "-frames:v", "1", "-q:v", "2", str(cover_path)],
-                limit_seconds=60,
-            )
+            await _extract_cover_frame(output_path, cover_path)
+            cover_bytes = cover_path.read_bytes()
+            if inp.cover_template != "none" and inp.cover_text.strip():
+                # 封面自动生成（14 号方案 §3.5）：帧底图 + 模板槽位 + 标题自动排版
+                try:
+                    cover_bytes = await asyncio.to_thread(
+                        render_cover, cover_bytes, inp.cover_text, inp.cover_template, width, height
+                    )
+                except Exception:
+                    # 模板渲染失败不阻断成片，回退原始帧封面
+                    logger.warning("cover_render_failed", exc_info=True, extra={"template": inp.cover_template})
             video_key = await save_bytes("compose", "final.mp4", output_path.read_bytes())
-            cover_key = await save_bytes("compose", "cover.jpg", cover_path.read_bytes())
+            cover_key = await save_bytes("compose", "cover.jpg", cover_bytes)
 
         report = await inspect_media(
             video_key,
@@ -344,6 +356,27 @@ async def _materialize(key: str, directory: Path, name: str) -> Path:
     path = directory / f"{name}{suffix}"
     await asyncio.to_thread(path.write_bytes, data)
     return path
+
+
+def _file_nonempty(path: Path) -> bool:
+    return path.exists() and path.stat().st_size > 0
+
+
+async def _extract_cover_frame(video: Path, cover: Path) -> None:
+    """封面底图：优先取 1s 处帧（口播开场站定后更稳），过短视频回退首帧"""
+    try:
+        await _run_ffmpeg(
+            ["ffmpeg", "-y", "-ss", "1", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
+            limit_seconds=60,
+        )
+        if await asyncio.to_thread(_file_nonempty, cover):
+            return
+    except StepRecoverableError:
+        pass
+    await _run_ffmpeg(
+        ["ffmpeg", "-y", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
+        limit_seconds=60,
+    )
 
 
 def _compose_command(
@@ -449,19 +482,86 @@ async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
         raise StepRecoverableError(f"FFmpeg 合成失败(exit={process.returncode}): {detail}")
 
 
-def _build_ass(words: list, width: int, height: int) -> str:
+def _ass_color(hex_color: str) -> str:
+    """#RRGGBB → ASS &H00BBGGRR（ABGR 小端序）"""
+    value = (hex_color or "").lstrip("#")
+    if len(value) != 6:
+        return "&H00FFFFFF"
+    try:
+        r, g, b = (int(value[i : i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return "&H00FFFFFF"
+    return f"&H00{b:02X}{g:02X}{r:02X}"
+
+
+def _ass_style_line(width: int, height: int, style: dict | None) -> str:
+    """剪辑台字幕配置 → ASS Style 行（字号按 1080 基准短边缩放，位置映射九宫格）"""
+    style = style or {}
+    scale = min(width, height) / 1080
+    try:
+        base_size = float(style.get("fontSize") or 54)
+    except (TypeError, ValueError):
+        base_size = 54.0
+    font_size = round(max(24.0, min(120.0, base_size)) * scale)
+    primary = _ass_color(str(style.get("color") or "#FFFFFF"))
+    position = str(style.get("position") or "bottom")
+    alignment = {"top": 8, "middle": 5}.get(position, 2)
+    margin_v = {"top": round(80 * scale), "middle": 0}.get(position, round(120 * scale))
+    stroke = style.get("stroke", 3)
+    if isinstance(stroke, bool):
+        stroke = 3 if stroke else 0
+    try:
+        outline = max(0, min(8, round(float(stroke))))
+    except (TypeError, ValueError):
+        outline = 3
+    return (
+        f"Style: Default,Arial,{font_size},{primary},&H00000000,1,"
+        f"{outline},0,{alignment},60,60,{margin_v},1"
+    )
+
+
+# 字幕分行：硬断句标点立即换行；软断句标点行长达标后换行；停顿间隙/行长上限兜底
+_HARD_BREAKERS = set("。！？!?；;…")
+_SOFT_BREAKERS = set("，,、：:")
+_MAX_LINE_CHARS = 16
+_SOFT_LINE_CHARS = 10
+_PAUSE_GAP_SECONDS = 0.5
+
+
+def _split_subtitle_groups(words: list) -> list[list]:
+    """按语句/停顿切分字幕行：每行起止=句首字 start/句末字 end，说到哪句显示哪句"""
+    groups: list[list] = []
+    current: list = []
+    length = 0
+    for word in words:
+        # 明显停顿（换气/句间留白）处先切行，停顿期字幕不滞留
+        if current and word.start - current[-1].end > _PAUSE_GAP_SECONDS:
+            groups.append(current)
+            current, length = [], 0
+        current.append(word)
+        length += len(word.word.strip())
+        tail = word.word.strip()[-1:]
+        soft_break = tail in _SOFT_BREAKERS and length >= _SOFT_LINE_CHARS
+        if tail in _HARD_BREAKERS or length >= _MAX_LINE_CHARS or soft_break:
+            groups.append(current)
+            current, length = [], 0
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _build_ass(words: list, width: int, height: int, style: dict | None = None) -> str:
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
         "[V4+ Styles]\n"
         "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BorderStyle, "
         "Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Default,Arial,54,&H00FFFFFF,&H00000000,1,3,0,2,60,60,120,1\n"
+        f"{_ass_style_line(width, height, style)}\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
     events: list[str] = []
-    for index in range(0, len(words), 12):
-        group = words[index : index + 12]
+    for group in _split_subtitle_groups(words):
         text = "".join(word.word for word in group).replace("\n", " ").replace("{", "（").replace("}", "）")
         events.append(f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},Default,,0,0,0,,{text}")
     return header + "\n".join(events) + "\n"

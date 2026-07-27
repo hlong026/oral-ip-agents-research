@@ -19,6 +19,14 @@ const BGM_MODES = [
   { key: "upload", label: "自定义上传", desc: "使用自有 BGM 素材" },
 ] as const;
 
+// 封面模板：key 与服务端 cover.COVER_TEMPLATES 一致（帧底图 + 槽位 + 标题自动排版）
+const COVER_TEMPLATES = [
+  { key: "bold-bottom", label: "大字标题", desc: "底部压暗 + 超大粗体，爆点词黄色高亮" },
+  { key: "center-band", label: "居中色带", desc: "品牌色横带 + 居中标题，正式感" },
+  { key: "top-title", label: "顶部标题", desc: "适配底部被平台 UI 遮挡的场景" },
+  { key: "none", label: "原始帧", desc: "不叠加文字，直接用视频帧" },
+] as const;
+
 interface EditConfig {
   fontSize: number;
   color: string;
@@ -26,7 +34,7 @@ interface EditConfig {
   stroke: number;
   bgmMode: string;
   bgmVolume: number;
-  cover: string;
+  coverTemplate: string;
 }
 
 const DEFAULT_CONFIG: EditConfig = {
@@ -36,7 +44,7 @@ const DEFAULT_CONFIG: EditConfig = {
   stroke: 2,
   bgmMode: "library",
   bgmVolume: 30,
-  cover: "A",
+  coverTemplate: "bold-bottom",
 };
 
 /** 视频剪辑台（流水线第⑥步 edit 产物精修：字幕样式/BGM/封面，F-401/402/404） */
@@ -129,7 +137,7 @@ export default function EditorPage() {
     setError("");
     setMsg("");
     try {
-      // 人工覆盖 edit 步参数 → 重跑 edit 步生成新成片
+      // 人工覆盖 edit 步参数 → 重跑 edit 步按配置真实重新合成（字幕样式 + 封面模板）
       await pipelineApi.overrideStep(detail.id, "edit", {
         subtitle_style: JSON.stringify({
           fontSize: cfg.fontSize,
@@ -139,7 +147,7 @@ export default function EditorPage() {
         }),
         bgm_mode: cfg.bgmMode,
         bgm_volume: String(cfg.bgmVolume),
-        cover: cfg.cover,
+        cover_template: cfg.coverTemplate,
       });
       await pipelineApi.retryStep(detail.id, "edit");
       setDirty(false);
@@ -354,38 +362,38 @@ export default function EditorPage() {
                 )}
               </div>
 
-              {/* 封面（F-404） */}
+              {/* 封面模板（F-404）：服务端自动取帧 + 标题自动排版，选模板即可 */}
               <div className="glass p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="font-medium">封面选择</h2>
-                  <span className="text-xs text-text-3">AI 已生成 3 候选</span>
+                  <h2 className="font-medium">封面模板</h2>
+                  <span className="text-xs text-text-3">
+                    标题自动匹配视频帧，保存后生效
+                  </span>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  {(["A", "B", "C"] as const).map((k) => (
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {COVER_TEMPLATES.map((t) => (
                     <button
-                      key={k}
-                      onClick={() => update({ cover: k })}
-                      className={`rounded-xl border-2 p-1 ${cfg.cover === k ? "border-brand-to" : "border-transparent"}`}
+                      key={t.key}
+                      onClick={() => update({ coverTemplate: t.key })}
+                      className={`rounded-xl border p-3.5 text-left ${cfg.coverTemplate === t.key ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
                     >
-                      {k === "A" && detail.coverUrl ? (
-                        <img
-                          src={detail.coverUrl}
-                          alt="封面 A · 成片首帧"
-                          className="h-24 w-full rounded-lg object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-24 items-center justify-center rounded-lg bg-white/5 text-xs text-text-3">
-                          封面 {k} ·{" "}
-                          {k === "A"
-                            ? "大字标题"
-                            : k === "B"
-                              ? "人物特写"
-                              : "对比数字"}
-                        </div>
-                      )}
+                      <div className="text-sm font-medium">{t.label}</div>
+                      <div className="mt-1 text-xs text-text-3">{t.desc}</div>
                     </button>
                   ))}
                 </div>
+                {detail.coverUrl && (
+                  <div className="mt-4 flex items-center gap-3">
+                    <img
+                      src={detail.coverUrl}
+                      alt="当前封面"
+                      className="h-24 rounded-lg border border-stroke object-cover"
+                    />
+                    <span className="text-xs text-text-3">
+                      当前封面 · 重新合成后按所选模板更新
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* 操作条 */}

@@ -9,7 +9,9 @@ mode=manual 时每步完成暂停等待用户确认（F-405 单步干预）
 """
 
 import asyncio
+import base64
 import json
+import mimetypes
 import time
 from datetime import UTC, datetime
 
@@ -344,12 +346,73 @@ async def step_voice(task: PipelineTask, ctx: dict) -> dict:
     result, provider = await registry.run_with_fallback(
         "voice", registry.voice_chain, "synthesize", voice_id, script, 1.0, trace_id=task.trace_id, task_id=task.id
     )
+    # 字幕精准同步：TTS 平摊时间戳不可信，对成品音频做 ASR 对齐拿真实字级时间戳
+    tts_words = await _align_tts_words(task, result.audio_key, script or "", result.duration)
+    if not tts_words:
+        tts_words = [{"word": w.word, "start": w.start, "end": w.end} for w in result.words]
     return {
         "audio_key": result.audio_key,
-        "tts_words": [{"word": w.word, "start": w.start, "end": w.end} for w in result.words],
+        "tts_words": tts_words,
         "duration": result.duration,
         "provider": provider,
     }
+
+
+# ASR 请求体内嵌 data URI 上限（与 content 模块 _MAX_ASR_DATA_URI_BYTES 保持一致）
+_MAX_ASR_DATA_URI_BYTES = 20 * 1024 * 1024
+
+
+async def _asr_media_input(audio_key: str, duration: float) -> str:
+    """ASR 取址三级策略（对齐 content 模块实践）：
+    ① 公网 URL 可达 → 直接回源（省 base64，长音频异步模式也能用）
+    ② 短音频（≤Flash 阈值）→ base64 data URI 内嵌，零配置直通
+    ③ 都不满足 → 返回空串，调用方回退平摊时间戳
+    """
+    from app.core.dynamic_config import get_config_int
+    from app.core.storage import get_accessible_url, read_bytes
+    from app.modules.content.service import _is_public_media_url
+
+    audio_url = await get_accessible_url(audio_key)
+    if _is_public_media_url(audio_url):
+        return audio_url
+    # 长音频只能走异步转写（要求公网回源），data URI 帮不上
+    threshold = await get_config_int("asr_flash_threshold_sec", 300)
+    if duration <= 0 or duration > threshold:
+        return ""
+    data = await read_bytes(audio_key)
+    media_type = mimetypes.guess_type(audio_key)[0] or "audio/mpeg"
+    data_uri = f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}"
+    return data_uri if len(data_uri) <= _MAX_ASR_DATA_URI_BYTES else ""
+
+
+async def _align_tts_words(task: PipelineTask, audio_key: str, script: str, duration: float) -> list[dict]:
+    """对 TTS 音频跑 ASR 取真实语音时间戳，对齐回脚本字符；任何失败回退平摊时间戳（不阻断流水线）"""
+    if not script.strip() or not audio_key:
+        return []
+    try:
+        from app.providers.align import align_script_to_asr
+
+        media_input = await _asr_media_input(audio_key, duration)
+        if not media_input:
+            logger.warning("subtitle_align_no_media_input", extra={"task_id": task.id})
+            return []
+        tr, _ = await registry.run_with_fallback(
+            "asr",
+            registry.asr_chain,
+            "transcribe",
+            media_input,
+            duration or None,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
+        aligned = align_script_to_asr(script, tr.words)
+        if not aligned:
+            logger.warning("subtitle_align_low_match", extra={"task_id": task.id})
+            return []
+        return [{"word": w.word, "start": w.start, "end": w.end} for w in aligned]
+    except Exception:
+        logger.warning("subtitle_align_failed", exc_info=True, extra={"task_id": task.id})
+        return []
 
 
 async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
@@ -394,16 +457,44 @@ async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
 
 
 async def step_compose(task: PipelineTask, ctx: dict) -> dict:
+    return await _compose_with_ctx(task, ctx)
+
+
+def _subtitle_style_from_ctx(ctx: dict) -> dict:
+    """剪辑台保存的字幕配置（override 写入 ctx，JSON 字符串容错），无配置用默认样式"""
+    raw = ctx.get("subtitle_style")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            raw = None
+    if isinstance(raw, dict):
+        return raw
+    return {"fontSize": 44, "color": "#FFFFFF", "position": "bottom", "stroke": 3}
+
+
+def _cover_text_from_ctx(task: PipelineTask, ctx: dict) -> str:
+    """封面标题取值：上游 LLM 标题优先，兜底口播文案截断"""
+    for candidate in (ctx.get("cover_title"), ctx.get("title"), task.title):
+        text = str(candidate or "").strip()
+        if text and text != "未命名任务":
+            return text[:24]
+    return (ctx.get("script") or "")[:18]
+
+
+async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
+    """合成执行体：compose 首跑与 edit 步按剪辑台配置重合成共用（字幕样式/封面模板真链路）"""
     # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底
     words = ctx.get("tts_words") or ctx.get("words") or []
     inp = ComposeInput(
         video_key=ctx.get("avatar_video_key") or ctx.get("video_key") or "",
         audio_key=ctx.get("audio_key"),
         subtitle_words=[],  # 由 engine 转换
-        subtitle_style={"fontSize": 15, "color": "#FFFFFF", "position": "bottom", "stroke": True},
+        subtitle_style=_subtitle_style_from_ctx(ctx),
         bgm_key=None,
         bgm_mode="auto",
-        cover_text=(ctx.get("script") or "")[:18],
+        cover_text=_cover_text_from_ctx(task, ctx),
+        cover_template=str(ctx.get("cover_template") or "bold-bottom"),
         randomize=task.randomize,
     )
     from app.providers.base import WordTs
@@ -422,10 +513,16 @@ async def step_compose(task: PipelineTask, ctx: dict) -> dict:
 
 
 async def step_edit(task: PipelineTask, ctx: dict) -> dict:
-    """剪辑步（第⑥步）：自动模式跳过；manual 模式等待人工在剪辑台确认"""
-    if task.mode == "auto":
-        return {"skipped": True, "note": "自动模式跳过剪辑步"}
-    return {"edited": True, "note": "人工剪辑确认"}
+    """剪辑步（第⑥步）：剪辑台保存过配置时按配置真实重新合成；否则 auto 跳过、manual 人工确认"""
+    has_config = bool(ctx.get("subtitle_style") or ctx.get("cover_template"))
+    if not has_config:
+        if task.mode == "auto":
+            return {"skipped": True, "note": "自动模式跳过剪辑步"}
+        return {"edited": True, "note": "人工剪辑确认"}
+    out = await _compose_with_ctx(task, ctx)
+    out["edited"] = True
+    out["note"] = "已按剪辑台配置重新合成"
+    return out
 
 
 async def step_publish(task: PipelineTask, ctx: dict) -> dict:
