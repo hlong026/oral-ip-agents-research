@@ -1,9 +1,14 @@
 """对象存储：local（MVP 默认）/ s3（MinIO）；产物落库用相对 key，访问走 /media 路由"""
 
 import asyncio
+import hashlib
+import hmac
+import os
+import time
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
+from typing import Protocol
 from urllib.parse import quote
 
 import aiofiles
@@ -17,6 +22,14 @@ settings = get_settings()
 
 class StorageConfigurationError(RuntimeError):
     """存储配置不足以支持真实外部调用。"""
+
+
+class UploadTooLarge(ValueError):
+    """上传流超过业务上限。"""
+
+
+class AsyncUploadStream(Protocol):
+    async def read(self, size: int = -1) -> bytes: ...
 
 
 def _validated_key(key: str) -> str:
@@ -60,6 +73,62 @@ async def save_bytes(prefix: str, filename: str, data: bytes) -> str:
 
 async def save_text(prefix: str, filename: str, text: str) -> str:
     return await save_bytes(prefix, filename, text.encode("utf-8"))
+
+
+async def read_limited(source: AsyncUploadStream, max_bytes: int, chunk_size: int = 1024 * 1024) -> bytes:
+    """分块读取小型上传；最多读取 limit+1 字节后立即拒绝。"""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        data = await source.read(min(chunk_size, max_bytes - total + 1))
+        if not data:
+            return b"".join(chunks)
+        total += len(data)
+        if total > max_bytes:
+            raise UploadTooLarge
+        chunks.append(data)
+
+
+async def save_stream(
+    prefix: str,
+    filename: str,
+    source: AsyncUploadStream,
+    *,
+    max_bytes: int,
+    chunk_size: int = 1024 * 1024,
+) -> tuple[str, int]:
+    """分块保存大文件，避免把整个上传载入进程内存。"""
+    key = _key(prefix, filename)
+    path = local_path(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    try:
+        async with aiofiles.open(path, "wb") as target:
+            while True:
+                data = await source.read(min(chunk_size, max_bytes - total + 1))
+                if not data:
+                    break
+                total += len(data)
+                if total > max_bytes:
+                    raise UploadTooLarge
+                await target.write(data)
+        if settings.storage_driver == "s3":
+            client = _s3_client()
+            await asyncio.to_thread(client.upload_file, str(path), settings.s3_bucket, key)
+            await asyncio.to_thread(path.unlink, missing_ok=True)
+        return key, total
+    except BaseException:
+        await asyncio.to_thread(path.unlink, missing_ok=True)
+        raise
+
+
+async def delete(key: str) -> None:
+    key = _validated_key(key)
+    if settings.storage_driver == "local":
+        await asyncio.to_thread(local_path(key).unlink, missing_ok=True)
+        return
+    client = _s3_client()
+    await asyncio.to_thread(client.delete_object, Bucket=settings.s3_bucket, Key=key)
 
 
 def local_path(key: str) -> Path:
@@ -137,7 +206,41 @@ async def stream_range(key: str, start: int, end: int, chunk_size: int = 1024 * 
         yield data
 
 
-async def get_accessible_url(key: str, *, require_public: bool = False) -> str:
+def _media_signature(key: str, expires_at: int) -> str:
+    message = f"{_validated_key(key)}:{expires_at}".encode()
+    return hmac.new(settings.app_secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def signed_media_path(key: str, *, expires_in: int = 3600) -> str:
+    """生成短期媒体访问路径；签名本身是 bearer，不在日志中附带用户凭据。"""
+    key = _validated_key(key)
+    expires_at = int(time.time()) + expires_in
+    signature = _media_signature(key, expires_at)
+    return f"/media/{quote(key, safe='/')}?exp={expires_at}&sig={signature}"
+
+
+def verify_media_signature(key: str, expires_at: str | None, signature: str | None) -> bool:
+    if not expires_at or not signature:
+        return False
+    try:
+        expires = int(expires_at)
+    except ValueError:
+        return False
+    if expires < int(time.time()):
+        return False
+    try:
+        expected = _media_signature(key, expires)
+    except ValueError:
+        return False
+    return hmac.compare_digest(expected, signature)
+
+
+async def get_accessible_url(
+    key: str,
+    *,
+    require_public: bool = False,
+    expires_in: int = 24 * 60 * 60,
+) -> str:
     """返回云端 Provider 可下载的媒体 URL。"""
     key = _validated_key(key)
     base_url = settings.media_public_base_url.strip().rstrip("/")
@@ -146,4 +249,17 @@ async def get_accessible_url(key: str, *, require_public: bool = False) -> str:
             "真实云端转写前必须配置 MEDIA_PUBLIC_BASE_URL，并确保其 /media 路径可从公网访问"
         )
     base_url = base_url or "http://127.0.0.1:8000"
-    return f"{base_url}/media/{quote(key, safe='/')}"
+    return f"{base_url}{signed_media_path(key, expires_in=expires_in)}"
+
+
+async def storage_ready() -> bool:
+    """检查当前存储后端是否可用，不创建探针对象。"""
+    if settings.storage_driver == "local":
+        path = Path(settings.local_storage_dir)
+        return await asyncio.to_thread(lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK))
+    try:
+        client = _s3_client()
+        await asyncio.to_thread(client.head_bucket, Bucket=settings.s3_bucket)
+        return True
+    except Exception:
+        return False

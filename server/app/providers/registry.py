@@ -20,6 +20,7 @@ from .base import (
     ComposeEngine,
     LLMProvider,
     ParseProvider,
+    ProviderOutcomeUnknown,
     PublishDriver,
     VoiceProvider,
     is_mock_provider,
@@ -192,6 +193,17 @@ class ProviderRegistry:
                         },
                     )
                 return result, provider.name
+            except ProviderOutcomeUnknown as e:
+                logger.error(
+                    "provider_outcome_unknown",
+                    kind=kind,
+                    provider_name=provider.name,
+                    fn_name=fn_name,
+                    error=str(e)[:200],
+                    trace_id=trace_id,
+                    task_id=task_id,
+                )
+                raise
             except StepRecoverableError as e:
                 # 降级链中某 Provider 失败：记录 WARNING
                 logger.warning(

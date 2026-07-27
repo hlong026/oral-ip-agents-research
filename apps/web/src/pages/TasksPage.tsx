@@ -4,13 +4,14 @@ import type { PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { Zap } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import TaskCard from "../components/TaskCard";
 
 const FILTERS = [
   { key: "", label: "全部" },
   { key: "running", label: "执行中" },
   { key: "waiting_confirm", label: "待确认" },
+  { key: "reconciliation_required", label: "待对账" },
   { key: "done", label: "已完成" },
   { key: "failed", label: "失败" },
 ] as const;
@@ -45,7 +46,7 @@ export default function TasksPage() {
         <div>
           <h1 className="text-xl font-bold">任务中心</h1>
           <p className="mt-1 text-sm text-text-3">
-            8 步流水线实时进度 · 单步重跑 / 人工覆盖 / 批量队列
+            8 步流水线实时进度 · 单步重跑 / 版本化精修 / 批量队列
           </p>
         </div>
         <Link to="/create" className="btn-primary flex items-center gap-1.5">

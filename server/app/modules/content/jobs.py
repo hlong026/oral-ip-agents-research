@@ -2,7 +2,7 @@
 
 import json
 import math
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes
+from app.core.storage import save_bytes
 from app.core.white_label import public_error_message, public_metadata
 from app.modules.billing.service import (
     attach_reservation,
@@ -22,7 +22,7 @@ from app.modules.billing.service import (
     settle_reservation,
 )
 from app.providers.base import ProviderError
-from app.providers.duration_probe import probe_media_bytes
+from app.providers.duration_probe import probe_media_bytes, probe_media_key
 
 from . import repository
 from . import service as content_service
@@ -134,11 +134,22 @@ async def submit_parse_upload(
     user_id: str,
     persona_id: str | None,
     filename: str,
-    data: bytes,
+    data: bytes | None,
     quote_id: str | None,
+    storage_key: str | None = None,
+    duration_seconds: float | None = None,
 ) -> ContentJobOut:
     unit = await quote_operation_unit(db, user_id, quote_id, "asr")
-    duration = await probe_media_bytes(data, Path(filename).suffix)
+    if duration_seconds is not None:
+        duration = duration_seconds
+    elif storage_key:
+        info = await probe_media_key(storage_key)
+        try:
+            duration = float((info or {})["format"]["duration"])
+        except (KeyError, TypeError, ValueError):
+            duration = None
+    else:
+        duration = await probe_media_bytes(data or b"", Path(filename).suffix)
     if unit in {"per_minute", "per_second"} and duration is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -152,7 +163,7 @@ async def submit_parse_upload(
         "asr",
         {"seconds": seconds, "assets": 1},
     )
-    storage_key = await save_bytes("content-jobs", filename, data)
+    storage_key = storage_key or await save_bytes("content-jobs", filename, data or b"")
     return await _create_and_schedule(
         db,
         user_id=user_id,
@@ -294,13 +305,12 @@ async def _execute(db: AsyncSession, job: ContentJob) -> dict:
     if job.kind == "parse_upload":
         await progress(25, "正在读取上传媒体")
         storage_key = str(payload["storageKey"])
-        data = await read_bytes(storage_key)
         await progress(45, "正在提取音轨并转写文案")
         upload_result = await content_service.parse_upload(
             db,
             job.user_id,
             str(payload["filename"]),
-            data,
+            None,
             payload.get("personaId"),
             payload.get("durationSeconds"),
             storage_key=storage_key,
@@ -335,13 +345,65 @@ async def _update_progress(job_id: str, progress: int, stage: str) -> None:
 
 
 async def recover_pending_jobs(db: AsyncSession) -> int:
-    jobs = await repository.pending_jobs(db)
+    # Content actor 最长执行 30 分钟；只处理超过宽限期的 running，避免 API
+    # 滚动重启与仍在运行的独立 Worker 争抢同一任务。
+    jobs = await repository.recoverable_jobs(
+        db,
+        running_stale_before=datetime.now(UTC) - timedelta(minutes=35),
+    )
+    scheduled = 0
+    stale_failed = 0
+    stale_settled = 0
     for job in jobs:
+        if job.status == "running":
+            if json.loads(job.result_json or "{}"):
+                try:
+                    settled = await settle_reservation(
+                        db,
+                        job.reservation_id,
+                        job.id,
+                        step=_billing_step(job.kind),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "content_job_recovery_settlement_failed",
+                        job_id=job.id,
+                        user_id=job.user_id,
+                    )
+                    settled = 0
+                if settled > 0:
+                    job.status = "done"
+                    job.progress = 100
+                    job.stage = "处理完成"
+                    job.error = ""
+                    await db.commit()
+                    await _emit(job)
+                    stale_settled += 1
+                    continue
+                await recover_reservation_after_failure(db, job.reservation_id, job.user_id)
+                job = await repository.get_job(db, job.id) or job
+            else:
+                await release_reservation(db, job.reservation_id, job.user_id)
+                job = await repository.get_job(db, job.id) or job
+            job.status = "failed"
+            job.stage = "处理失败"
+            job.error = "服务中断时任务结果未能确认，积分已恢复，请重新提交"
+            job.queue_message_id = ""
+            await db.commit()
+            await _emit(job)
+            stale_failed += 1
+            continue
         message_id = schedule_content_job(job.id)
         await repository.record_job_message(db, job.id, message_id)
+        scheduled += 1
     if jobs:
-        logger.warning("content_jobs_recovered", count=len(jobs))
-    return len(jobs)
+        logger.warning(
+            "content_jobs_recovered",
+            scheduled=scheduled,
+            stale_failed=stale_failed,
+            stale_settled=stale_settled,
+        )
+    return scheduled
 
 
 async def _emit(job: ContentJob) -> None:

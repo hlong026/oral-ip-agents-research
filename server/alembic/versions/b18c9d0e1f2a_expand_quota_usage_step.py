@@ -28,13 +28,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute(
-        sa.text(
-            "UPDATE quota_usage "
-            "SET step = 'rewrite' "
-            "WHERE step = 'script_generation'"
-        )
-    )
+    op.execute(sa.text("UPDATE quota_usage SET step = 'rewrite' WHERE step = 'script_generation'"))
     with op.batch_alter_table("quota_usage") as batch_op:
         batch_op.alter_column(
             "step",

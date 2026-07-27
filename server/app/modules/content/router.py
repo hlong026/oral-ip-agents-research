@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_active_persona_id, get_current_user_id
+from app.core.storage import UploadTooLarge, delete, save_stream
 from app.modules.billing.service import metered_operation, quote_operation_unit
-from app.providers.duration_probe import probe_media_bytes
+from app.providers.duration_probe import probe_media_key
 
 from . import jobs
 from .schemas import (
@@ -74,6 +75,34 @@ def _validate_upload(filename: str, data: bytes) -> None:
         )
 
 
+def _validate_upload_filename(filename: str) -> None:
+    _validate_upload(filename, b"")
+
+
+def _verified_duration(info: dict | None) -> float:
+    streams = (info or {}).get("streams")
+    if not isinstance(streams, list) or not any(
+        stream.get("codec_type") in {"audio", "video"} for stream in streams if isinstance(stream, dict)
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_MEDIA", "message": "上传文件不是可识别的音视频"},
+        )
+    try:
+        duration = float((info or {})["format"]["duration"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "MEDIA_DURATION_UNVERIFIED", "message": "无法验证媒体时长"},
+        ) from exc
+    if duration <= 0:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "MEDIA_DURATION_UNVERIFIED", "message": "无法验证媒体时长"},
+        )
+    return duration
+
+
 @router.post("/probe", response_model=ProbeUrlOut)
 async def api_probe_url(
     body: ProbeUrlIn,
@@ -95,31 +124,41 @@ async def api_parse(
 ):
     if file is not None:
         filename = file.filename or ""
-        data = await file.read(_MAX_UPLOAD_BYTES + 1)
-        _validate_upload(filename, data)
-        unit = await quote_operation_unit(db, user_id, quoteId, "asr")
-        duration = await probe_media_bytes(data, Path(file.filename or "").suffix)
-        if unit in {"per_minute", "per_second"} and duration is None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "MEDIA_DURATION_UNVERIFIED", "message": "无法验证媒体时长，暂不能执行转写"},
-            )
-        seconds = max(1, math.ceil(duration or 1))
-        async with metered_operation(
-            db,
-            user_id,
-            quoteId,
-            "asr",
-            {"seconds": seconds, "assets": 1},
-        ):
-            return await parse_upload(
+        _validate_upload_filename(filename)
+        storage_key = ""
+        try:
+            storage_key, _ = await save_stream("uploads", filename, file, max_bytes=_MAX_UPLOAD_BYTES)
+            duration = _verified_duration(await probe_media_key(storage_key))
+            await quote_operation_unit(db, user_id, quoteId, "asr")
+            seconds = max(1, math.ceil(duration))
+            async with metered_operation(
                 db,
                 user_id,
-                filename,
-                data,
-                persona_id,
-                duration,
-            )
+                quoteId,
+                "asr",
+                {"seconds": seconds, "assets": 1},
+            ):
+                return await parse_upload(
+                    db,
+                    user_id,
+                    filename,
+                    None,
+                    persona_id,
+                    duration,
+                    storage_key=storage_key,
+                )
+        except UploadTooLarge as exc:
+            raise HTTPException(
+                status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={
+                    "code": "FILE_TOO_LARGE",
+                    "message": f"上传文件不能超过 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+                },
+            ) from exc
+        except BaseException:
+            if storage_key:
+                await delete(storage_key)
+            raise
     if body:
         return await parse_text(db, user_id, body, persona_id)
     target = url
@@ -130,10 +169,10 @@ async def api_parse(
         )
     unit = await quote_operation_unit(db, user_id, quoteId, "asr")
     time_priced = unit in {"per_minute", "per_second"}
-    duration = await probe_url_duration(target, required=True) if time_priced else None
-    seconds = max(1, math.ceil(duration or 1))
+    url_duration = await probe_url_duration(target, required=True) if time_priced else None
+    seconds = max(1, math.ceil(url_duration or 1))
     async with metered_operation(db, user_id, quoteId, "asr", {"seconds": seconds, "assets": 1}):
-        return await parse_url(db, user_id, target, persona_id, duration)
+        return await parse_url(db, user_id, target, persona_id, url_duration)
 
 
 @router.post(
@@ -151,16 +190,33 @@ async def api_submit_parse_job(
 ) -> ContentJobOut:
     if file is not None:
         filename = file.filename or ""
-        data = await file.read(_MAX_UPLOAD_BYTES + 1)
-        _validate_upload(filename, data)
-        return await jobs.submit_parse_upload(
-            db,
-            user_id=user_id,
-            persona_id=persona_id,
-            filename=filename,
-            data=data,
-            quote_id=quoteId,
-        )
+        _validate_upload_filename(filename)
+        storage_key = ""
+        try:
+            storage_key, _ = await save_stream("content-jobs", filename, file, max_bytes=_MAX_UPLOAD_BYTES)
+            duration = _verified_duration(await probe_media_key(storage_key))
+            return await jobs.submit_parse_upload(
+                db,
+                user_id=user_id,
+                persona_id=persona_id,
+                filename=filename,
+                data=None,
+                quote_id=quoteId,
+                storage_key=storage_key,
+                duration_seconds=duration,
+            )
+        except UploadTooLarge as exc:
+            raise HTTPException(
+                status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={
+                    "code": "FILE_TOO_LARGE",
+                    "message": f"上传文件不能超过 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB",
+                },
+            ) from exc
+        except BaseException:
+            if storage_key:
+                await delete(storage_key)
+            raise
     if not url:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,

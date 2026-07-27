@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router";
 
 const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
   pending: { icon: Circle, cls: "text-text-3" },
@@ -22,9 +22,10 @@ const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
   done: { icon: CircleCheck, cls: "text-success" },
   skipped: { icon: Minus, cls: "text-text-3" },
   failed: { icon: X, cls: "text-danger" },
+  reconciliation_required: { icon: Hand, cls: "text-warning" },
 };
 
-/** 单步时间线节点（重跑/人工覆盖入口） */
+/** 单步时间线节点（受控重跑入口） */
 function StepNode({
   task,
   step,
@@ -36,9 +37,6 @@ function StepNode({
   isLast: boolean;
   onAction: () => void;
 }) {
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [overrideKey, setOverrideKey] = useState("");
-  const [overrideVal, setOverrideVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [retryQuote, setRetryQuote] = useState<{
     quoteId: string;
@@ -51,12 +49,8 @@ function StepNode({
     task.status !== "done" &&
     task.status !== "canceled" &&
     task.status !== "running" &&
+    task.status !== "reconciliation_required" &&
     (step.status === "failed" || step.status === "done");
-  const canOverride =
-    step.status !== "running" &&
-    task.status !== "running" &&
-    task.status !== "done";
-
   const retry = async () => {
     setBusy(true);
     setActionError("");
@@ -84,20 +78,6 @@ function StepNode({
           error instanceof HttpError ? error.body.message : "步骤重跑失败",
         );
       }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const override = async () => {
-    if (!overrideKey.trim()) return;
-    setBusy(true);
-    try {
-      await pipelineApi.overrideStep(task.id, step.step, {
-        [overrideKey.trim()]: overrideVal,
-      });
-      setOverrideOpen(false);
-      onAction();
     } finally {
       setBusy(false);
     }
@@ -133,15 +113,6 @@ function StepNode({
               className="btn-ghost px-2.5 py-0.5 text-xs"
             >
               重跑此步
-            </button>
-          )}
-          {canOverride && (
-            <button
-              onClick={() => setOverrideOpen((v) => !v)}
-              disabled={busy}
-              className="btn-ghost px-2.5 py-0.5 text-xs"
-            >
-              人工覆盖
             </button>
           )}
         </div>
@@ -199,35 +170,12 @@ function StepNode({
             )}
           </div>
         )}
-        {overrideOpen && (
-          <div className="glass-strong mt-3 flex flex-wrap items-center gap-2 p-3">
-            <input
-              className="input h-8 w-40 text-xs"
-              placeholder="产物键（如 script）"
-              value={overrideKey}
-              onChange={(e) => setOverrideKey(e.target.value)}
-            />
-            <input
-              className="input h-8 flex-1 text-xs"
-              placeholder="产物值（文本或 /media 链接）"
-              value={overrideVal}
-              onChange={(e) => setOverrideVal(e.target.value)}
-            />
-            <button
-              onClick={override}
-              disabled={busy || !overrideKey.trim()}
-              className="btn-primary px-3 py-1 text-xs"
-            >
-              覆盖并续跑
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-/** 任务详情：成片预览为主 + 进度条弱化展示（F-405，步骤详情可展开重跑/覆盖） */
+/** 任务详情：成片预览为主 + 进度条弱化展示（F-405，步骤详情可展开重跑） */
 export default function TaskDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -282,10 +230,8 @@ export default function TaskDetailPage() {
     const v = task.artifacts?.[key];
     return typeof v === "string" && v ? v : undefined;
   };
-  const composeStep = task.steps.find((s) => s.step === "compose");
-  const finalVideo =
-    art("final_video_key") ?? composeStep?.artifacts?.final_video_key;
-  const coverKey = art("cover_key") ?? composeStep?.artifacts?.cover_key;
+  const finalVideoUrl = art("final_video_url");
+  const coverUrl = art("cover_url") ?? task.coverUrl ?? undefined;
   const script =
     art("script") ??
     task.steps.find((s) => s.step === "rewrite")?.artifacts?.script;
@@ -308,7 +254,8 @@ export default function TaskDetailPage() {
   const isFinished =
     task.status === "done" ||
     task.status === "failed" ||
-    task.status === "canceled";
+    task.status === "canceled" ||
+    task.status === "reconciliation_required";
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -340,7 +287,7 @@ export default function TaskDetailPage() {
             <Hand className="h-4 w-4" />
           </span>
           <span className="flex-1 text-sm">
-            当前步骤已完成，检查产物后确认继续（或直接重跑/覆盖）
+            当前步骤已完成，检查产物后确认继续；如有问题可重跑当前步骤
           </span>
           <button
             className="btn-primary px-5"
@@ -365,17 +312,31 @@ export default function TaskDetailPage() {
         </div>
       )}
 
+      {task.status === "reconciliation_required" && (
+        <div className="glass flex items-center gap-3 border-warning/40 p-4">
+          <span className="text-warning">
+            <Hand className="h-4 w-4" />
+          </span>
+          <span className="flex-1 text-sm text-warning">
+            外部服务提交结果未知，系统已停止自动重试并保留积分冻结；管理员对账完成前请勿重复创建。
+          </span>
+        </div>
+      )}
+
       {/* 成片预览（主体）：就绪即内嵌播放，未就绪时以进度占位 */}
       <div className="glass p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-medium">成片预览</span>
-          {finalVideo && (
+          {finalVideoUrl && (
             <div className="flex gap-2">
-              <Link to="/editor" className="btn-ghost px-3 py-1.5 text-xs">
+              <Link
+                to={`/editor?task=${task.id}`}
+                className="btn-ghost px-3 py-1.5 text-xs"
+              >
                 去剪辑精修
               </Link>
               <Link
-                to="/publish/jobs"
+                to={`/publish/jobs?task=${task.id}`}
                 className="btn-primary px-3 py-1.5 text-xs"
               >
                 去发布
@@ -383,10 +344,10 @@ export default function TaskDetailPage() {
             </div>
           )}
         </div>
-        {finalVideo ? (
+        {finalVideoUrl ? (
           <video
-            src={`/media/${finalVideo}`}
-            poster={coverKey ? `/media/${coverKey}` : undefined}
+            src={finalVideoUrl}
+            poster={coverUrl}
             controls
             playsInline
             preload="metadata"
@@ -401,7 +362,9 @@ export default function TaskDetailPage() {
                 <span className="text-sm">
                   {task.status === "failed"
                     ? "合成未完成，可展开下方步骤详情从失败步续跑"
-                    : "任务已取消，未生成成片"}
+                    : task.status === "reconciliation_required"
+                      ? "任务等待管理员核对外部服务结果"
+                      : "任务已取消，未生成成片"}
                 </span>
               </>
             ) : (
@@ -435,16 +398,17 @@ export default function TaskDetailPage() {
                 ? `${STEP_LABELS[runningStep.step]}中…`
                 : task.status === "failed"
                   ? "已失败"
-                  : task.status === "canceled"
-                    ? "已取消"
-                    : task.status === "waiting_confirm"
-                      ? "等待人工确认"
-                      : "等待中"}
+                  : task.status === "reconciliation_required"
+                    ? "等待人工对账"
+                    : task.status === "canceled"
+                      ? "已取消"
+                      : task.status === "waiting_confirm"
+                        ? "等待人工确认"
+                        : "等待中"}
           </span>
           <div className="flex-1" />
           <span className="text-xs font-medium text-text-2">{overallPct}%</span>
-          {(task.status === "running" ||
-            task.status === "waiting_confirm") && (
+          {(task.status === "running" || task.status === "waiting_confirm") && (
             <button
               className="btn-danger px-3 py-1 text-xs"
               onClick={async () => {
@@ -490,7 +454,7 @@ export default function TaskDetailPage() {
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
           />
-          {detailsOpen ? "收起步骤详情" : "展开步骤详情（重跑 / 人工覆盖）"}
+          {detailsOpen ? "收起步骤详情" : "展开步骤详情（单步重跑）"}
         </button>
         {detailsOpen && (
           <div className="mt-4 border-t border-stroke pt-4">

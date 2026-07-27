@@ -6,6 +6,7 @@
  *   CHANNEL_ALERT → alert
  */
 import type { FeedEvent } from "@oral/types";
+import { API_BASE } from "./http";
 
 export type TaskEvent =
   | { kind: "task_updated"; taskId: string; userId?: string }
@@ -43,9 +44,18 @@ export class TaskSocket {
   private url: string;
   private token: string;
 
-  constructor(token: string) {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    this.url = `${proto}://${location.host}/ws/tasks`;
+  constructor(token: string, apiBase = API_BASE) {
+    if (/^https?:\/\//.test(apiBase)) {
+      const remote = new URL(apiBase);
+      remote.protocol = remote.protocol === "https:" ? "wss:" : "ws:";
+      remote.pathname = "/ws/tasks";
+      remote.search = "";
+      remote.hash = "";
+      this.url = remote.toString();
+    } else {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      this.url = `${proto}://${location.host}/ws/tasks`;
+    }
     this.token = token;
   }
 

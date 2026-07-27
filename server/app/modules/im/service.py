@@ -532,13 +532,18 @@ async def approve_gray_account(db: AsyncSession, account_id: str, admin_id: str)
             detail={"code": "ACCOUNT_NOT_FOUND", "message": "发布账号不存在"},
         )
     settings = get_settings()
-    already_enabled = await repo.is_gray_account_enabled(db, account_id, account.user_id)
-    if not already_enabled and await repo.gray_account_count(db) >= max(1, settings.im_gray_max_accounts):
+    try:
+        gray = await repo.approve_gray_account(
+            db,
+            account_id,
+            approved_by=admin_id,
+            max_enabled=settings.im_gray_max_accounts,
+        )
+    except repo.GrayAccountLimitReached:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "IM_GRAY_LIMIT_REACHED", "message": "灰度账号数量已达到受控上限"},
-        )
-    gray = await repo.approve_gray_account(db, account_id, approved_by=admin_id)
+        ) from None
     if gray is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,

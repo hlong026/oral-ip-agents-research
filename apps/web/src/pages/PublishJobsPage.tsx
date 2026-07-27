@@ -1,13 +1,14 @@
-import { HttpError, publishApi } from "@oral/api-client";
+import { HttpError, pipelineApi, publishApi } from "@oral/api-client";
 import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
+  type Platform,
   type PublishJob,
 } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
-import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router";
 
 import PlatformIcon from "../components/PlatformIcon";
 
@@ -161,8 +162,18 @@ export default function PublishJobsPage({
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
+  const [publishTitle, setPublishTitle] = useState("");
+  const [publishAt, setPublishAt] = useState("");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [created, setCreated] = useState(false);
   const taskFilter = params.get("task") ?? "";
 
+  const { data: targetTask, isLoading: taskLoading } = useQuery({
+    queryKey: ["task", taskFilter],
+    queryFn: () => pipelineApi.get(taskFilter),
+    enabled: Boolean(taskFilter),
+  });
   const { data: accounts } = useQuery({
     queryKey: ["publish-accounts"],
     queryFn: () => publishApi.accounts(),
@@ -172,18 +183,25 @@ export default function PublishJobsPage({
     queryFn: () => publishApi.capabilities(),
   });
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["publish-jobs", showLogs ? "logs" : status, page],
+    queryKey: ["publish-jobs", showLogs ? "logs" : status, page, taskFilter],
     queryFn: () =>
       showLogs
         ? publishApi.logs(page, 50)
-        : publishApi.jobs(status || undefined, page, 12),
+        : publishApi.jobs(
+            status || undefined,
+            page,
+            12,
+            taskFilter || undefined,
+          ),
     refetchInterval: 10_000,
   });
 
+  useEffect(() => {
+    if (targetTask) setPublishTitle(targetTask.title);
+  }, [targetTask]);
+
   const expired = (accounts ?? []).filter((a) => a.status === "expired");
-  const items = (data?.items ?? []).filter(
-    (j) => !taskFilter || j.taskId === taskFilter,
-  );
+  const items = data?.items ?? [];
 
   const refresh = () => {
     void refetch();
@@ -197,6 +215,37 @@ export default function PublishJobsPage({
       void queryClient.invalidateQueries({ queryKey: ["publish-accounts"] });
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "发起授权失败");
+    }
+  };
+
+  const togglePlatform = (platform: Platform) => {
+    setSelectedPlatforms((current) =>
+      current.includes(platform)
+        ? current.filter((item) => item !== platform)
+        : [...current, platform],
+    );
+  };
+
+  const createPublishJobs = async () => {
+    if (!targetTask || targetTask.status !== "done") return;
+    if (!publishTitle.trim() || selectedPlatforms.length === 0) return;
+    setCreating(true);
+    setCreated(false);
+    setError("");
+    try {
+      await publishApi.createJobs({
+        taskId: targetTask.id,
+        platforms: selectedPlatforms,
+        title: publishTitle.trim().slice(0, 30),
+        publishAt: publishAt ? new Date(publishAt).toISOString() : undefined,
+      });
+      setCreated(true);
+      await queryClient.invalidateQueries({ queryKey: ["publish-jobs"] });
+      await refetch();
+    } catch (e) {
+      setError(e instanceof HttpError ? e.body.message : "创建发布任务失败");
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -272,6 +321,116 @@ export default function PublishJobsPage({
         <div className="rounded-card border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
           未完成真实账号验收的平台只生成包含视频、封面和发布文案的 ZIP
           发布包，不会触发自动发布。
+        </div>
+      )}
+
+      {taskFilter && (
+        <div className="glass-strong space-y-4 p-5">
+          <div>
+            <h2 className="font-medium">为此成片创建发布任务</h2>
+            <p className="mt-1 text-xs text-text-3">
+              发布始终使用当前活动成片版本；未验收平台只生成完整人工发布包。
+            </p>
+          </div>
+          {taskLoading && (
+            <div className="py-6 text-center text-sm text-text-3">
+              正在读取成片…
+            </div>
+          )}
+          {targetTask && targetTask.status !== "done" && (
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+              当前任务尚未完成，暂不能创建发布任务。
+            </div>
+          )}
+          {targetTask?.status === "done" && (
+            <>
+              {typeof targetTask.artifacts?.final_video_url === "string" && (
+                <video
+                  src={targetTask.artifacts.final_video_url}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="max-h-72 w-full rounded-xl bg-black"
+                  aria-label="待发布活动成片"
+                />
+              )}
+              <div>
+                <label className="label" htmlFor="publish-title">
+                  视频标题
+                </label>
+                <input
+                  id="publish-title"
+                  className="input"
+                  value={publishTitle}
+                  onChange={(event) => setPublishTitle(event.target.value)}
+                  maxLength={30}
+                />
+              </div>
+              <div>
+                <div className="label">发布平台</div>
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                  {PUBLISH_PLATFORMS.map((platform) => {
+                    const capability = (capabilities ?? []).find(
+                      (item) => item.platform === platform,
+                    );
+                    const active = selectedPlatforms.includes(platform);
+                    return (
+                      <button
+                        key={platform}
+                        type="button"
+                        onClick={() => togglePlatform(platform)}
+                        className={`flex items-center justify-center gap-2 rounded-xl border p-3 text-sm ${
+                          active
+                            ? "border-brand-from/60 bg-brand-from/10 text-text-1"
+                            : "border-stroke bg-white/[0.03] text-text-3"
+                        }`}
+                      >
+                        <PlatformIcon platform={platform} size={18} />
+                        <span>
+                          {PLATFORM_NAMES[platform]}
+                          <span className="block text-[10px] opacity-70">
+                            {capability?.automaticEnabled
+                              ? "自动发布"
+                              : "人工发布包"}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="label" htmlFor="publish-at">
+                  定时发布（留空立即）
+                </label>
+                <input
+                  id="publish-at"
+                  type="datetime-local"
+                  className="input"
+                  value={publishAt}
+                  onChange={(event) => setPublishAt(event.target.value)}
+                />
+              </div>
+              <div className="flex items-center justify-end gap-3">
+                {created && (
+                  <span className="text-sm text-success">发布任务已创建</span>
+                )}
+                <button
+                  className="btn-primary"
+                  disabled={
+                    creating ||
+                    !publishTitle.trim() ||
+                    selectedPlatforms.length === 0
+                  }
+                  onClick={() => void createPublishJobs()}
+                >
+                  {creating
+                    ? "创建中…"
+                    : `创建发布任务 ×${selectedPlatforms.length}`}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

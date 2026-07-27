@@ -18,7 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import LinkSourceInput from "../components/LinkSourceInput";
 import TaskCard from "../components/TaskCard";
 import {

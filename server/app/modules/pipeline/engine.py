@@ -4,24 +4,26 @@
 每步: emit(running) → ComputeRouter.pick(step) → step.run(ctx)
       → 失败时按降级链换 Provider 重试 → artifacts 落库 → emit(done, 计量事件)
 mode=manual 时每步完成暂停等待用户确认（F-405 单步干预）
-支持单步重跑 /retry 与人工覆盖产物 /override；批量任务扇出 + 并发闸门(≥5)
+支持单步重跑 /retry；文案和剪辑修改通过版本化接口提交；批量任务扇出 + 并发闸门(≥5)
 日志：step_failed/task_failed 结构化字段（§10.6.8-A #3）
 """
 
-import asyncio
 import base64
 import json
 import mimetypes
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
+from app.core.distributed_semaphore import DistributedSemaphore, SemaphoreUnavailableError
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
 from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
+from app.core.runtime_limits import PIPELINE_SEMAPHORE_LEASE_SECONDS
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.base import ComposeInput, is_mock_provider
@@ -35,9 +37,12 @@ from .repository import save as repo_save
 logger = get_logger("oral.pipeline.engine")
 settings = get_settings()
 
-# 并发闸门（F-406：任务级并发 ≥5）
-# 注意：asyncio.Semaphore 仅单进程内生效；生产环境多 Worker 时应替换为 Redis 分布式信号量
-_gate = asyncio.Semaphore(settings.pipeline_max_concurrency)
+# 并发闸门（F-406）：生产跨 Worker 共享，开发/测试回落进程内。
+_gate = DistributedSemaphore(
+    "pipeline",
+    limit=settings.pipeline_max_concurrency,
+    lease_seconds=PIPELINE_SEMAPHORE_LEASE_SECONDS,
+)
 _running: set[str] = set()
 
 
@@ -378,10 +383,13 @@ async def step_voice(task: PipelineTask, ctx: dict) -> dict:
 
     async with SessionLocal() as db:
         v = await get_voice(db, voice_id, task.user_id)
-        if v:
-            if v.status != "ready":
-                raise RuntimeError("声音尚未就绪，请先完成克隆确认")
-            voice_id = v.provider_voice_id or voice_id
+        if v is None:
+            raise RuntimeError("声音不存在或不属于当前用户")
+        if v.status != "ready":
+            raise RuntimeError("声音尚未就绪，请先完成克隆确认")
+        if not v.provider_voice_id:
+            raise RuntimeError("声音供应商资产缺失，请重新克隆")
+        voice_id = v.provider_voice_id
     result, provider = await registry.run_with_fallback(
         "voice", registry.voice_chain, "synthesize", voice_id, script, 1.0, trace_id=task.trace_id, task_id=task.id
     )
@@ -532,15 +540,18 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
     """合成执行体：compose 首跑与 edit 步按剪辑台配置重合成共用（字幕样式/封面模板真链路）"""
     # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底
     words = ctx.get("tts_words") or ctx.get("words") or []
+    bgm_mode = str(ctx.get("bgm_mode") or "off")
+    bgm_volume = float(ctx.get("bgm_volume") or 0.0)
     inp = ComposeInput(
         video_key=ctx.get("avatar_video_key") or ctx.get("video_key") or "",
         audio_key=ctx.get("audio_key"),
         subtitle_words=[],  # 由 engine 转换
         subtitle_style=_subtitle_style_from_ctx(ctx),
-        bgm_key=None,
-        bgm_mode="auto",
+        bgm_key=str(ctx.get("bgm_key") or "") or None if bgm_mode == "custom" else None,
+        bgm_mode=bgm_mode,
         cover_text=_cover_text_from_ctx(task, ctx),
         cover_template=str(ctx.get("cover_template") or "bold-bottom"),
+        bgm_volume=max(0.0, min(bgm_volume, 1.0)),
         randomize=task.randomize,
     )
     from app.providers.base import WordTs
@@ -565,7 +576,9 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
 
 async def step_edit(task: PipelineTask, ctx: dict) -> dict:
     """剪辑步（第⑥步）：剪辑台保存过配置时按配置真实重新合成；否则 auto 跳过、manual 人工确认"""
-    has_config = bool(ctx.get("subtitle_style") or ctx.get("cover_template"))
+    has_config = bool(
+        ctx.get("subtitle_style") or ctx.get("cover_template") or ctx.get("bgm_key") or ctx.get("bgm_mode") == "off"
+    )
     if not has_config:
         if task.mode == "auto":
             return {"skipped": True, "note": "自动模式跳过剪辑步"}
@@ -595,6 +608,8 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
             video_key=ctx.get("final_video_key", ""),
             cover_key=ctx.get("cover_key", ""),
             scheduled_at=task.publish_at or None,
+            render_version_id=str(ctx.get("render_version_id") or ""),
+            render_version=int(ctx.get("render_version") or 0),
         )
     return {"publish_job_ids": job_ids}
 
@@ -614,6 +629,111 @@ STEP_RUNNERS = {
 # ============ 引擎主循环 ============
 
 
+async def _settle_and_activate_render(
+    db: AsyncSession,
+    task: PipelineTask,
+    ctx: dict,
+) -> bool:
+    """外部发布前先完成结算并固化活动成片，避免未结算产物进入平台链路。"""
+    if task.reservation_id:
+        from app.modules.billing.service import (
+            recover_reservation_after_failure,
+            settle_reservation,
+        )
+
+        try:
+            settled = await settle_reservation(db, task.reservation_id, task.id)
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "task_billing_settlement_failed",
+                task_id=task.id,
+                user_id=task.user_id,
+                reservation_id=task.reservation_id,
+            )
+            settled = 0
+        if settled <= 0:
+            recovered = await recover_reservation_after_failure(db, task.reservation_id, task.user_id)
+            if recovered is not None and recovered.status == "settled":
+                settled = recovered.actualPoints
+            else:
+                await db.refresh(task)
+                task.status = "failed"
+                task.error = "billing: settlement failed"
+                await repo_save(db, task)
+                await _emit(task)
+                await _feed(task.user_id, "err", f"「{task.title}」积分结算失败")
+                await notify_user(
+                    db,
+                    task.user_id,
+                    "error",
+                    f"任务结算失败：{task.title}",
+                    "成片流程已执行，但积分结算未确认；冻结积分已进入恢复流程，请勿重复创建任务。",
+                )
+                return False
+        task.quota_cost = float(settled)
+
+    from app.modules.pipeline.service import ensure_active_render_version
+    from app.modules.publish import repository as publish_repo
+
+    active_render = await ensure_active_render_version(db, task)
+    await publish_repo.pin_task_render_version(
+        db,
+        user_id=task.user_id,
+        task_id=task.id,
+        video_key=active_render.video_key,
+        render_version_id=active_render.id,
+        render_version=active_render.version,
+    )
+    await repo_save(db, task)
+    ctx.clear()
+    ctx.update(_load_artifacts(task))
+    return True
+
+
+async def _fail_task_when_gate_unavailable(task_id: str) -> None:
+    """Turn an accepted message into a visible retryable failure instead of a stuck task."""
+    async with SessionLocal() as db:
+        task = await repo_get(db, task_id)
+        if task is None or task.status != "pending":
+            return
+        task.status = "failed"
+        task.error = "系统并发调度暂不可用，积分已恢复，请稍后重试"
+        task.queue_message_id = ""
+        user_id = task.user_id
+        title = task.title
+        reservation_id = task.reservation_id
+        await repo_save(db, task)
+        try:
+            await notify_user(
+                db,
+                user_id,
+                "error",
+                f"任务调度失败：{title}",
+                "任务未开始执行，冻结积分已恢复，请稍后重新报价重试。",
+            )
+            await _emit(task)
+        finally:
+            if reservation_id:
+                from app.modules.billing.service import recover_reservation_after_failure
+
+                await recover_reservation_after_failure(db, reservation_id, user_id)
+
+
+@asynccontextmanager
+async def _task_slot(task_id: str) -> AsyncIterator[bool]:
+    try:
+        lease = await _gate.acquire()
+    except SemaphoreUnavailableError:
+        logger.exception("pipeline_concurrency_gate_unavailable", task_id=task_id)
+        await _fail_task_when_gate_unavailable(task_id)
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        await lease.release()
+
+
 async def run_task(task_id: str, from_step: str | None = None) -> None:
     """从断点续跑：跳过已 done 步骤；manual 模式每步完成挂起等待确认"""
     if task_id in _running:
@@ -622,7 +742,9 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
     # 设置任务级上下文（供日志自动注入）
     task_id_var.set(task_id)
     try:
-        async with _gate:
+        async with _task_slot(task_id) as gate_ready:
+            if not gate_ready:
+                return
             async with SessionLocal() as db:
                 task = await claim_for_run(db, task_id)
                 if task is None:
@@ -660,6 +782,11 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                 for i in range(start_idx, len(STEP_ORDER)):
                     step_name = STEP_ORDER[i]
                     st = steps[i]
+                    billing_ready = False
+                    if step_name == "publish":
+                        billing_ready = await _settle_and_activate_render(db, task, ctx)
+                        if not billing_ready:
+                            return
                     if st["status"] == "done":
                         continue
                     # 用户取消检查（cancel 后及时退出，不再推进后续步骤）
@@ -712,6 +839,9 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             skipped=skipped,
                         )
                     except Exception as e:  # noqa: BLE001
+                        from app.providers.base import ProviderOutcomeUnknown
+
+                        outcome_unknown = isinstance(e, ProviderOutcomeUnknown)
                         # 步骤失败：记录 ERROR + 结构化字段（§10.6.8-A #3）
                         logger.error(
                             "step_failed",
@@ -722,21 +852,55 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             trace_id=task.trace_id,
                             user_id=task.user_id,
                         )
-                        if task.reservation_id:
+                        if task.reservation_id and not outcome_unknown and not billing_ready:
                             from app.modules.billing.service import release_reservation
 
                             await release_reservation(db, task.reservation_id, task.user_id)
                         step_ms = int((time.perf_counter() - step_start) * 1000)
-                        safe_error = public_error_message(e)
+                        if step_name == "publish" and billing_ready:
+                            safe_error = "成片已完成，但发布任务创建失败；请前往发布管理重新提交"
+                            st.update(
+                                {
+                                    "status": "failed",
+                                    "message": safe_error,
+                                    "durationMs": step_ms,
+                                    "finishedAt": _now(),
+                                }
+                            )
+                            task.status = "done"
+                            task.current_step = ""
+                            task.error = ""
+                            _dump_steps(task, steps)
+                            await repo_save(db, task)
+                            await _emit(task)
+                            await _feed(task.user_id, "info", f"「{task.title}」成片完成，发布任务待重新提交")
+                            await notify_user(
+                                db,
+                                task.user_id,
+                                "warn",
+                                f"成片已完成：{task.title}",
+                                "发布任务创建失败，成片与积分结算均已保留；请前往发布管理重新提交。",
+                            )
+                            logger.warning(
+                                "pipeline_publish_setup_failed",
+                                task_id=task_id,
+                                user_id=task.user_id,
+                            )
+                            return
+                        safe_error = (
+                            "外部服务提交结果未知，已暂停自动重试并保留积分冻结，等待管理员对账"
+                            if outcome_unknown
+                            else public_error_message(e)
+                        )
                         st.update(
                             {
-                                "status": "failed",
+                                "status": "reconciliation_required" if outcome_unknown else "failed",
                                 "message": safe_error,
                                 "durationMs": step_ms,
                                 "finishedAt": _now(),
                             }
                         )
-                        task.status = "failed"
+                        task.status = "reconciliation_required" if outcome_unknown else "failed"
                         task.error = safe_error
                         _dump_steps(task, steps)
                         await repo_save(db, task)
@@ -746,8 +910,12 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             db,
                             task.user_id,
                             "error",
-                            f"任务失败：{task.title}",
-                            (f"步骤={step_name}；耗时={step_ms}ms；{safe_error}；可重新报价后从该步骤重试。"),
+                            (f"任务等待人工对账：{task.title}" if outcome_unknown else f"任务失败：{task.title}"),
+                            (
+                                f"步骤={step_name}；耗时={step_ms}ms；{safe_error}。"
+                                if outcome_unknown
+                                else f"步骤={step_name}；耗时={step_ms}ms；{safe_error}；可重新报价后从该步骤重试。"
+                            ),
                         )
                         # 任务最终失败：记录 ERROR
                         logger.error(
@@ -778,42 +946,6 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         await _feed(task.user_id, "info", f"「{task.title}」{step_name} 步完成，等待确认")
                         return
 
-                if task.reservation_id:
-                    from app.modules.billing.service import (
-                        recover_reservation_after_failure,
-                        settle_reservation,
-                    )
-
-                    try:
-                        settled = await settle_reservation(db, task.reservation_id, task.id)
-                    except Exception:  # noqa: BLE001
-                        logger.exception(
-                            "task_billing_settlement_failed",
-                            task_id=task.id,
-                            user_id=task.user_id,
-                            reservation_id=task.reservation_id,
-                        )
-                        settled = 0
-                    if settled <= 0:
-                        recovered = await recover_reservation_after_failure(db, task.reservation_id, task.user_id)
-                        if recovered is not None and recovered.status == "settled":
-                            settled = recovered.actualPoints
-                        else:
-                            await db.refresh(task)
-                            task.status = "failed"
-                            task.error = "billing: settlement failed"
-                            await repo_save(db, task)
-                            await _emit(task)
-                            await _feed(task.user_id, "err", f"「{task.title}」积分结算失败")
-                            await notify_user(
-                                db,
-                                task.user_id,
-                                "error",
-                                f"任务结算失败：{task.title}",
-                                "成片流程已执行，但积分结算未确认；冻结积分已进入恢复流程，请勿重复创建任务。",
-                            )
-                            return
-                    task.quota_cost = float(settled)
                 task.status = "done"
                 task.current_step = ""
                 await repo_save(db, task)
@@ -840,91 +972,3 @@ def schedule_run(task_id: str, from_step: str | None = None) -> str:
 
     message = run_pipeline_task.send(task_id, from_step)
     return message.message_id
-
-
-async def handle_compose_callback(db: AsyncSession, task_id: str, status_code: int) -> None:
-    """飞影合成视频完成回调：按 task_id 定位 pipeline 任务，根据 status_code 推进 avatar 步骤状态。
-
-    status_code==0（进行中）被轮询兜底；本处仅处理完成态（status_code!=0）。
-    幂等：若任务不处于 avatar 待确认状态则忽略。
-    """
-    from sqlalchemy import select
-
-    repo_save = get_settings().storage_driver.job_repository.save_job
-
-    stmt = select(PipelineTask).where(PipelineTask.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        logger.warning("compose callback: no pipeline task found", task_id=task_id)
-        return
-
-    if task.status != "waiting_confirm":
-        # 幂等：非等待确认态直接忽略
-        return
-
-    # 状态转换：success/fail → step_done / failed
-    ctx = json.loads(task.steps_json or "[]")
-    avatar_result = ctx.get("avatar") or {}
-
-    if status_code == 0:
-        # 继续合成中：轮询兜底，此处不干预
-        logger.info("compose callback: still synthesizing", task_id=task_id, status_code=status_code)
-        return
-
-    if status_code != 1:
-        # 失败：标记 avatar 步失败并推进任务状态为 failed
-        avatar_result.update({"degraded_mock": True, "error": f"飞影合成失败：{status_code}"})
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "飞影合成失败，请稍后重试"
-        await db.commit()
-        logger.error("compose callback: avatar failed", task_id=task_id, status_code=status_code)
-        return
-
-    # success (status_code==1): 将合成结果视频下载转存，更新 avatar 产物并推进任务状态
-    video_url: str | None = avatar_result.get("videoUrl")
-    if not video_url:
-        # 无视频 URL 视为失败
-        avatar_result.update({"degraded_mock": True, "error": "飞影返回视频链接为空"})
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "合成成功但未返回视频链接，请检查飞影配置"
-        await db.commit()
-        logger.error("compose callback: no video url in result", task_id=task_id)
-        return
-
-    try:
-        # 从远程 URL 下载并转存到本地存储（使用已有 download_file + storage driver 的 put/get）
-        from app.core.storage import download_file
-
-        video_key = f"compose/{task.user_id}/{task_id}/avatar.mp4"
-        temp_local = await download_file(video_url)  # 返回本地临时路径
-        async with get_settings().storage_driver.open(video_key, "wb") as f:
-            with open(temp_local, "rb") as src:
-                await f.write(src.read())
-        # 清理临时文件
-        import os
-
-        os.unlink(temp_local)
-        # 构造视频访问地址
-        video_public_url = f"/media/{video_key}"
-
-        # 更新产物
-        avatar_result["videoUrl"] = video_public_url
-        avatar_result["degraded_mock"] = False
-        ctx["avatar"] = avatar_result
-        task.steps_json = json.dumps(ctx)
-        task.status = "done"
-        task.current_step = ""
-        await db.commit()
-        logger.info("compose callback: avatar succeeded and video downloaded", task_id=task_id)
-        # TODO: 发送用户通知
-    except Exception:
-        # 下载失败：记录错误但不覆盖飞影的成功状态，留给人工
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "合成成功但下载视频失败，请联系运营核查"
-        await db.commit()
-        logger.exception("compose callback: failed to download video", task_id=task_id)

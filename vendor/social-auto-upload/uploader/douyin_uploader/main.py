@@ -624,7 +624,7 @@ class DouYinVideo(DouYinBaseUploader):
         self.desc = desc or ""
 
     async def _submit_sms_verify_code(self, page: Page, sms_input, code: str, code_file: str) -> bool:
-        douyin_logger.info(_msg("✍️", f"已获取验证码，准备填入: {code}"))
+        douyin_logger.info(_msg("✍️", "已获取验证码，准备填入"))
         await sms_input.click()
         await sms_input.fill(code)
         douyin_logger.info(_msg("✅", "验证码已填入输入框"))

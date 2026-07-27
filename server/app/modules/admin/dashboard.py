@@ -263,7 +263,7 @@ async def build_dashboard(db: AsyncSession, days: int) -> dict:
         },
         "activation": {
             "created": _bucket_counts(dates, code_created_stamps),
-            "activated": _bucket_counts(dates, code_activated_stamps),
+            "activated": _bucket_counts(dates, (stamp for stamp in code_activated_stamps if stamp is not None)),
         },
         "credits": {
             "granted": points_granted,

@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import consent_fingerprint
+from app.core.storage import signed_media_path
 from app.core.white_label import public_error_message
+from app.providers.base import ProviderOutcomeUnknown
 from app.providers.hifly import HiFlyAPIError
 from app.providers.registry import registry
 
@@ -19,6 +21,18 @@ from .models import Avatar
 from .schemas import AvatarOut, AvatarStatusOut
 
 logger = get_logger("oral.avatar")
+
+
+async def recover_unknown_submissions(db: AsyncSession) -> int:
+    """进程若在供应商提交窗口退出，启动时把本地 submitting 记录转入人工对账。"""
+    result = await db.execute(
+        update(Avatar).where(Avatar.status == "submitting").values(status="reconciliation_required")
+    )
+    count = int(getattr(result, "rowcount", 0) or 0)
+    if count:
+        await db.commit()
+        logger.error("avatar_submissions_require_reconciliation", count=count)
+    return count
 
 
 async def list_avatars(db: AsyncSession, user_id: str) -> list[AvatarOut]:
@@ -52,24 +66,14 @@ async def clone_avatar_by_video(
     # 数字人克隆提交：记录 INFO（§10.6.8-B #4）
     logger.info("avatar_clone_start", user_id=user_id, avatar_name=name, clone_type="video")
 
-    try:
-        task_id, provider_name = await registry.run_with_fallback(
-            "avatar", registry.avatar_chain, "clone_by_video", name, video_key, consent_token
-        )
-    except HiFlyAPIError as e:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
-        ) from e
-
     a = await repo.create(
         db,
         user_id=user_id,
         name=name,
         source="clone",
-        provider=provider_name,
+        provider="",
         provider_avatar_id="",
-        provider_task_id=task_id,
+        provider_task_id="",
         reservation_id=reservation_id,
         avatar_type="video",
         scene=scene,
@@ -77,8 +81,42 @@ async def clone_avatar_by_video(
         preview_key=video_key,
         consent_hash=consent_fingerprint(user_id, "avatar", consent_token),
         consented_at=datetime.now(UTC),
-        status="training",
+        status="submitting",
     )
+    if reservation_id:
+        from app.modules.billing.service import attach_reservation
+
+        try:
+            await attach_reservation(db, reservation_id, user_id, a.id)
+            await db.commit()
+        except BaseException:
+            await repo.delete(db, a)
+            raise
+
+    try:
+        task_id, provider_name = await registry.run_with_fallback(
+            "avatar", registry.avatar_chain, "clone_by_video", name, video_key, consent_token
+        )
+    except ProviderOutcomeUnknown:
+        a.status = "reconciliation_required"
+        await db.commit()
+        await db.refresh(a)
+        logger.error("avatar_clone_reconciliation_required", user_id=user_id, avatar_id=a.id)
+        return to_out(a)
+    except HiFlyAPIError as e:
+        await repo.delete(db, a)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
+        ) from e
+    except BaseException:
+        await repo.delete(db, a)
+        raise
+    a.provider = provider_name
+    a.provider_task_id = task_id
+    a.status = "training"
+    await db.commit()
+    await db.refresh(a)
     return to_out(a)
 
 
@@ -106,24 +144,14 @@ async def clone_avatar_by_image(
     # 数字人克隆提交：记录 INFO（§10.6.8-B #4）
     logger.info("avatar_clone_start", user_id=user_id, avatar_name=name, clone_type="image")
 
-    try:
-        task_id, provider_name = await registry.run_with_fallback(
-            "avatar", registry.avatar_chain, "clone_by_image", name, image_key, 2
-        )
-    except HiFlyAPIError as e:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
-        ) from e
-
     a = await repo.create(
         db,
         user_id=user_id,
         name=name,
         source="clone",
-        provider=provider_name,
+        provider="",
         provider_avatar_id="",
-        provider_task_id=task_id,
+        provider_task_id="",
         reservation_id=reservation_id,
         avatar_type="image",
         scene=scene,
@@ -131,8 +159,42 @@ async def clone_avatar_by_image(
         preview_key=image_key,
         consent_hash=consent_fingerprint(user_id, "avatar", consent_token),
         consented_at=datetime.now(UTC),
-        status="training",
+        status="submitting",
     )
+    if reservation_id:
+        from app.modules.billing.service import attach_reservation
+
+        try:
+            await attach_reservation(db, reservation_id, user_id, a.id)
+            await db.commit()
+        except BaseException:
+            await repo.delete(db, a)
+            raise
+
+    try:
+        task_id, provider_name = await registry.run_with_fallback(
+            "avatar", registry.avatar_chain, "clone_by_image", name, image_key, 2
+        )
+    except ProviderOutcomeUnknown:
+        a.status = "reconciliation_required"
+        await db.commit()
+        await db.refresh(a)
+        logger.error("avatar_clone_reconciliation_required", user_id=user_id, avatar_id=a.id)
+        return to_out(a)
+    except HiFlyAPIError as e:
+        await repo.delete(db, a)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
+        ) from e
+    except BaseException:
+        await repo.delete(db, a)
+        raise
+    a.provider = provider_name
+    a.provider_task_id = task_id
+    a.status = "training"
+    await db.commit()
+    await db.refresh(a)
     return to_out(a)
 
 
@@ -230,14 +292,24 @@ async def get_clone_status(db: AsyncSession, user_id: str, avatar_id: str) -> Av
 
 
 async def delete_avatar(db: AsyncSession, user_id: str, avatar_id: str) -> None:
-    """删除数字人"""
+    """删除数字人，并解除当前用户人设中的引用。"""
     a = await repo.get(db, avatar_id, user_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "数字人不存在"})
-    if a.status == "training" and a.reservation_id:
+    if a.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部提交结果未知，管理员对账前不可删除"},
+        )
+    if a.status in {"submitting", "training"} and a.reservation_id:
         from app.modules.billing.service import release_reservation
 
         await release_reservation(db, a.reservation_id, user_id)
+    from app.modules.ipasset.models import Persona
+
+    await db.execute(
+        update(Persona).where(Persona.user_id == user_id, Persona.avatar_id == avatar_id).values(avatar_id=None)
+    )
     await repo.delete(db, a)
 
 
@@ -248,7 +320,12 @@ async def resolve_provider_avatar_id(db: AsyncSession, user_id: str, avatar_id: 
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "数字人不存在"})
     if a.status != "ready":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail={"code": "NOT_READY", "message": "数字人尚未就绪"})
-    return a.provider_avatar_id or avatar_id
+    if not a.provider_avatar_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "PROVIDER_ASSET_MISSING", "message": "数字人供应商资产缺失，请重新克隆"},
+        )
+    return a.provider_avatar_id
 
 
 async def handle_avatar_callback(db: AsyncSession, task_id: str, status_code: int, avatar_id_remote: str) -> None:
@@ -281,8 +358,8 @@ def to_out(a: Avatar) -> AvatarOut:
         avatarType=a.avatar_type,
         scene=a.scene,
         style=a.style,
-        coverUrl=f"/media/{a.cover_key}" if a.cover_key else None,
-        previewUrl=f"/media/{a.preview_key}" if a.preview_key else None,
+        coverUrl=signed_media_path(a.cover_key) if a.cover_key else None,
+        previewUrl=signed_media_path(a.preview_key) if a.preview_key else None,
         status=a.status,
         createdAt=a.created_at.astimezone(UTC).isoformat(),
     )

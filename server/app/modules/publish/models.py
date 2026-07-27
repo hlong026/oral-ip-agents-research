@@ -3,7 +3,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, String, Text
+from sqlalchemy import DateTime, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
@@ -34,10 +34,24 @@ class PublishJob(Base):
     """发布任务：queued → publishing → success | failed（可重试/仅导出 MP4 降级）"""
 
     __tablename__ = "publish_jobs"
+    __table_args__ = (
+        Index(
+            "uq_publish_jobs_render_platform",
+            "user_id",
+            "task_id",
+            "render_version_id",
+            "platform",
+            unique=True,
+            sqlite_where=text("render_version_id <> ''"),
+            postgresql_where=text("render_version_id <> ''"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(32), index=True)
     task_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    render_version_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    render_version: Mapped[int] = mapped_column(Integer, default=0)
     account_id: Mapped[str] = mapped_column(String(32), default="")
     platform: Mapped[str] = mapped_column(String(16), index=True)
     title: Mapped[str] = mapped_column(String(128), default="")

@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T04:47:45.884Z
+ * API 版本：1.0.0 · 生成时间：2026-07-27T08:01:48.411Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -21,6 +21,19 @@ export interface AdminLoginIn {
   phone: string;
   password: string;
   deviceId?: string | null;
+}
+
+export interface AutomationConsentIn {
+  accountId: string;
+  accepted: boolean;
+  riskVersion: string;
+}
+
+export interface AutomationStatusOut {
+  accountId: string;
+  authorized: boolean;
+  riskVersion?: string;
+  acceptedAt?: string | null;
 }
 
 export interface AvatarOut {
@@ -158,11 +171,33 @@ export interface ContentJobOut {
   updatedAt: string;
 }
 
+export interface ConversationOut {
+  id: string;
+  accountId: string;
+  platform: string;
+  remoteUid: string;
+  remoteNickname: string;
+  remoteAvatar: string;
+  lastMessageAt: string;
+  unreadCount: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface ConversationPageOut {
+  items: ConversationOut[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface CreatePipelineIn {
   ipId: string;
   sourceUrl?: string | null;
   topic?: string | null;
   scriptText?: string | null;
+  scriptId?: string | null;
+  scriptVersion?: number | null;
   voiceId?: string | null;
   avatarId?: string | null;
   mode?: string;
@@ -178,6 +213,13 @@ export interface CreditAdjustIn {
   points: number;
   reason: string;
   expiresAt?: string | null;
+}
+
+export interface EditConfigIn {
+  subtitleStyle?: SubtitleStyleIn;
+  bgmMode?: string;
+  bgmVolume?: number;
+  coverTemplate?: "bold-bottom" | "center-band" | "top-title" | "none";
 }
 
 export interface ExportOut {
@@ -206,6 +248,8 @@ export interface GrayAccountOut {
 export interface JobOut {
   id: string;
   taskId: string;
+  renderVersionId?: string;
+  renderVersion?: number;
   platform: string;
   platformName: string;
   accountId: string;
@@ -215,6 +259,7 @@ export interface JobOut {
   scheduledAt?: string | null;
   error?: string;
   postId?: string;
+  postIdSource?: string;
   videoUrl?: string | null;
   packageUrl?: string | null;
   retryCount?: number;
@@ -236,6 +281,44 @@ export interface KillSwitchIn {
 export interface KillSwitchOut {
   stopped: boolean;
   canceledMessages?: number;
+}
+
+export interface ListenerControlIn {
+  accountId: string;
+}
+
+export interface ListenerStatusOut {
+  accountId: string;
+  accountNickname?: string;
+  platform?: string;
+  status: string;
+  lastHeartbeat?: string | null;
+  errorMsg?: string;
+  startedAt?: string | null;
+}
+
+export interface MessageOut {
+  id: string;
+  conversationId: string;
+  direction: string;
+  msgType: number;
+  content: string;
+  autoReplied: boolean;
+  replyContent: string;
+  sendStatus: string;
+  sendError: string;
+  retryCount: number;
+  manualTakeover: boolean;
+  moderationStatus: string;
+  moderationReason: string;
+  createdAt: string;
+}
+
+export interface MessagePageOut {
+  items: MessageOut[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface ModulePriceCatalogOut {
@@ -305,10 +388,6 @@ export interface NotificationOut {
   body: string;
   read: boolean;
   createdAt: string;
-}
-
-export interface OverrideIn {
-  artifacts: Record<string, string>;
 }
 
 export interface OverviewOut {
@@ -478,6 +557,25 @@ export interface ProviderProbeOut {
   details?: Record<string, unknown>;
 }
 
+export interface ProviderReadinessItem {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  missingFields: string[];
+  ready: boolean;
+  probeStatus?: string;
+  probeMessage?: string;
+}
+
+export interface ProviderReadinessOut {
+  env: string;
+  providerMode: string;
+  mockFallbackAllowed: boolean;
+  providerChains: Record<string, string[]>;
+  items: ProviderReadinessItem[];
+  allReady: boolean;
+}
+
 export interface ProviderStatusItem {
   provider: string;
   enabled: boolean;
@@ -518,6 +616,19 @@ export interface QuotaOut {
   total: number;
 }
 
+export interface RecomposeIn {
+  quoteId: string;
+  idempotencyKey: string;
+  baseVersion: number;
+  config: EditConfigIn;
+}
+
+export interface ReconciliationIn {
+  action: "release" | "settle" | "resume";
+  reason: string;
+  providerTaskId?: string | null;
+}
+
 export interface RedeemIn {
   code: string;
 }
@@ -533,6 +644,22 @@ export interface RedeemOut {
 export interface RefreshIn {
   refreshToken: string;
   deviceFingerprint?: string;
+}
+
+export interface RenderVersionOut {
+  id: string;
+  taskId: string;
+  version: number;
+  baseVersion: number;
+  status: string;
+  config: EditConfigIn;
+  videoUrl?: string | null;
+  coverUrl?: string | null;
+  quality?: Record<string, unknown>;
+  error?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ReservationBatchOut {
@@ -580,6 +707,55 @@ export interface RewriteOut {
   validationPassed?: boolean;
 }
 
+export interface RuleCreateIn {
+  accountId?: string;
+  name: string;
+  triggerType?: string;
+  triggerPattern?: string;
+  replyMode?: string;
+  replyTemplate?: string;
+  llmPrompt?: string;
+  priority?: number;
+  dailyLimit?: number;
+  delayMin?: number;
+  delayMax?: number;
+  deliveryMode?: string;
+  enabled?: boolean;
+}
+
+export interface RuleOut {
+  id: string;
+  accountId: string;
+  name: string;
+  triggerType: string;
+  triggerPattern: string;
+  replyMode: string;
+  replyTemplate: string;
+  llmPrompt: string;
+  priority: number;
+  dailyLimit: number;
+  delayMin: number;
+  delayMax: number;
+  deliveryMode: string;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface RuleUpdateIn {
+  name?: string | null;
+  triggerType?: string | null;
+  triggerPattern?: string | null;
+  replyMode?: string | null;
+  replyTemplate?: string | null;
+  llmPrompt?: string | null;
+  priority?: number | null;
+  dailyLimit?: number | null;
+  delayMin?: number | null;
+  delayMax?: number | null;
+  deliveryMode?: string | null;
+  enabled?: boolean | null;
+}
+
 export interface ScriptCreateIn {
   title?: string;
   text: string;
@@ -615,6 +791,11 @@ export interface ScriptVersionOut {
   modelName: string;
   promptVersion: string;
   createdAt: string;
+}
+
+export interface SendMessageIn {
+  content: string;
+  msgType?: number;
 }
 
 export interface SettingsIn {
@@ -675,6 +856,13 @@ export interface SubscriptionOut {
   quotaBalance?: number;
 }
 
+export interface SubtitleStyleIn {
+  fontSize?: number;
+  color?: string;
+  position?: "bottom" | "middle" | "top";
+  stroke?: number;
+}
+
 export interface SynthesizeIn {
   voiceId: string;
   text: string;
@@ -690,6 +878,8 @@ export interface SynthesizeOut {
 export interface TaskOut {
   id: string;
   ipId: string;
+  scriptId?: string;
+  scriptVersion?: number;
   title: string;
   coverUrl?: string | null;
   sourceUrl: string;
@@ -701,6 +891,7 @@ export interface TaskOut {
   quotaCost: number;
   error?: string;
   artifacts?: Record<string, unknown>;
+  activeRenderVersion?: number;
   batchId?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -793,11 +984,11 @@ export interface app__modules__catalog__schemas__PublishIn {
 }
 
 export interface app__modules__publish__schemas__PublishIn {
-  taskId?: string | null;
+  taskId: string;
   platforms: string[];
   title: string;
   topics?: string[];
-  videoKey: string;
+  videoKey?: string | null;
   coverKey?: string | null;
   publishAt?: string | null;
 }

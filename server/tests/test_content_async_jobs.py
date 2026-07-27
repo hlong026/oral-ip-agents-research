@@ -1,6 +1,7 @@
 """文案转录、改写和分析必须通过持久后台任务执行。"""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -155,6 +156,111 @@ async def test_failed_job_releases_reservation_without_settlement(monkeypatch) -
     assert failed.status == "failed"
     assert "provider timeout" in failed.error
     assert released == ["failed-reservation"]
+
+
+async def test_recovery_does_not_duplicate_fresh_running_content_job(monkeypatch) -> None:
+    from app.modules.content import jobs
+    from app.modules.content.models import ContentJob
+
+    monkeypatch.setattr(
+        jobs,
+        "schedule_content_job",
+        lambda _job_id: (_ for _ in ()).throw(AssertionError("fresh running job must not be scheduled")),
+    )
+
+    async with SessionLocal() as db:
+        job = ContentJob(
+            user_id="fresh-content-user",
+            kind="rewrite",
+            status="running",
+            payload_json='{"text":"正在处理的文案"}',
+            reservation_id="fresh-content-reservation",
+        )
+        db.add(job)
+        await db.commit()
+        recovered = await jobs.recover_pending_jobs(db)
+        await db.refresh(job)
+
+    assert recovered == 0
+    assert job.status == "running"
+
+
+async def test_recovery_fails_stale_running_content_job_without_replaying_provider(monkeypatch) -> None:
+    from app.modules.content import jobs
+    from app.modules.content.models import ContentJob
+
+    released: list[str] = []
+
+    async def fake_release(_db, reservation_id: str, _user_id: str):
+        released.append(reservation_id)
+        return SimpleNamespace(status="released")
+
+    monkeypatch.setattr(jobs, "release_reservation", fake_release)
+    monkeypatch.setattr(
+        jobs,
+        "schedule_content_job",
+        lambda _job_id: (_ for _ in ()).throw(AssertionError("stale provider call must not be replayed")),
+    )
+
+    async with SessionLocal() as db:
+        job = ContentJob(
+            user_id="stale-content-user",
+            kind="rewrite",
+            status="running",
+            payload_json='{"text":"结果未持久化的文案"}',
+            reservation_id="stale-content-reservation",
+            updated_at=datetime.now(UTC) - timedelta(minutes=40),
+        )
+        db.add(job)
+        await db.commit()
+        recovered = await jobs.recover_pending_jobs(db)
+        await db.refresh(job)
+
+    assert recovered == 0
+    assert job.status == "failed"
+    assert "服务中断" in job.error
+    assert released == ["stale-content-reservation"]
+
+
+async def test_recovery_settles_stale_content_result_without_replaying_provider(monkeypatch) -> None:
+    from app.modules.content import jobs
+    from app.modules.content.models import ContentJob
+
+    settled: list[tuple[str, str]] = []
+
+    async def fake_settle(_db, reservation_id: str, task_id: str, **_kwargs) -> int:
+        settled.append((reservation_id, task_id))
+        return 2
+
+    monkeypatch.setattr(jobs, "settle_reservation", fake_settle)
+    monkeypatch.setattr(jobs, "publish", lambda *_args, **_kwargs: _noop())
+    monkeypatch.setattr(
+        jobs,
+        "schedule_content_job",
+        lambda _job_id: (_ for _ in ()).throw(AssertionError("persisted result must not rerun provider")),
+    )
+
+    async with SessionLocal() as db:
+        job = ContentJob(
+            user_id="settled-content-user",
+            kind="rewrite",
+            status="running",
+            progress=95,
+            stage="正在结算积分",
+            payload_json='{"text":"已经处理的文案"}',
+            result_json='{"text":"已经持久化的结果"}',
+            reservation_id="settled-content-reservation",
+            updated_at=datetime.now(UTC) - timedelta(minutes=40),
+        )
+        db.add(job)
+        await db.commit()
+        recovered = await jobs.recover_pending_jobs(db)
+        await db.refresh(job)
+
+    assert recovered == 0
+    assert job.status == "done"
+    assert job.progress == 100
+    assert settled == [("settled-content-reservation", job.id)]
 
 
 async def _noop() -> None:

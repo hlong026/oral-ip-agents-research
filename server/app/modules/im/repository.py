@@ -1,8 +1,9 @@
 """im 模块数据访问层"""
 
+import asyncio
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,14 @@ from .models import (
 
 class ListenerOwnershipConflict(RuntimeError):
     """The durable listener row already belongs to another user."""
+
+
+class GrayAccountLimitReached(RuntimeError):
+    """The controlled rollout already contains the maximum enabled accounts."""
+
+
+_GRAY_APPROVAL_ADVISORY_LOCK_ID = 2026072701
+_gray_approval_process_lock = asyncio.Lock()
 
 
 # ---- 会话 ----
@@ -597,11 +606,23 @@ async def is_gray_account_enabled(db: AsyncSession, account_id: str, user_id: st
     return result.scalar_one_or_none() is not None
 
 
-async def approve_gray_account(db: AsyncSession, account_id: str, *, approved_by: str) -> IMGrayAccount | None:
+async def _approve_gray_account(
+    db: AsyncSession,
+    account_id: str,
+    *,
+    approved_by: str,
+    max_enabled: int | None,
+) -> IMGrayAccount | None:
     account = await db.get(PublishAccount, account_id)
     if account is None:
+        await db.rollback()
         return None
     gray = (await db.execute(select(IMGrayAccount).where(IMGrayAccount.account_id == account_id))).scalar_one_or_none()
+    if max_enabled is not None and (gray is None or not gray.enabled):
+        result = await db.execute(select(func.count(IMGrayAccount.id)).where(IMGrayAccount.enabled.is_(True)))
+        if int(result.scalar() or 0) >= max(1, max_enabled):
+            await db.rollback()
+            raise GrayAccountLimitReached
     if gray is None:
         gray = IMGrayAccount(
             account_id=account_id,
@@ -618,6 +639,40 @@ async def approve_gray_account(db: AsyncSession, account_id: str, *, approved_by
     await db.commit()
     await db.refresh(gray)
     return gray
+
+
+async def approve_gray_account(
+    db: AsyncSession,
+    account_id: str,
+    *,
+    approved_by: str,
+    max_enabled: int | None = None,
+) -> IMGrayAccount | None:
+    if max_enabled is None:
+        return await _approve_gray_account(
+            db,
+            account_id,
+            approved_by=approved_by,
+            max_enabled=None,
+        )
+    if db.get_bind().dialect.name == "postgresql":
+        await db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": _GRAY_APPROVAL_ADVISORY_LOCK_ID},
+        )
+        return await _approve_gray_account(
+            db,
+            account_id,
+            approved_by=approved_by,
+            max_enabled=max_enabled,
+        )
+    async with _gray_approval_process_lock:
+        return await _approve_gray_account(
+            db,
+            account_id,
+            approved_by=approved_by,
+            max_enabled=max_enabled,
+        )
 
 
 async def remove_gray_account(db: AsyncSession, account_id: str) -> bool:

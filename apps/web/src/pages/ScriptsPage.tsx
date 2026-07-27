@@ -3,7 +3,7 @@ import { useRelativeTime } from "@oral/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import LinkSourceInput from "../components/LinkSourceInput";
 import {
   confirmMeteredOperation,

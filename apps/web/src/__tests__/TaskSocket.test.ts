@@ -1,4 +1,4 @@
-import { TaskSocket } from "@oral/api-client";
+import { buildApiUrl, TaskSocket } from "@oral/api-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 describe("TaskSocket 鉴权", () => {
@@ -26,6 +26,39 @@ describe("TaskSocket 鉴权", () => {
     expect(opened.url).toBe("ws://localhost:3000/ws/tasks");
     expect(opened.url).not.toContain("secret.jwt.token");
     expect(opened.protocols).toEqual(["access-token", "secret.jwt.token"]);
+  });
+
+  it("桌面构建使用远程 HTTPS API 时连接同源 WSS，而不是 Tauri 自身协议", () => {
+    const opened: { url?: string } = {};
+    class FakeWebSocket {
+      static readonly OPEN = 1;
+
+      readyState = FakeWebSocket.OPEN;
+      onopen: (() => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(url: string) {
+        opened.url = url;
+      }
+
+      close() {}
+    }
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+
+    new TaskSocket(
+      "secret.jwt.token",
+      "https://api.oral.company/api/v1",
+    ).connect();
+
+    expect(opened.url).toBe("wss://api.oral.company/ws/tasks");
+    expect(
+      buildApiUrl(
+        "/billing/usage?export=csv",
+        "https://api.oral.company/api/v1/",
+      ),
+    ).toBe("https://api.oral.company/api/v1/billing/usage?export=csv");
   });
 
   it("连接建立前关闭时等待握手完成，避免浏览器记录连接中断告警", () => {

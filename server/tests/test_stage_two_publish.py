@@ -74,6 +74,47 @@ async def test_unverified_publish_creates_export_ready_job_without_account(monke
     assert job.account_id == ""
 
 
+async def test_pipeline_publish_uses_the_settled_render_version(monkeypatch) -> None:
+    from app.modules.pipeline import engine
+    from app.modules.pipeline.models import PipelineTask
+    from app.modules.publish import service
+
+    captured: dict[str, object] = {}
+
+    async def fake_publish(_db, user_id, task_id, platforms, **kwargs):
+        captured.update(
+            user_id=user_id,
+            task_id=task_id,
+            platforms=platforms,
+            **kwargs,
+        )
+        return ["publish-v2"]
+
+    monkeypatch.setattr(service, "publish_task_video", fake_publish)
+    task = PipelineTask(
+        id="pipeline-render-v2",
+        user_id="pipeline-render-user",
+        title="发布结算后的活动成片",
+        platforms_json='["douyin"]',
+    )
+
+    result = await engine.step_publish(
+        task,
+        {
+            "script": "发布结算后的活动成片",
+            "final_video_key": "compose/v2.mp4",
+            "cover_key": "compose/v2.jpg",
+            "quality": {"passed": True},
+            "render_version_id": "render-v2",
+            "render_version": 2,
+        },
+    )
+
+    assert result == {"publish_job_ids": ["publish-v2"]}
+    assert captured["render_version_id"] == "render-v2"
+    assert captured["render_version"] == 2
+
+
 async def test_pipeline_publish_reentry_reuses_existing_platform_job(monkeypatch) -> None:
     from app.modules.publish import repository as publish_repo
     from app.modules.publish import service
@@ -107,6 +148,40 @@ async def test_pipeline_publish_reentry_reuses_existing_platform_job(monkeypatch
     assert first == second
     assert total == 1
     assert [item.id for item in items] == first
+
+
+async def test_publish_job_list_filters_by_task_before_pagination() -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    async with SessionLocal() as db:
+        await publish_repo.create_job(
+            db,
+            user_id="task-filter-user",
+            task_id="other-task",
+            platform="douyin",
+            title="其它任务",
+            status="export_ready",
+        )
+        expected = await publish_repo.create_job(
+            db,
+            user_id="task-filter-user",
+            task_id="target-task",
+            platform="xiaohongshu",
+            title="目标任务",
+            status="export_ready",
+        )
+        result = await service.list_jobs(
+            db,
+            "task-filter-user",
+            None,
+            1,
+            1,
+            "target-task",
+        )
+
+    assert result.total == 1
+    assert [item.id for item in result.items] == [expected.id]
 
 
 async def test_failed_publish_job_is_not_reused_after_account_is_fixed(monkeypatch) -> None:
@@ -192,6 +267,154 @@ async def test_changed_compose_output_does_not_reuse_old_export_job(monkeypatch)
     assert created != [old.id]
     assert new_job is not None
     assert new_job.video_key == "compose/new.mp4"
+
+
+async def test_manual_publish_pins_the_active_render_version(monkeypatch) -> None:
+    from app.modules.pipeline.models import PipelineRenderVersion, PipelineTask
+    from app.modules.publish import service
+    from app.modules.publish.models import PublishJob
+    from app.modules.publish.schemas import PublishIn
+
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(app_env="test", publish_verified_platforms=""),
+    )
+    async with SessionLocal() as db:
+        task = PipelineTask(
+            user_id="render-publish-user",
+            ip_id="ip-1",
+            title="发布活动成片",
+            status="done",
+            active_render_version=2,
+            artifacts_json=json.dumps(
+                {
+                    "final_video_key": "compose/stale-v1.mp4",
+                    "cover_key": "compose/stale-v1.jpg",
+                    "quality": {"passed": True},
+                }
+            ),
+        )
+        db.add(task)
+        await db.flush()
+        db.add_all(
+            [
+                PipelineRenderVersion(
+                    task_id=task.id,
+                    user_id=task.user_id,
+                    version=1,
+                    base_version=0,
+                    status="done",
+                    config_json='{"bgmMode":"off","bgmVolume":0,"coverTemplate":"bold-bottom","subtitleStyle":{"fontSize":44,"color":"#FFFFFF","position":"bottom","stroke":2}}',
+                    idempotency_key=f"pipeline:{task.id}:1",
+                    video_key="compose/v1.mp4",
+                    cover_key="compose/v1.jpg",
+                    quality_json='{"passed":true}',
+                    is_active=False,
+                ),
+                PipelineRenderVersion(
+                    task_id=task.id,
+                    user_id=task.user_id,
+                    version=2,
+                    base_version=1,
+                    status="done",
+                    config_json='{"bgmMode":"off","bgmVolume":0,"coverTemplate":"center-band","subtitleStyle":{"fontSize":48,"color":"#FDE047","position":"top","stroke":3}}',
+                    idempotency_key=f"editor:{task.id}:2",
+                    video_key="compose/v2.mp4",
+                    cover_key="compose/v2.jpg",
+                    quality_json='{"passed":true}',
+                    is_active=True,
+                ),
+            ]
+        )
+        await db.commit()
+        request = PublishIn(
+            taskId=task.id,
+            platforms=["douyin"],
+            title="发布活动成片",
+        )
+        jobs = await service.create_jobs(
+            db,
+            task.user_id,
+            request,
+        )
+        duplicate = await service.create_jobs(db, task.user_id, request)
+        changed = await service.create_jobs(
+            db,
+            task.user_id,
+            PublishIn(
+                taskId=task.id,
+                platforms=["douyin"],
+                title="更新后的发布标题",
+                topics=["新版话题"],
+            ),
+        )
+        stored = await db.get(PublishJob, jobs[0].id)
+
+    assert duplicate[0].id == jobs[0].id
+    assert changed[0].id == jobs[0].id
+    assert stored is not None
+    assert stored.title == "更新后的发布标题"
+    assert json.loads(stored.topics_json) == ["新版话题"]
+    assert stored.render_version == 2
+    assert stored.render_version_id
+    assert stored.video_key == "compose/v2.mp4"
+    assert stored.cover_key == "compose/v2.jpg"
+
+
+async def test_manual_publish_backfills_legacy_job_with_bootstrapped_render_version(monkeypatch) -> None:
+    from app.modules.pipeline.models import PipelineTask
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+    from app.modules.publish.schemas import PublishIn
+
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(app_env="test", publish_verified_platforms=""),
+    )
+    async with SessionLocal() as db:
+        task = PipelineTask(
+            user_id="legacy-render-publish-user",
+            ip_id="ip-legacy",
+            title="存量发布任务",
+            status="done",
+            artifacts_json=json.dumps(
+                {
+                    "final_video_key": "compose/legacy.mp4",
+                    "cover_key": "compose/legacy.jpg",
+                    "quality": {"passed": True},
+                }
+            ),
+        )
+        db.add(task)
+        await db.commit()
+        legacy = await publish_repo.create_job(
+            db,
+            user_id=task.user_id,
+            task_id=task.id,
+            platform="douyin",
+            title="存量发布任务",
+            topics_json="[]",
+            video_key="compose/legacy.mp4",
+            cover_key="compose/legacy.jpg",
+            status="export_ready",
+        )
+        jobs = await service.create_jobs(
+            db,
+            task.user_id,
+            PublishIn(
+                taskId=task.id,
+                platforms=["douyin"],
+                title="存量发布任务",
+            ),
+        )
+        stored = await publish_repo.get_job(db, legacy.id, task.user_id)
+
+    assert jobs[0].id == legacy.id
+    assert stored is not None
+    assert stored.render_version == 1
+    assert stored.render_version_id
 
 
 async def test_export_package_contains_video_cover_and_metadata() -> None:

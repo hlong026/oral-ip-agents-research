@@ -10,10 +10,14 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from app.core.db import SessionLocal
-from app.core.security import hash_password
+from app.core.security import decode_token, hash_password
 from app.modules.auth.models import User
+from app.modules.avatar.models import Avatar
+from app.modules.ipasset.models import Persona
+from app.modules.voice.models import Voice
 from tests.helpers import code_login, create_unused_code
 
 STEP_ORDER = ["parse", "asr", "rewrite", "voice", "avatar", "compose", "edit", "publish"]
@@ -55,6 +59,43 @@ async def _register(client: AsyncClient, phone: str = "", role: str = "user") ->
 
 def _auth(tokens: dict) -> dict:
     return {"Authorization": f"Bearer {tokens['accessToken']}"}
+
+
+async def _prepare_pipeline_persona(tokens: dict) -> str:
+    """为 Pipeline 冒烟测试绑定可用的用户自有音色和数字人。"""
+    claims = decode_token(tokens["accessToken"])
+    assert claims is not None
+    user_id = str(claims["sub"])
+
+    async with SessionLocal() as db:
+        persona = (
+            await db.execute(
+                select(Persona).where(
+                    Persona.user_id == user_id,
+                    Persona.is_active.is_(True),
+                )
+            )
+        ).scalar_one()
+        voice = Voice(
+            user_id=user_id,
+            name="冒烟测试音色",
+            provider="mock",
+            provider_voice_id=f"voice-{uuid.uuid4().hex}",
+            status="ready",
+        )
+        avatar = Avatar(
+            user_id=user_id,
+            name="冒烟测试数字人",
+            provider="mock",
+            provider_avatar_id=f"avatar-{uuid.uuid4().hex}",
+            status="ready",
+        )
+        db.add_all([voice, avatar])
+        await db.flush()
+        persona.voice_id = voice.id
+        persona.avatar_id = avatar.id
+        await db.commit()
+        return persona.id
 
 
 async def _pipeline_quote(client: AsyncClient, user_headers: dict) -> str:
@@ -100,6 +141,35 @@ async def test_healthz(client: AsyncClient):
     r = await client.get("/healthz")
     assert r.status_code == 200
     assert r.json()["ok"] is True
+
+
+async def test_readyz_reports_live_dependency_status(client: AsyncClient):
+    r = await client.get("/readyz")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["dependencies"]["database"]["ok"] is True
+    assert body["dependencies"]["storage"]["ok"] is True
+    assert body["dependencies"]["redis"]["required"] is False
+
+
+async def test_readyz_fails_when_required_dependency_is_unavailable(client: AsyncClient, monkeypatch):
+    from app import main
+
+    async def unavailable() -> bool:
+        return False
+
+    monkeypatch.setattr(main, "database_ready", unavailable)
+
+    r = await client.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json()["ok"] is False
+    assert r.json()["dependencies"]["database"] == {
+        "ok": False,
+        "required": True,
+    }
 
 
 async def test_auth_and_quota_flow(client: AsyncClient):
@@ -162,9 +232,7 @@ async def test_pipeline_create_fetch_cancel(client: AsyncClient):
     tokens = await _register(client, _phone())
     h = _auth(tokens)
 
-    r = await client.get("/api/v1/personas", headers=h)
-    assert r.status_code == 200
-    persona_id = r.json()[0]["id"]  # 注册即建默认 IP 档案
+    persona_id = await _prepare_pipeline_persona(tokens)
     quote_id = await _pipeline_quote(client, h)
 
     r = await client.post(
@@ -198,8 +266,7 @@ async def test_pipeline_batch_fanout(client: AsyncClient):
     """F-406：批量扇出共享 batchId"""
     tokens = await _register(client, _phone())
     h = _auth(tokens)
-    r = await client.get("/api/v1/personas", headers=h)
-    persona_id = r.json()[0]["id"]
+    persona_id = await _prepare_pipeline_persona(tokens)
     quote_id = await _pipeline_quote(client, h)
 
     r = await client.post(

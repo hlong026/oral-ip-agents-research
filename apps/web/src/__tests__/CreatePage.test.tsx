@@ -14,7 +14,7 @@ import type {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
-import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useParams } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   confirmMeteredOperation,
@@ -32,6 +32,7 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       parse: vi.fn(),
       rewrite: vi.fn(),
       script: vi.fn(),
+      updateScript: vi.fn(),
     },
     catalogApi: {
       ...actual.catalogApi,
@@ -493,11 +494,21 @@ describe("CreatePage 视频合成步全自动", () => {
     vi.mocked(pipelineApi.create).mockReset();
     vi.mocked(pipelineApi.get).mockReset();
     vi.mocked(contentApi.script).mockReset();
+    vi.mocked(contentApi.updateScript).mockReset();
     vi.mocked(contentApi.script).mockResolvedValue({
       id: "script-1",
+      title: "测试文案",
       originalText: "原始文案",
       rewrittenText: "这是一段超过十个字的测试口播文案，用于满足合成前置校验。",
+      currentVersion: 2,
     } as Awaited<ReturnType<typeof contentApi.script>>);
+    vi.mocked(contentApi.updateScript).mockResolvedValue({
+      id: "script-1",
+      title: "测试文案",
+      originalText: "原始文案",
+      rewrittenText: "这是一段超过十个字的测试口播文案，用于满足合成前置校验。",
+      currentVersion: 2,
+    } as Awaited<ReturnType<typeof contentApi.updateScript>>);
     useIp.setState({ current: testPersona, personas: [testPersona] });
     useTasks.setState({ tasks: {} });
     useQuota.setState({ quota: null, load: vi.fn() });
@@ -514,6 +525,8 @@ describe("CreatePage 视频合成步全自动", () => {
     expect(pipelineApi.create).toHaveBeenCalledWith(
       expect.objectContaining({
         ipId: "ip-1",
+        scriptId: "script-1",
+        scriptVersion: 2,
         platforms: [],
         quoteId: "quote-compose",
       }),

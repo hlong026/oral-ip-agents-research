@@ -21,11 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
-from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
+from app.core.storage import StorageConfigurationError, get_accessible_url, read_bytes, save_bytes, size
 from app.core.white_label import public_model_name
-from app.providers.base import ProviderError, is_mock_provider as _is_mock_provider
+from app.providers.base import ProviderError
+from app.providers.base import is_mock_provider as _is_mock_provider
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
-from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
+from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, extract_audio_key, probe_duration
 from app.providers.registry import registry
 from app.providers.url_resolver import resolve_input
 
@@ -115,6 +116,14 @@ async def _embedded_asr_input(filename: str, data: bytes) -> str:
     return _media_data_uri("audio.mp3", audio)
 
 
+async def _embedded_asr_input_from_key(filename: str, key: str) -> str:
+    """小文件直接内嵌；大文件从存储流式提取压缩音轨。"""
+    raw_limit = _MAX_ASR_DATA_URI_BYTES * 3 // 4
+    if await size(key) <= raw_limit:
+        return await _embedded_asr_input(filename, await read_bytes(key))
+    return _media_data_uri("audio.mp3", await extract_audio_key(key))
+
+
 async def parse_url(
     db: AsyncSession,
     user_id: str,
@@ -126,7 +135,12 @@ async def parse_url(
     """链接解析 → 音频优先 ASR → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
-    logger.info(f"解析输入: platform={resolved.platform.value}, is_id={resolved.is_id}, url={resolved.url[:80]}")
+    logger.info(
+        "parse_input_resolved",
+        platform=resolved.platform.value,
+        is_id=resolved.is_id,
+        source_host=urlparse(resolved.url).hostname or "",
+    )
 
     # 尝试 Douyidou 完整解析（获取文案+视频直链）
     douyidou_result = _recent_probe_result(resolved.url)
@@ -349,19 +363,30 @@ async def parse_upload(
     db: AsyncSession,
     user_id: str,
     filename: str,
-    data: bytes,
+    data: bytes | None,
     persona_id: str | None,
     duration_seconds: float | None = None,
     storage_key: str | None = None,
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
-    key = storage_key or await save_bytes("uploads", filename, data)
+    if storage_key:
+        key = storage_key
+    elif data is not None:
+        key = await save_bytes("uploads", filename, data)
+    else:
+        raise ValueError("parse_upload requires data or storage_key")
     try:
         threshold = await get_config_int("asr_flash_threshold_sec", 300)
         if duration_seconds is not None and duration_seconds <= threshold:
             accessible_url = await get_accessible_url(key, require_public=False)
             media_input = (
-                accessible_url if _is_public_media_url(accessible_url) else await _embedded_asr_input(filename, data)
+                accessible_url
+                if _is_public_media_url(accessible_url)
+                else (
+                    await _embedded_asr_input(filename, data)
+                    if data is not None
+                    else await _embedded_asr_input_from_key(filename, key)
+                )
             )
         else:
             media_input = await get_accessible_url(key, require_public=True)
@@ -592,22 +617,7 @@ async def rewrite(
 
     # 落库
     if script_id:
-        s = await repo.get(db, script_id, user_id)
-        if s:
-            s.rewritten_text = result
-            s.similarity_score = final_score
-            s.current_version += 1
-            s.model_name = provider_name
-            s.prompt_version = PROMPT_VERSION
-            await repo.save(db, s)
-            await repo.append_version(
-                db,
-                s,
-                kind="model_rewrite",
-                text=result,
-                model_name=provider_name,
-                prompt_version=PROMPT_VERSION,
-            )
+        await _append_generated_version(db, user_id, script_id, result, provider_name, final_score)
 
     # 仿写完成：记录 INFO（§10.6.8-B #3）
     duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -787,23 +797,33 @@ async def update_script(
     title: str,
     text: str,
 ) -> ScriptOut:
-    script = await repo.get(db, script_id, user_id)
+    script = await repo.get_for_update(db, script_id, user_id)
     if not script:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "文案不存在"})
-    script.title = title.strip()
-    script.rewritten_text = text.strip()
+    clean_title = title.strip()
+    clean_text = text.strip()
+    if script.title == clean_title and (script.rewritten_text or script.original_text) == clean_text:
+        return to_out(script)
+    script.title = clean_title
+    script.rewritten_text = clean_text
     script.current_version += 1
     script.model_name = "human"
     script.prompt_version = "manual"
-    await repo.save(db, script)
-    await repo.append_version(
-        db,
-        script,
-        kind="manual_edit",
-        text=script.rewritten_text,
-        model_name="human",
-        prompt_version="manual",
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="manual_edit",
+            text=script.rewritten_text,
+            model_name="human",
+            prompt_version="manual",
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise
     return to_out(script)
 
 
@@ -857,19 +877,27 @@ def version_to_out(version: ScriptVersion) -> ScriptVersionOut:
 async def _create_script_with_source_version(db: AsyncSession, **fields) -> Script:
     script = await repo.create(
         db,
+        commit=False,
         current_version=1,
         model_name="source",
         prompt_version="source",
         **fields,
     )
-    await repo.append_version(
-        db,
-        script,
-        kind="source",
-        text=script.original_text,
-        model_name="source",
-        prompt_version="source",
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="source",
+            text=script.original_text,
+            model_name="source",
+            prompt_version="source",
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise
     return script
 
 
@@ -881,7 +909,7 @@ async def _append_generated_version(
     provider_name: str,
     similarity_score: float,
 ) -> None:
-    script = await repo.get(db, script_id, user_id)
+    script = await repo.get_for_update(db, script_id, user_id)
     if not script:
         return
     script.rewritten_text = text
@@ -889,12 +917,18 @@ async def _append_generated_version(
     script.current_version += 1
     script.model_name = provider_name
     script.prompt_version = PROMPT_VERSION
-    await repo.save(db, script)
-    await repo.append_version(
-        db,
-        script,
-        kind="model_rewrite",
-        text=text,
-        model_name=provider_name,
-        prompt_version=PROMPT_VERSION,
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="model_rewrite",
+            text=text,
+            model_name=provider_name,
+            prompt_version=PROMPT_VERSION,
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise

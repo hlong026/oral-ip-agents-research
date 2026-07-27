@@ -106,12 +106,13 @@ async def create_jobs(
 @router.get("/jobs", response_model=JobPageOut)
 async def list_jobs(
     status_: str | None = Query(None, alias="status"),
+    task_id: str = Query("", alias="taskId"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> JobPageOut:
-    return await service.list_jobs(db, user_id, status_, page, page_size)
+    return await service.list_jobs(db, user_id, status_, page, page_size, task_id)
 
 
 @router.get("/logs", response_model=JobPageOut)

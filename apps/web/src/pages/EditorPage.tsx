@@ -1,10 +1,11 @@
 import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
-import type { PipelineTask } from "@oral/types";
+import type { EditConfig as ApiEditConfig, PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, Play } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { confirmMeteredOperation } from "../lib/meteredOperation";
 
 const SUB_COLORS = [
   { key: "#FFFFFF", label: "白" },
@@ -13,16 +14,18 @@ const SUB_COLORS = [
   { key: "#F87171", label: "红" },
 ] as const;
 
-const BGM_MODES = [
-  { key: "none", label: "无 BGM", desc: "纯人声干声" },
-  { key: "library", label: "平台曲库", desc: "商用授权曲目，自动闪避人声" },
-  { key: "upload", label: "自定义上传", desc: "使用自有 BGM 素材" },
-] as const;
-
 // 封面模板：key 与服务端 cover.COVER_TEMPLATES 一致（帧底图 + 槽位 + 标题自动排版）
 const COVER_TEMPLATES = [
-  { key: "bold-bottom", label: "大字标题", desc: "底部压暗 + 超大粗体，爆点词黄色高亮" },
-  { key: "center-band", label: "居中色带", desc: "品牌色横带 + 居中标题，正式感" },
+  {
+    key: "bold-bottom",
+    label: "大字标题",
+    desc: "底部压暗 + 超大粗体，爆点词黄色高亮",
+  },
+  {
+    key: "center-band",
+    label: "居中色带",
+    desc: "品牌色横带 + 居中标题，正式感",
+  },
   { key: "top-title", label: "顶部标题", desc: "适配底部被平台 UI 遮挡的场景" },
   { key: "none", label: "原始帧", desc: "不叠加文字，直接用视频帧" },
 ] as const;
@@ -32,9 +35,9 @@ interface EditConfig {
   color: string;
   position: "bottom" | "middle" | "top";
   stroke: number;
-  bgmMode: string;
-  bgmVolume: number;
-  coverTemplate: string;
+  bgmMode: "off";
+  bgmVolume: 0;
+  coverTemplate: ApiEditConfig["coverTemplate"];
 }
 
 const DEFAULT_CONFIG: EditConfig = {
@@ -42,8 +45,8 @@ const DEFAULT_CONFIG: EditConfig = {
   color: "#FFFFFF",
   position: "bottom",
   stroke: 2,
-  bgmMode: "library",
-  bgmVolume: 30,
+  bgmMode: "off",
+  bgmVolume: 0,
   coverTemplate: "bold-bottom",
 };
 
@@ -58,6 +61,8 @@ export default function EditorPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  const [submittedRenderId, setSubmittedRenderId] = useState("");
+  const idempotencyKey = useRef("");
 
   // 候选任务：已产出成片的任务（compose 步完成）
   const { data: doneTasks } = useQuery({
@@ -80,7 +85,7 @@ export default function EditorPage() {
     (taskId ? undefined : candidates[0]);
   const effectiveTaskId = task?.id ?? taskId;
 
-  const { data: taskDetail, refetch } = useQuery({
+  const { data: taskDetail } = useQuery({
     queryKey: ["task", effectiveTaskId],
     queryFn: () => pipelineApi.get(effectiveTaskId),
     enabled: Boolean(effectiveTaskId),
@@ -97,20 +102,93 @@ export default function EditorPage() {
     refetchIntervalInBackground: true,
   });
   const detail = liveTasks[effectiveTaskId] ?? taskDetail ?? task;
+  const { data: renderVersions, refetch: refetchRenders } = useQuery({
+    queryKey: ["task-renders", effectiveTaskId],
+    queryFn: () => pipelineApi.renderVersions(effectiveTaskId),
+    enabled: Boolean(effectiveTaskId),
+    refetchInterval: (query) =>
+      query.state.data?.some((render) =>
+        ["pending", "running", "rendered"].includes(render.status),
+      )
+        ? 3000
+        : false,
+    refetchIntervalInBackground: true,
+  });
+  const activeRender = renderVersions?.find((render) => render.isActive);
+  const inflightRender = renderVersions?.find((render) =>
+    ["pending", "running", "rendered"].includes(render.status),
+  );
+  const submittedRender = renderVersions?.find(
+    (render) => render.id === submittedRenderId,
+  );
+  const terminalAttempt = renderVersions?.find(
+    (render) =>
+      !render.isActive &&
+      ["failed", "canceled"].includes(render.status) &&
+      render.version > (activeRender?.version ?? 0),
+  );
   const rerunning =
+    Boolean(inflightRender) ||
     detail?.status === "pending" ||
     detail?.status === "running" ||
     detail?.status === "waiting_confirm";
+
+  useEffect(() => {
+    setDirty(false);
+    setMsg("");
+    setError("");
+    setSubmittedRenderId("");
+    idempotencyKey.current = "";
+  }, [effectiveTaskId]);
+
+  useEffect(() => {
+    if (!activeRender || dirty || submittedRenderId) return;
+    setCfg({
+      fontSize: activeRender.config.subtitleStyle.fontSize,
+      color: activeRender.config.subtitleStyle.color,
+      position: activeRender.config.subtitleStyle.position,
+      stroke: activeRender.config.subtitleStyle.stroke,
+      bgmMode: "off",
+      bgmVolume: 0,
+      coverTemplate: activeRender.config.coverTemplate,
+    });
+  }, [activeRender, dirty, submittedRenderId]);
+
+  useEffect(() => {
+    if (!terminalAttempt) return;
+    setCfg({
+      fontSize: terminalAttempt.config.subtitleStyle.fontSize,
+      color: terminalAttempt.config.subtitleStyle.color,
+      position: terminalAttempt.config.subtitleStyle.position,
+      stroke: terminalAttempt.config.subtitleStyle.stroke,
+      bgmMode: "off",
+      bgmVolume: 0,
+      coverTemplate: terminalAttempt.config.coverTemplate,
+    });
+    setDirty(true);
+    setSubmittedRenderId("");
+    idempotencyKey.current = "";
+    setMsg("");
+    setError(
+      terminalAttempt.status === "failed"
+        ? terminalAttempt.error || "重新合成失败，请稍后重试"
+        : "本次重合成已取消，可调整后重新提交",
+    );
+  }, [terminalAttempt]);
+
+  useEffect(() => {
+    if (submittedRender?.status !== "done") return;
+    setSubmittedRenderId("");
+    idempotencyKey.current = "";
+    setMsg(`v${submittedRender.version} 已完成并切换为当前成片`);
+  }, [submittedRender]);
 
   // 任务级 artifacts 为全量产物；步骤级 artifacts 服务端截断至 200 字，仅供展示归因
   const detailArt = (key: string) => {
     const v = detail?.artifacts?.[key];
     return typeof v === "string" && v ? v : undefined;
   };
-  const videoKey =
-    detailArt("final_video_key") ??
-    detail?.steps.find((s) => s.step === "compose")?.artifacts
-      ?.final_video_key;
+  const videoUrl = activeRender?.videoUrl ?? detailArt("final_video_url");
   const script =
     detailArt("script") ??
     detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ??
@@ -128,31 +206,47 @@ export default function EditorPage() {
   const update = (patch: Partial<EditConfig>) => {
     setCfg((c) => ({ ...c, ...patch }));
     setDirty(true);
+    idempotencyKey.current = "";
     setMsg("");
   };
 
   const save = async () => {
-    if (!detail) return;
+    if (!detail || !activeRender) return;
     setBusy(true);
     setError("");
     setMsg("");
     try {
-      // 人工覆盖 edit 步参数 → 重跑 edit 步按配置真实重新合成（字幕样式 + 封面模板）
-      await pipelineApi.overrideStep(detail.id, "edit", {
-        subtitle_style: JSON.stringify({
+      const quoteId = await confirmMeteredOperation(
+        "hd_export",
+        "重新合成成片",
+        { assets: 1 },
+      );
+      idempotencyKey.current ||=
+        globalThis.crypto?.randomUUID?.() ??
+        `editor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const config: ApiEditConfig = {
+        subtitleStyle: {
           fontSize: cfg.fontSize,
           color: cfg.color,
           position: cfg.position,
           stroke: cfg.stroke,
-        }),
-        bgm_mode: cfg.bgmMode,
-        bgm_volume: String(cfg.bgmVolume),
-        cover_template: cfg.coverTemplate,
+        },
+        bgmMode: "off",
+        bgmVolume: 0,
+        coverTemplate: cfg.coverTemplate,
+      };
+      const created = await pipelineApi.recompose(detail.id, {
+        quoteId,
+        idempotencyKey: idempotencyKey.current,
+        baseVersion: activeRender.version,
+        config,
       });
-      await pipelineApi.retryStep(detail.id, "edit");
+      setSubmittedRenderId(created.id);
       setDirty(false);
-      setMsg("已保存并重新合成，稍候可在任务详情查看新成片");
-      await refetch();
+      setMsg(
+        `已提交 v${activeRender.version + 1}，旧成片会保留到新版本通过质量检查`,
+      );
+      await refetchRenders();
     } catch (e) {
       setError(e instanceof HttpError ? e.body.message : "保存失败，请重试");
     } finally {
@@ -166,7 +260,7 @@ export default function EditorPage() {
         <div>
           <h1 className="text-xl font-bold">视频剪辑</h1>
           <p className="mt-1 text-sm text-text-3">
-            成片微调 · 字幕样式 · BGM · 封面（F-401/402/404）
+            成片微调 · 字幕样式 · 封面 · 版本可追溯
           </p>
         </div>
         <select
@@ -198,9 +292,9 @@ export default function EditorPage() {
             {/* 预览：成片就绪后直接内嵌播放器，字幕样式叠加层实时预览 */}
             <div className="glass p-4">
               <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
-                {videoKey ? (
+                {videoUrl ? (
                   <video
-                    src={`/media/${videoKey}`}
+                    src={videoUrl}
                     poster={detail.coverUrl ?? undefined}
                     controls
                     playsInline
@@ -242,7 +336,8 @@ export default function EditorPage() {
                 <div className="min-w-0">
                   <b className="block truncate">{detail.title}</b>
                   <div className="mt-0.5 text-xs text-text-3">
-                    合成完成 · {dirty ? "有未保存修改" : "待微调"}
+                    当前 v{activeRender?.version ?? detail.activeRenderVersion}{" "}
+                    · {dirty ? "有未保存修改" : "配置已同步"}
                   </div>
                 </div>
                 <span className="chip shrink-0 text-[11px]">
@@ -251,7 +346,7 @@ export default function EditorPage() {
                       <LoaderCircle className="h-3 w-3 animate-spin" />
                       重新合成中
                     </span>
-                  ) : videoKey ? (
+                  ) : videoUrl ? (
                     "成片就绪"
                   ) : (
                     "合成中"
@@ -328,38 +423,16 @@ export default function EditorPage() {
                 </div>
               </div>
 
-              {/* BGM 三模式（F-402） */}
+              {/* BGM 在真实素材归属链路开放前保持关闭，避免伪曲库与任意 key。 */}
               <div className="glass p-5">
                 <h2 className="mb-4 font-medium">背景音乐</h2>
-                <div className="grid gap-3 md:grid-cols-3">
-                  {BGM_MODES.map((m) => (
-                    <button
-                      key={m.key}
-                      onClick={() => update({ bgmMode: m.key })}
-                      className={`rounded-xl border p-3.5 text-left ${cfg.bgmMode === m.key ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
-                    >
-                      <div className="text-sm font-medium">{m.label}</div>
-                      <div className="mt-1 text-xs text-text-3">{m.desc}</div>
-                    </button>
-                  ))}
-                </div>
-                {cfg.bgmMode !== "none" && (
-                  <div className="mt-4">
-                    <label className="label">
-                      BGM 音量（{cfg.bgmVolume}% · sidechain 自动闪避人声）
-                    </label>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={cfg.bgmVolume}
-                      onChange={(e) =>
-                        update({ bgmVolume: Number(e.target.value) })
-                      }
-                      className="w-full accent-brand-from"
-                    />
+                <div className="rounded-xl border border-stroke bg-white/[0.03] p-3.5">
+                  <div className="text-sm font-medium">当前使用纯人声</div>
+                  <div className="mt-1 text-xs leading-relaxed text-text-3">
+                    平台曲库和自定义上传将在素材库完成真实授权、归属校验与版权审计后开放；当前不会提交虚假的
+                    BGM 配置。
                   </div>
-                )}
+                </div>
               </div>
 
               {/* 封面模板（F-404）：服务端自动取帧 + 标题自动排版，选模板即可 */}
@@ -382,10 +455,10 @@ export default function EditorPage() {
                     </button>
                   ))}
                 </div>
-                {detail.coverUrl && (
+                {(activeRender?.coverUrl || detail.coverUrl) && (
                   <div className="mt-4 flex items-center gap-3">
                     <img
-                      src={detail.coverUrl}
+                      src={activeRender?.coverUrl ?? detail.coverUrl ?? ""}
                       alt="当前封面"
                       className="h-24 rounded-lg border border-stroke object-cover"
                     />
@@ -408,12 +481,8 @@ export default function EditorPage() {
                 >
                   导出剪映草稿
                 </button>
-                {videoKey ? (
-                  <a
-                    className="btn-ghost text-xs"
-                    href={`/media/${videoKey}`}
-                    download
-                  >
+                {videoUrl ? (
+                  <a className="btn-ghost text-xs" href={videoUrl} download>
                     导出 MP4
                   </a>
                 ) : (
@@ -423,11 +492,49 @@ export default function EditorPage() {
                 )}
                 <button
                   className="btn-primary px-5"
-                  disabled={busy || !dirty}
+                  disabled={busy || rerunning || !dirty || !activeRender}
                   onClick={save}
                 >
                   {busy ? "合成中…" : "保存并重新合成"}
                 </button>
+                {inflightRender?.status === "pending" && (
+                  <button
+                    className="btn-ghost text-xs"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      setError("");
+                      try {
+                        await pipelineApi.cancelRender(
+                          detail.id,
+                          inflightRender.id,
+                        );
+                        setSubmittedRenderId("");
+                        idempotencyKey.current = "";
+                        setDirty(true);
+                        setMsg(
+                          "已取消本次重合成，当前成片保持不变，可再次提交",
+                        );
+                        await refetchRenders();
+                      } catch (e) {
+                        setError(
+                          e instanceof HttpError
+                            ? e.body.message
+                            : "取消失败，请重试",
+                        );
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    取消本次重合成
+                  </button>
+                )}
+                {inflightRender?.status === "running" && (
+                  <span className="text-xs text-text-3">
+                    已开始合成，当前不可取消
+                  </span>
+                )}
                 <Link
                   to={`/publish/jobs?task=${detail.id}`}
                   className="btn-ghost text-xs"

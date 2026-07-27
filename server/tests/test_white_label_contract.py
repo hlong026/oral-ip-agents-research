@@ -204,6 +204,7 @@ def test_public_openapi_hides_legacy_provider_webhook_path() -> None:
 
     assert "/api/v1/webhooks/provider-callback" in paths
     assert "/api/v1/webhooks/hifly" not in paths
+    assert not any(path.endswith("/override") for path in paths)
 
 
 def test_background_job_error_hides_provider_details() -> None:

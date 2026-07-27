@@ -64,6 +64,19 @@ async def api_release_reservation(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
+    from .models import CreditReservation
+
+    reservation = await db.get(CreditReservation, reservation_id)
+    if reservation is None or reservation.user_id != user_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "RESERVATION_NOT_FOUND", "message": "冻结记录不存在"},
+        )
+    if reservation.task_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RESERVATION_BOUND", "message": "任务已接管该冻结，不能手动释放"},
+        )
     released = await release_reservation(db, reservation_id, user_id)
     if released is None:
         raise HTTPException(

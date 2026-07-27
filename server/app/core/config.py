@@ -1,6 +1,8 @@
 """全局配置（pydantic-settings，.env 驱动）"""
 
 from functools import lru_cache
+from ipaddress import ip_address
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -16,11 +18,13 @@ class Settings(BaseSettings):
     bootstrap_admin_phone: str = ""
     bootstrap_admin_password: str = ""
     api_prefix: str = "/api/v1"
+    cors_origins: str = ""
 
     # 数据层
     database_url: str = "sqlite+aiosqlite:///./oral.db"
     redis_url: str = "redis://localhost:6379/0"
     task_queue_name: str = "oral"
+    redis_operation_timeout_seconds: float = 3.0
 
     # 存储
     storage_driver: str = "local"  # local | s3
@@ -61,6 +65,8 @@ class Settings(BaseSettings):
     feiying_poll_interval: float = 5.0  # 轮询间隔（秒）
     feiying_poll_max_attempts: int = 60  # 最大轮询次数（5分钟超时）
     feiying_webhook_secret: str = ""  # 回调验签（预留）
+    webhook_retry_max_attempts: int = 3
+    webhook_retry_base_seconds: int = 30
 
     # 第三方解析兜底
     parse_api_url: str = ""
@@ -130,16 +136,96 @@ def validate_runtime_security(settings: Settings) -> None:
         raise RuntimeError("启用私信模块必须配置真实 DOUYIN_IM_APP_KEY，禁止使用 Mock 发送")
     if settings.app_env in {"dev", "test"}:
         return
-    missing: list[str] = []
-    if settings.app_secret == "dev-secret-change-me":
-        missing.append("APP_SECRET")
-    if not settings.config_encryption_key:
-        missing.append("CONFIG_ENCRYPTION_KEY")
-    if not settings.activation_secret:
-        missing.append("ACTIVATION_SECRET")
-    if not settings.publish_session_encryption_key:
-        missing.append("PUBLISH_SESSION_ENCRYPTION_KEY")
-    if not settings.feiying_webhook_secret:
-        missing.append("FEIYING_WEBHOOK_SECRET")
-    if missing:
-        raise RuntimeError("生产环境缺少安全配置：" + ", ".join(missing))
+
+    def is_placeholder(value: str) -> bool:
+        normalized = value.strip().lower()
+        return not normalized or any(
+            marker in normalized for marker in ("replace_", "replace-", "change-me", "example.com", "dev-secret")
+        )
+
+    def has_url_host(value: str, schemes: set[str]) -> bool:
+        parsed = urlparse(value)
+        return parsed.scheme in schemes and bool(parsed.hostname)
+
+    def is_public_dns_hostname(hostname: str | None) -> bool:
+        normalized = (hostname or "").strip().lower().rstrip(".")
+        if not normalized or "." not in normalized:
+            return False
+        try:
+            ip_address(normalized)
+        except ValueError:
+            pass
+        else:
+            return False
+        return not normalized.endswith((".example", ".internal", ".invalid", ".lan", ".local", ".localhost", ".test"))
+
+    allowed_tauri_origins = {"tauri://localhost", "https://tauri.localhost"}
+
+    def is_allowed_cors_origin(origin: str) -> bool:
+        if origin in allowed_tauri_origins:
+            return True
+        parsed = urlparse(origin)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.hostname)
+            and is_public_dns_hostname(parsed.hostname)
+            and not parsed.username
+            and not parsed.password
+            and parsed.path in {"", "/"}
+            and not parsed.params
+            and not parsed.query
+            and not parsed.fragment
+            and not is_placeholder(origin)
+        )
+
+    errors: list[str] = []
+    secrets = {
+        "APP_SECRET": settings.app_secret,
+        "CONFIG_ENCRYPTION_KEY": settings.config_encryption_key,
+        "ACTIVATION_SECRET": settings.activation_secret,
+        "PUBLISH_SESSION_ENCRYPTION_KEY": settings.publish_session_encryption_key,
+        "FEIYING_WEBHOOK_SECRET": settings.feiying_webhook_secret,
+    }
+    for name, value in secrets.items():
+        if is_placeholder(value) or len(value.encode("utf-8")) < 32:
+            errors.append(f"{name} 必须是至少 32 字节的非占位随机值")
+    if len(set(secrets.values())) != len(secrets):
+        errors.append("应用安全密钥必须互不相同")
+
+    if not has_url_host(settings.database_url, {"postgresql+asyncpg"}) or is_placeholder(settings.database_url):
+        errors.append("DATABASE_URL 必须使用非占位的 PostgreSQL asyncpg 连接")
+    if not has_url_host(settings.redis_url, {"redis", "rediss"}) or is_placeholder(settings.redis_url):
+        errors.append("REDIS_URL 必须使用有效的 Redis 连接")
+
+    cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+    if not cors_origins or any(not is_allowed_cors_origin(origin) for origin in cors_origins):
+        errors.append("CORS_ORIGINS 必须只包含正式 HTTPS 域名或受控 Tauri Origin")
+
+    if settings.storage_driver != "s3":
+        errors.append("STORAGE_DRIVER 生产环境必须使用 s3")
+    if not has_url_host(settings.s3_endpoint, {"http", "https"}) or is_placeholder(settings.s3_endpoint):
+        errors.append("S3_ENDPOINT 必须是有效的非占位地址")
+    if is_placeholder(settings.s3_access_key):
+        errors.append("S3_ACCESS_KEY 必须是非占位值")
+    if is_placeholder(settings.s3_secret_key) or len(settings.s3_secret_key.encode("utf-8")) < 32:
+        errors.append("S3_SECRET_KEY 必须是至少 32 字节的非占位值")
+    if is_placeholder(settings.s3_bucket):
+        errors.append("S3_BUCKET 必须是非占位值")
+
+    media_url = urlparse(settings.media_public_base_url)
+    if (
+        not has_url_host(settings.media_public_base_url, {"https"})
+        or not is_public_dns_hostname(media_url.hostname)
+        or media_url.username
+        or media_url.password
+        or media_url.params
+        or media_url.query
+        or media_url.fragment
+        or is_placeholder(settings.media_public_base_url)
+    ):
+        errors.append("MEDIA_PUBLIC_BASE_URL 必须是公网可达的正式 HTTPS 地址")
+    if not settings.publish_browser_headless:
+        errors.append("PUBLISH_BROWSER_HEADLESS 生产环境必须为 true")
+
+    if errors:
+        raise RuntimeError("生产环境安全配置无效：" + "；".join(errors))

@@ -5,6 +5,7 @@
 - 日志：structlog 结构化输出（§10.6）
 """
 
+import asyncio
 import mimetypes
 import os
 import re
@@ -17,8 +18,8 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from app.core import storage
 from app.core.config import get_settings, validate_runtime_security
-from app.core.db import SessionLocal, init_models, verify_migrations_current
-from app.core.events import init_redis
+from app.core.db import SessionLocal, database_ready, init_models, verify_migrations_current
+from app.core.events import init_redis, redis_ready
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import TraceMiddleware
 from app.core.white_label import PUBLIC_PROVIDER_UNAVAILABLE, public_text
@@ -53,19 +54,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with SessionLocal() as db:
         await seed_prices(db)
         await seed_initial_price_catalog(db)
+        from app.modules.avatar.service import recover_unknown_submissions as recover_unknown_avatar_submissions
         from app.modules.content.jobs import recover_pending_jobs
-        from app.modules.pipeline.service import recover_incomplete_tasks
+        from app.modules.pipeline.service import recover_incomplete_tasks, recover_render_versions
         from app.modules.publish.service import recover_publish_jobs
+        from app.modules.voice.service import recover_unknown_submissions as recover_unknown_voice_submissions
+        from app.modules.webhook.service import recover_failed_webhooks
 
         await recover_pending_jobs(db)
+        await recover_unknown_voice_submissions(db)
+        await recover_unknown_avatar_submissions(db)
         await recover_incomplete_tasks(db)
+        await recover_render_versions(db)
         await recover_publish_jobs(db)
+        await recover_failed_webhooks(db)
     # 发布模块：启动 Cookie 心跳检测后台任务
     from app.providers.publish.heartbeat import start_heartbeat
 
-    start_heartbeat()
+    heartbeat_task = start_heartbeat()
     logger.info("oral-ip-agents server ready")
-    yield
+    try:
+        yield
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
 
 
 app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
@@ -75,12 +87,8 @@ app.add_middleware(TraceMiddleware)
 _allowed_origins = (
     ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
     if settings.app_env == "dev"
-    else [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+    else [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 )
-if not _allowed_origins and settings.app_env != "dev":
-    import warnings
-
-    warnings.warn("CORS_ORIGINS 未配置，生产环境跨域请求将被拒绝", stacklevel=1)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
@@ -134,18 +142,35 @@ async def healthz() -> dict:
 
 
 @app.get("/readyz")
-async def readyz() -> dict:
-    """部署验证端点：暴露运行环境、provider 模式与各链名单，切生产后用于确认零 Mock"""
+async def readyz() -> Response:
+    """生产就绪探针：验证实时依赖，并保留 Provider 配置快照。"""
     from app.providers.registry import registry
 
     has_mock = registry.has_mock_providers()
-    return {
-        "ok": True,
+    database_ok, redis_ok, storage_ok = await asyncio.gather(
+        database_ready(),
+        redis_ready(),
+        storage.storage_ready(),
+    )
+    redis_required = settings.app_env not in {"dev", "test"}
+    dependencies = {
+        "database": {"ok": database_ok, "required": True},
+        "redis": {"ok": redis_ok, "required": redis_required},
+        "storage": {"ok": storage_ok, "required": True},
+    }
+    ok = database_ok and storage_ok and (redis_ok or not redis_required)
+    payload = {
+        "ok": ok,
         "env": settings.app_env,
         "provider_mode": "mock_fallback" if has_mock else "real_only",
         "mock_fallback_allowed": settings.mock_fallback_allowed,
         "provider_chains": registry.chain_snapshot(),
+        "dependencies": dependencies,
     }
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if ok else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=payload,
+    )
 
 
 # ---- 业务路由 ----
@@ -209,8 +234,15 @@ app.include_router(ws_router)
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
 
 
-@app.api_route("/media/{key:path}", methods=["GET", "HEAD"], name="media")
+@app.head("/media/{key:path}", include_in_schema=False)
+@app.get("/media/{key:path}", name="media")
 async def media_file(key: str, request: Request) -> Response:
+    if not storage.verify_media_signature(
+        key,
+        request.query_params.get("exp"),
+        request.query_params.get("sig"),
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "媒体访问链接无效或已过期")
     try:
         total = await storage.size(key)
     except (FileNotFoundError, ValueError) as exc:

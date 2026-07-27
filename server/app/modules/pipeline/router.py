@@ -1,20 +1,23 @@
 """pipeline 路由（/pipelines，F-405/406）"""
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user_id
 
 from . import service
-from .schemas import CreatePipelineIn, RetryStepIn, StatsOut, TaskOut, TaskPageOut
+from .schemas import (
+    CreatePipelineIn,
+    RecomposeIn,
+    RenderVersionOut,
+    RetryStepIn,
+    StatsOut,
+    TaskOut,
+    TaskPageOut,
+)
 
 router = APIRouter(prefix="/pipelines", tags=["pipeline"])
-
-
-class OverrideIn(BaseModel):
-    artifacts: dict[str, str]
 
 
 @router.post("", response_model=list[TaskOut])
@@ -55,6 +58,35 @@ async def get_pipeline(
     return await service.get_task(db, task_id, user_id)
 
 
+@router.get("/{task_id}/renders", response_model=list[RenderVersionOut])
+async def list_render_versions(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[RenderVersionOut]:
+    return await service.list_render_versions(db, task_id, user_id)
+
+
+@router.post("/{task_id}/recompose", response_model=RenderVersionOut)
+async def recompose(
+    task_id: str,
+    inp: RecomposeIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> RenderVersionOut:
+    return await service.recompose(db, task_id, user_id, inp)
+
+
+@router.post("/{task_id}/renders/{render_id}/cancel", response_model=RenderVersionOut)
+async def cancel_render(
+    task_id: str,
+    render_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> RenderVersionOut:
+    return await service.cancel_render(db, task_id, render_id, user_id)
+
+
 @router.post("/{task_id}/retry-quote")
 async def retry_quote(
     task_id: str,
@@ -74,18 +106,6 @@ async def retry_step(
 ) -> TaskOut:
     """单步重跑（F-405）"""
     return await service.retry_step(db, task_id, step, user_id, inp.quoteId if inp else None)
-
-
-@router.post("/{task_id}/steps/{step}/override", response_model=TaskOut)
-async def override_step(
-    task_id: str,
-    step: str,
-    inp: OverrideIn,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-) -> TaskOut:
-    """人工覆盖产物，从下一步续跑（F-405）"""
-    return await service.override_step(db, task_id, step, user_id, inp.artifacts)
 
 
 @router.post("/{task_id}/confirm", response_model=TaskOut)

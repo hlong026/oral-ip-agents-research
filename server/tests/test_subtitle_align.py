@@ -130,7 +130,8 @@ async def test_asr_media_input_prefers_public_url(monkeypatch):
     monkeypatch.setattr(storage.settings, "media_public_base_url", "https://api.example.com")
     key = await storage.save_bytes("tts", "audio.mp3", b"fake-mp3-bytes")
     media_input = await _asr_media_input(key, 60.0)
-    assert media_input == f"https://api.example.com/media/{key}"
+    assert media_input.startswith(f"https://api.example.com/media/{key}?exp=")
+    assert "&sig=" in media_input
 
 
 async def test_asr_media_input_gives_up_on_long_audio_without_public_url(monkeypatch):

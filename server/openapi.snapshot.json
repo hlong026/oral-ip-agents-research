@@ -25,6 +25,23 @@
         }
       }
     },
+    "/readyz": {
+      "get": {
+        "summary": "Readyz",
+        "description": "生产就绪探针：验证实时依赖，并保留 Provider 配置快照。",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": ["auth"],
@@ -2166,6 +2183,164 @@
         }
       }
     },
+    "/api/v1/pipelines/{task_id}/renders": {
+      "get": {
+        "tags": ["pipeline"],
+        "summary": "List Render Versions",
+        "operationId": "list_render_versions_api_v1_pipelines__task_id__renders_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RenderVersionOut"
+                  },
+                  "title": "Response List Render Versions Api V1 Pipelines  Task Id  Renders Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/recompose": {
+      "post": {
+        "tags": ["pipeline"],
+        "summary": "Recompose",
+        "operationId": "recompose_api_v1_pipelines__task_id__recompose_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecomposeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderVersionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/renders/{render_id}/cancel": {
+      "post": {
+        "tags": ["pipeline"],
+        "summary": "Cancel Render",
+        "operationId": "cancel_render_api_v1_pipelines__task_id__renders__render_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenderVersionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pipelines/{task_id}/retry-quote": {
       "post": {
         "tags": ["pipeline"],
@@ -2257,71 +2432,6 @@
                   }
                 ],
                 "title": "Inp"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/pipelines/{task_id}/steps/{step}/override": {
-      "post": {
-        "tags": ["pipeline"],
-        "summary": "Override Step",
-        "description": "人工覆盖产物，从下一步续跑（F-405）",
-        "operationId": "override_step_api_v1_pipelines__task_id__steps__step__override_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "task_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Task Id"
-            }
-          },
-          {
-            "name": "step",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Step"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OverrideIn"
               }
             }
           }
@@ -2811,6 +2921,16 @@
             }
           },
           {
+            "name": "taskId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Taskid"
+            }
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -3205,6 +3325,798 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/conversations": {
+      "get": {
+        "tags": ["im"],
+        "summary": "List Conversations",
+        "operationId": "list_conversations_api_v1_im_conversations_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": "",
+              "title": "Search"
+            }
+          },
+          {
+            "name": "accountId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 32,
+              "default": "",
+              "title": "Accountid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/conversations/{conversation_id}/messages": {
+      "get": {
+        "tags": ["im"],
+        "summary": "List Messages",
+        "operationId": "list_messages_api_v1_im_conversations__conversation_id__messages_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100,
+              "default": "",
+              "title": "Search"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/conversations/{conversation_id}/send": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Send Message",
+        "operationId": "send_message_api_v1_im_conversations__conversation_id__send_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/conversations/{conversation_id}/read": {
+      "put": {
+        "tags": ["im"],
+        "summary": "Mark Read",
+        "operationId": "mark_read_api_v1_im_conversations__conversation_id__read_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/messages/{message_id}/retry": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Retry Message",
+        "operationId": "retry_message_api_v1_im_messages__message_id__retry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/messages/{message_id}/takeover": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Take Over Message",
+        "operationId": "take_over_message_api_v1_im_messages__message_id__takeover_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Message Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/rules": {
+      "get": {
+        "tags": ["im"],
+        "summary": "List Rules",
+        "operationId": "list_rules_api_v1_im_rules_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RuleOut"
+                  },
+                  "type": "array",
+                  "title": "Response List Rules Api V1 Im Rules Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": ["im"],
+        "summary": "Create Rule",
+        "operationId": "create_rule_api_v1_im_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleCreateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/rules/{rule_id}": {
+      "put": {
+        "tags": ["im"],
+        "summary": "Update Rule",
+        "operationId": "update_rule_api_v1_im_rules__rule_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["im"],
+        "summary": "Delete Rule",
+        "operationId": "delete_rule_api_v1_im_rules__rule_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/rules/{rule_id}/toggle": {
+      "put": {
+        "tags": ["im"],
+        "summary": "Toggle Rule",
+        "operationId": "toggle_rule_api_v1_im_rules__rule_id__toggle_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/im/listener/status": {
+      "get": {
+        "tags": ["im"],
+        "summary": "Listener Status",
+        "operationId": "listener_status_api_v1_im_listener_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ListenerStatusOut"
+                  },
+                  "type": "array",
+                  "title": "Response Listener Status Api V1 Im Listener Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/listener/start": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Start Listener",
+        "operationId": "start_listener_api_v1_im_listener_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListenerControlIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenerStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/listener/stop": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Stop Listener",
+        "operationId": "stop_listener_api_v1_im_listener_stop_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListenerControlIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListenerStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/automation/status": {
+      "get": {
+        "tags": ["im"],
+        "summary": "Automation Status",
+        "operationId": "automation_status_api_v1_im_automation_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AutomationStatusOut"
+                  },
+                  "type": "array",
+                  "title": "Response Automation Status Api V1 Im Automation Status Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/automation/authorize": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Authorize Automation",
+        "operationId": "authorize_automation_api_v1_im_automation_authorize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutomationConsentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/im/automation/{account_id}/disable": {
+      "post": {
+        "tags": ["im"],
+        "summary": "Disable Automation",
+        "operationId": "disable_automation_api_v1_im_automation__account_id__disable_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutomationStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -4102,6 +5014,53 @@
         ]
       }
     },
+    "/api/admin/v1/providers/readiness": {
+      "get": {
+        "tags": ["admin-providers"],
+        "summary": "Get Provider Readiness Api",
+        "description": "供应商就绪度看板（切生产前人工核对清单）：\n逐项汇总 Key 配置/开关状态，probe=true 时附带连通性探测；同时暴露运行时 provider 链名单。",
+        "operationId": "get_provider_readiness_api_api_admin_v1_providers_readiness_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Probe"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderReadinessOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/providers/{provider}/probe": {
       "post": {
         "tags": ["admin-providers"],
@@ -4458,6 +5417,93 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/reconciliations": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "List Reconciliations",
+        "description": "列出外部非幂等提交结果未知、仍保留积分冻结的记录。",
+        "operationId": "list_reconciliations_api_admin_v1_reconciliations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/v1/reconciliations/{kind}/{record_id}": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Resolve Reconciliation",
+        "description": "管理员根据供应商后台证据恢复轮询，或结算/释放冻结后关闭未知状态。",
+        "operationId": "resolve_reconciliation_api_admin_v1_reconciliations__kind___record_id__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": ["pipeline", "voice", "avatar"],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconciliationIn"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4865,6 +5911,56 @@
         "required": ["phone", "password"],
         "title": "AdminLoginIn",
         "description": "管理端手机号+密码登录"
+      },
+      "AutomationConsentIn": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "riskVersion": {
+            "type": "string",
+            "title": "Riskversion"
+          }
+        },
+        "type": "object",
+        "required": ["accountId", "accepted", "riskVersion"],
+        "title": "AutomationConsentIn"
+      },
+      "AutomationStatusOut": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "authorized": {
+            "type": "boolean",
+            "title": "Authorized"
+          },
+          "riskVersion": {
+            "type": "string",
+            "title": "Riskversion",
+            "default": ""
+          },
+          "acceptedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acceptedat"
+          }
+        },
+        "type": "object",
+        "required": ["accountId", "authorized"],
+        "title": "AutomationStatusOut"
       },
       "AvatarOut": {
         "properties": {
@@ -5526,6 +6622,90 @@
         ],
         "title": "ContentJobOut"
       },
+      "ConversationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform"
+          },
+          "remoteUid": {
+            "type": "string",
+            "title": "Remoteuid"
+          },
+          "remoteNickname": {
+            "type": "string",
+            "title": "Remotenickname"
+          },
+          "remoteAvatar": {
+            "type": "string",
+            "title": "Remoteavatar"
+          },
+          "lastMessageAt": {
+            "type": "string",
+            "title": "Lastmessageat"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "title": "Unreadcount"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "accountId",
+          "platform",
+          "remoteUid",
+          "remoteNickname",
+          "remoteAvatar",
+          "lastMessageAt",
+          "unreadCount",
+          "status",
+          "createdAt"
+        ],
+        "title": "ConversationOut"
+      },
+      "ConversationPageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": ["items", "total", "page", "pageSize"],
+        "title": "ConversationPageOut"
+      },
       "CreatePipelineIn": {
         "properties": {
           "ipId": {
@@ -5564,6 +6744,29 @@
               }
             ],
             "title": "Scripttext"
+          },
+          "scriptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scriptid"
+          },
+          "scriptVersion": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scriptversion"
           },
           "voiceId": {
             "anyOf": [
@@ -5672,6 +6875,34 @@
         "type": "object",
         "required": ["points", "reason"],
         "title": "CreditAdjustIn"
+      },
+      "EditConfigIn": {
+        "properties": {
+          "subtitleStyle": {
+            "$ref": "#/components/schemas/SubtitleStyleIn"
+          },
+          "bgmMode": {
+            "type": "string",
+            "const": "off",
+            "title": "Bgmmode",
+            "default": "off"
+          },
+          "bgmVolume": {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Bgmvolume",
+            "default": 0
+          },
+          "coverTemplate": {
+            "type": "string",
+            "enum": ["bold-bottom", "center-band", "top-title", "none"],
+            "title": "Covertemplate",
+            "default": "bold-bottom"
+          }
+        },
+        "type": "object",
+        "title": "EditConfigIn"
       },
       "ExportOut": {
         "properties": {
@@ -5786,6 +7017,16 @@
             "type": "string",
             "title": "Taskid"
           },
+          "renderVersionId": {
+            "type": "string",
+            "title": "Renderversionid",
+            "default": ""
+          },
+          "renderVersion": {
+            "type": "integer",
+            "title": "Renderversion",
+            "default": 0
+          },
           "platform": {
             "type": "string",
             "title": "Platform"
@@ -5830,6 +7071,11 @@
           "postId": {
             "type": "string",
             "title": "Postid",
+            "default": ""
+          },
+          "postIdSource": {
+            "type": "string",
+            "title": "Postidsource",
             "default": ""
           },
           "videoUrl": {
@@ -5934,6 +7180,173 @@
         "type": "object",
         "required": ["stopped"],
         "title": "KillSwitchOut"
+      },
+      "ListenerControlIn": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          }
+        },
+        "type": "object",
+        "required": ["accountId"],
+        "title": "ListenerControlIn"
+      },
+      "ListenerStatusOut": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "accountNickname": {
+            "type": "string",
+            "title": "Accountnickname",
+            "default": ""
+          },
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "default": "douyin"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "lastHeartbeat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastheartbeat"
+          },
+          "errorMsg": {
+            "type": "string",
+            "title": "Errormsg",
+            "default": ""
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          }
+        },
+        "type": "object",
+        "required": ["accountId", "status"],
+        "title": "ListenerStatusOut"
+      },
+      "MessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "conversationId": {
+            "type": "string",
+            "title": "Conversationid"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction"
+          },
+          "msgType": {
+            "type": "integer",
+            "title": "Msgtype"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "autoReplied": {
+            "type": "boolean",
+            "title": "Autoreplied"
+          },
+          "replyContent": {
+            "type": "string",
+            "title": "Replycontent"
+          },
+          "sendStatus": {
+            "type": "string",
+            "title": "Sendstatus"
+          },
+          "sendError": {
+            "type": "string",
+            "title": "Senderror"
+          },
+          "retryCount": {
+            "type": "integer",
+            "title": "Retrycount"
+          },
+          "manualTakeover": {
+            "type": "boolean",
+            "title": "Manualtakeover"
+          },
+          "moderationStatus": {
+            "type": "string",
+            "title": "Moderationstatus"
+          },
+          "moderationReason": {
+            "type": "string",
+            "title": "Moderationreason"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "conversationId",
+          "direction",
+          "msgType",
+          "content",
+          "autoReplied",
+          "replyContent",
+          "sendStatus",
+          "sendError",
+          "retryCount",
+          "manualTakeover",
+          "moderationStatus",
+          "moderationReason",
+          "createdAt"
+        ],
+        "title": "MessageOut"
+      },
+      "MessagePageOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MessageOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "pageSize": {
+            "type": "integer",
+            "title": "Pagesize"
+          }
+        },
+        "type": "object",
+        "required": ["items", "total", "page", "pageSize"],
+        "title": "MessagePageOut"
       },
       "ModulePriceCatalogOut": {
         "properties": {
@@ -6217,20 +7630,6 @@
         "type": "object",
         "required": ["id", "level", "title", "body", "read", "createdAt"],
         "title": "NotificationOut"
-      },
-      "OverrideIn": {
-        "properties": {
-          "artifacts": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Artifacts"
-          }
-        },
-        "type": "object",
-        "required": ["artifacts"],
-        "title": "OverrideIn"
       },
       "OverviewOut": {
         "properties": {
@@ -7210,6 +8609,99 @@
         "required": ["provider", "status", "message"],
         "title": "ProviderProbeOut"
       },
+      "ProviderReadinessItem": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "missingFields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missingfields"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "probeStatus": {
+            "type": "string",
+            "title": "Probestatus",
+            "default": ""
+          },
+          "probeMessage": {
+            "type": "string",
+            "title": "Probemessage",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "enabled",
+          "configured",
+          "missingFields",
+          "ready"
+        ],
+        "title": "ProviderReadinessItem"
+      },
+      "ProviderReadinessOut": {
+        "properties": {
+          "env": {
+            "type": "string",
+            "title": "Env"
+          },
+          "providerMode": {
+            "type": "string",
+            "title": "Providermode"
+          },
+          "mockFallbackAllowed": {
+            "type": "boolean",
+            "title": "Mockfallbackallowed"
+          },
+          "providerChains": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Providerchains"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderReadinessItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "allReady": {
+            "type": "boolean",
+            "title": "Allready"
+          }
+        },
+        "type": "object",
+        "required": [
+          "env",
+          "providerMode",
+          "mockFallbackAllowed",
+          "providerChains",
+          "items",
+          "allReady"
+        ],
+        "title": "ProviderReadinessOut"
+      },
       "ProviderStatusItem": {
         "properties": {
           "provider": {
@@ -7381,6 +8873,62 @@
         "required": ["balance", "usedThisMonth", "total"],
         "title": "QuotaOut"
       },
+      "RecomposeIn": {
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "title": "Quoteid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotencykey"
+          },
+          "baseVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Baseversion"
+          },
+          "config": {
+            "$ref": "#/components/schemas/EditConfigIn"
+          }
+        },
+        "type": "object",
+        "required": ["quoteId", "idempotencyKey", "baseVersion", "config"],
+        "title": "RecomposeIn"
+      },
+      "ReconciliationIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["release", "settle", "resume"],
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "providerTaskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providertaskid"
+          }
+        },
+        "type": "object",
+        "required": ["action", "reason"],
+        "title": "ReconciliationIn"
+      },
       "RedeemIn": {
         "properties": {
           "code": {
@@ -7449,6 +8997,91 @@
         "type": "object",
         "required": ["refreshToken"],
         "title": "RefreshIn"
+      },
+      "RenderVersionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "baseVersion": {
+            "type": "integer",
+            "title": "Baseversion"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "config": {
+            "$ref": "#/components/schemas/EditConfigIn"
+          },
+          "videoUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Videourl"
+          },
+          "coverUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverurl"
+          },
+          "quality": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Quality",
+            "default": {}
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "isActive": {
+            "type": "boolean",
+            "title": "Isactive"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "taskId",
+          "version",
+          "baseVersion",
+          "status",
+          "config",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "RenderVersionOut"
       },
       "ReservationBatchOut": {
         "properties": {
@@ -7661,6 +9294,298 @@
         "required": ["text"],
         "title": "RewriteOut"
       },
+      "RuleCreateIn": {
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "title": "Accountid",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "triggerType": {
+            "type": "string",
+            "title": "Triggertype",
+            "default": "all"
+          },
+          "triggerPattern": {
+            "type": "string",
+            "title": "Triggerpattern",
+            "default": ""
+          },
+          "replyMode": {
+            "type": "string",
+            "title": "Replymode",
+            "default": "template"
+          },
+          "replyTemplate": {
+            "type": "string",
+            "title": "Replytemplate",
+            "default": ""
+          },
+          "llmPrompt": {
+            "type": "string",
+            "title": "Llmprompt",
+            "default": ""
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "default": 100
+          },
+          "dailyLimit": {
+            "type": "integer",
+            "title": "Dailylimit",
+            "default": 50
+          },
+          "delayMin": {
+            "type": "integer",
+            "title": "Delaymin",
+            "default": 3
+          },
+          "delayMax": {
+            "type": "integer",
+            "title": "Delaymax",
+            "default": 30
+          },
+          "deliveryMode": {
+            "type": "string",
+            "title": "Deliverymode",
+            "default": "suggestion"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": ["name"],
+        "title": "RuleCreateIn"
+      },
+      "RuleOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "triggerType": {
+            "type": "string",
+            "title": "Triggertype"
+          },
+          "triggerPattern": {
+            "type": "string",
+            "title": "Triggerpattern"
+          },
+          "replyMode": {
+            "type": "string",
+            "title": "Replymode"
+          },
+          "replyTemplate": {
+            "type": "string",
+            "title": "Replytemplate"
+          },
+          "llmPrompt": {
+            "type": "string",
+            "title": "Llmprompt"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority"
+          },
+          "dailyLimit": {
+            "type": "integer",
+            "title": "Dailylimit"
+          },
+          "delayMin": {
+            "type": "integer",
+            "title": "Delaymin"
+          },
+          "delayMax": {
+            "type": "integer",
+            "title": "Delaymax"
+          },
+          "deliveryMode": {
+            "type": "string",
+            "title": "Deliverymode"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "accountId",
+          "name",
+          "triggerType",
+          "triggerPattern",
+          "replyMode",
+          "replyTemplate",
+          "llmPrompt",
+          "priority",
+          "dailyLimit",
+          "delayMin",
+          "delayMax",
+          "deliveryMode",
+          "enabled",
+          "createdAt"
+        ],
+        "title": "RuleOut"
+      },
+      "RuleUpdateIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "triggerType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggertype"
+          },
+          "triggerPattern": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerpattern"
+          },
+          "replyMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replymode"
+          },
+          "replyTemplate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replytemplate"
+          },
+          "llmPrompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llmprompt"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "dailyLimit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dailylimit"
+          },
+          "delayMin": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delaymin"
+          },
+          "delayMax": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delaymax"
+          },
+          "deliveryMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deliverymode"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "title": "RuleUpdateIn"
+      },
       "ScriptCreateIn": {
         "properties": {
           "title": {
@@ -7823,6 +9748,22 @@
           "createdAt"
         ],
         "title": "ScriptVersionOut"
+      },
+      "SendMessageIn": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "msgType": {
+            "type": "integer",
+            "title": "Msgtype",
+            "default": 7
+          }
+        },
+        "type": "object",
+        "required": ["content"],
+        "title": "SendMessageIn"
       },
       "SettingsIn": {
         "properties": {
@@ -8100,6 +10041,38 @@
         "title": "SubscriptionOut",
         "description": "订阅状态"
       },
+      "SubtitleStyleIn": {
+        "properties": {
+          "fontSize": {
+            "type": "integer",
+            "maximum": 64,
+            "minimum": 32,
+            "title": "Fontsize",
+            "default": 44
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "title": "Color",
+            "default": "#FFFFFF"
+          },
+          "position": {
+            "type": "string",
+            "enum": ["bottom", "middle", "top"],
+            "title": "Position",
+            "default": "bottom"
+          },
+          "stroke": {
+            "type": "integer",
+            "maximum": 6,
+            "minimum": 0,
+            "title": "Stroke",
+            "default": 2
+          }
+        },
+        "type": "object",
+        "title": "SubtitleStyleIn"
+      },
       "SynthesizeIn": {
         "properties": {
           "voiceId": {
@@ -8158,6 +10131,16 @@
           "ipId": {
             "type": "string",
             "title": "Ipid"
+          },
+          "scriptId": {
+            "type": "string",
+            "title": "Scriptid",
+            "default": ""
+          },
+          "scriptVersion": {
+            "type": "integer",
+            "title": "Scriptversion",
+            "default": 0
           },
           "title": {
             "type": "string",
@@ -8222,6 +10205,11 @@
             "type": "object",
             "title": "Artifacts",
             "default": {}
+          },
+          "activeRenderVersion": {
+            "type": "integer",
+            "title": "Activerenderversion",
+            "default": 0
           },
           "batchId": {
             "anyOf": [
@@ -8665,14 +10653,7 @@
       "app__modules__publish__schemas__PublishIn": {
         "properties": {
           "taskId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Taskid"
           },
           "platforms": {
@@ -8695,7 +10676,14 @@
             "default": []
           },
           "videoKey": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Videokey"
           },
           "coverKey": {
@@ -8722,7 +10710,7 @@
           }
         },
         "type": "object",
-        "required": ["platforms", "title", "videoKey"],
+        "required": ["taskId", "platforms", "title"],
         "title": "PublishIn"
       }
     },

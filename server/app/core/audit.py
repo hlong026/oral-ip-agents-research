@@ -39,7 +39,7 @@ async def write_audit(
     异步写入审计日志（fire-and-forget，失败仅记 warning 不影响主流程）
     使用独立 Session 避免与业务事务耦合。
     """
-    from app.core.logging import get_logger
+    from app.core.logging import get_logger, sanitize_text
 
     logger = get_logger("oral.audit")
     try:
@@ -50,7 +50,7 @@ async def write_audit(
                     user_id=user_id,
                     trace_id=trace_id,
                     task_id=task_id,
-                    detail=detail[:2000],
+                    detail=sanitize_text(detail)[:2000],
                 )
             )
             await db.commit()

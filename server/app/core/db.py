@@ -6,6 +6,7 @@ from pathlib import Path
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -67,3 +68,13 @@ async def verify_migrations_current() -> None:
         raise RuntimeError(
             f"数据库迁移版本不一致：current={sorted(current_heads) or ['<none>']}, expected={sorted(expected_heads)}"
         )
+
+
+async def database_ready() -> bool:
+    """运行期数据库探针；只执行常量查询，不修改业务状态。"""
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False

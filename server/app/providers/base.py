@@ -7,7 +7,6 @@ Provider 抽象层（06 文档 §10.3）：七类 Protocol，防供应商锁定�
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-
 MOCK_PROVIDER_PREFIX = "mock-"
 
 
@@ -22,6 +21,10 @@ class ProviderError(Exception):
 
 class StepRecoverableError(ProviderError):
     """可降级重试的错误（触发降级链）"""
+
+
+class ProviderOutcomeUnknown(ProviderError):
+    """非幂等请求可能已被供应商受理，必须先对账，禁止自动重试或降级。"""
 
 
 class ConsentRequiredError(ProviderError):

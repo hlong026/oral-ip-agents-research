@@ -7,7 +7,7 @@
 
 import json
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes
+from app.core.storage import read_bytes, save_bytes, signed_media_path
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.registry import registry
@@ -63,6 +63,8 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
     return JobOut(
         id=j.id,
         taskId=j.task_id,
+        renderVersionId=j.render_version_id,
+        renderVersion=j.render_version,
         platform=j.platform,
         platformName=PLATFORM_NAMES.get(j.platform, j.platform),
         accountId=j.account_id,
@@ -73,8 +75,8 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
         error="发布失败，请稍后重试" if j.error else "",
         postId=j.post_id,
         postIdSource=j.post_id_source,
-        videoUrl=f"/media/{j.video_key}" if j.video_key else None,
-        packageUrl=f"/media/{j.export_key}" if j.export_key else None,
+        videoUrl=signed_media_path(j.video_key) if j.video_key else None,
+        packageUrl=signed_media_path(j.export_key) if j.export_key else None,
         retryCount=int(j.retry_count or "0"),
         createdAt=j.created_at.astimezone(UTC).isoformat(),
         updatedAt=j.updated_at.astimezone(UTC).isoformat(),
@@ -232,13 +234,27 @@ async def publish_task_video(
     cover_key: str | None,
     scheduled_at: str | None = None,
     topics: list[str] | None = None,
+    render_version_id: str = "",
+    render_version: int = 0,
 ) -> list[str]:
     """供 pipeline engine step_publish 调用：为各平台建发布任务并调度执行"""
     job_ids: list[str] = []
+    enqueue_ids: list[str] = []
+    notifications: list[tuple[str, str, str]] = []
     for platform in platforms:
         _check_platform(platform)
         topics_json = json.dumps(topics or [], ensure_ascii=False)
-        existing = await repo.get_task_platform_job(db, user_id, task_id, platform)
+        existing = (
+            await repo.get_task_render_platform_job(
+                db,
+                user_id,
+                task_id,
+                render_version_id,
+                platform,
+            )
+            if render_version_id
+            else None
+        ) or await repo.get_task_platform_job(db, user_id, task_id, platform)
         if existing is not None and _can_reuse_publish_job(
             existing,
             title=title,
@@ -247,69 +263,120 @@ async def publish_task_video(
             scheduled_at=scheduled_at or "",
             topics_json=topics_json,
         ):
+            if render_version_id and not existing.render_version_id:
+                existing.render_version_id = render_version_id
+                existing.render_version = render_version
             job_ids.append(existing.id)
             continue
+        mutable_existing = None
+        if existing is not None and render_version_id and existing.render_version_id == render_version_id:
+            if existing.status in {"queued", "publishing", "success"}:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "PUBLISH_ALREADY_STARTED",
+                        "message": f"{PLATFORM_NAMES[platform]}发布已开始，不能修改发布信息",
+                    },
+                )
+            existing.title = title
+            existing.video_key = video_key
+            existing.cover_key = cover_key or ""
+            existing.scheduled_at = scheduled_at or ""
+            existing.topics_json = topics_json
+            mutable_existing = existing
         capability = _capability(platform)
         if not capability.automaticEnabled:
-            job = await repo.create_job(
-                db,
-                user_id=user_id,
-                task_id=task_id,
-                platform=platform,
-                title=title,
-                topics_json=topics_json,
-                video_key=video_key,
-                cover_key=cover_key or "",
-                scheduled_at=scheduled_at or "",
-                status="export_ready",
-                error=capability.reason,
-            )
-            await notify_user(
-                db,
-                user_id,
-                "warn",
-                f"{PLATFORM_NAMES[platform]}任务等待人工发布",
-                "自动发布尚未完成真实验收，可在发布任务中下载完整发布包。",
+            if mutable_existing is not None:
+                job = mutable_existing
+                job.status = "export_ready"
+                job.error = capability.reason
+            else:
+                job = await repo.create_job(
+                    db,
+                    user_id=user_id,
+                    task_id=task_id,
+                    render_version_id=render_version_id,
+                    render_version=render_version,
+                    platform=platform,
+                    title=title,
+                    topics_json=topics_json,
+                    video_key=video_key,
+                    cover_key=cover_key or "",
+                    scheduled_at=scheduled_at or "",
+                    status="export_ready",
+                    error=capability.reason,
+                    commit=False,
+                )
+            notifications.append(
+                (
+                    "warn",
+                    f"{PLATFORM_NAMES[platform]}任务等待人工发布",
+                    "自动发布尚未完成真实验收，可在发布任务中下载完整发布包。",
+                )
             )
             job_ids.append(job.id)
             continue
         account = await repo.active_account_for(db, user_id, platform)
         if account is None:
+            if mutable_existing is not None:
+                job = mutable_existing
+            else:
+                job = await repo.create_job(
+                    db,
+                    user_id=user_id,
+                    task_id=task_id,
+                    render_version_id=render_version_id,
+                    render_version=render_version,
+                    platform=platform,
+                    title=title,
+                    video_key=video_key,
+                    cover_key=cover_key or "",
+                    topics_json=topics_json,
+                    status="failed",
+                    commit=False,
+                )
+            job.status = "failed"
+            job.error = f"未授权{PLATFORM_NAMES[platform]}账号，请到「发布-账号」扫码授权"
+            notifications.append(
+                (
+                    "error",
+                    f"{PLATFORM_NAMES[platform]}发布失败：未授权账号",
+                    "请到「发布-账号」扫码授权，或下载完整人工发布包。",
+                )
+            )
+            job_ids.append(job.id)
+            continue
+        if mutable_existing is not None:
+            job = mutable_existing
+            job.account_id = account.id
+            job.status = "queued"
+            job.error = ""
+            job.queue_message_id = ""
+        else:
             job = await repo.create_job(
                 db,
                 user_id=user_id,
                 task_id=task_id,
+                render_version_id=render_version_id,
+                render_version=render_version,
+                account_id=account.id,
                 platform=platform,
                 title=title,
                 video_key=video_key,
                 cover_key=cover_key or "",
                 topics_json=topics_json,
-                status="failed",
-                error=f"未授权{PLATFORM_NAMES[platform]}账号，请到「发布-账号」扫码授权",
+                scheduled_at=scheduled_at or "",
+                commit=False,
             )
-            await notify_user(
-                db,
-                user_id,
-                "error",
-                f"{PLATFORM_NAMES[platform]}发布失败：未授权账号",
-                "请到「发布-账号」扫码授权，或下载完整人工发布包。",
-            )
-            job_ids.append(job.id)
-            continue
-        job = await repo.create_job(
-            db,
-            user_id=user_id,
-            task_id=task_id,
-            account_id=account.id,
-            platform=platform,
-            title=title,
-            video_key=video_key,
-            cover_key=cover_key or "",
-            topics_json=topics_json,
-            scheduled_at=scheduled_at or "",
-        )
         job_ids.append(job.id)
-        await _enqueue_job(db, job)
+        enqueue_ids.append(job.id)
+    await db.commit()
+    for level, notification_title, body in notifications:
+        await notify_user(db, user_id, level, notification_title, body)
+    for job_id in enqueue_ids:
+        queued_job = await repo.get_job(db, job_id, user_id)
+        if queued_job is not None:
+            await _enqueue_job(db, queued_job)
     return job_ids
 
 
@@ -319,16 +386,47 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "PLATFORM_REQUIRED", "message": "至少选择一个平台"}
         )
+    from app.modules.pipeline import repository as pipeline_repo
+
+    task = await pipeline_repo.get_for_update(db, inp.taskId, user_id)
+    if task is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "TASK_NOT_FOUND", "message": "任务不存在或不属于当前用户"},
+        )
+    if task.status != "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能创建发布任务"},
+        )
+    from app.modules.pipeline.service import ensure_active_render_version
+
+    active_render = await ensure_active_render_version(db, task)
+    video_key = active_render.video_key
+    cover_key = active_render.cover_key
+    quality = json.loads(active_render.quality_json or "{}")
+    if not video_key or not isinstance(quality, dict) or not quality.get("passed"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VIDEO_NOT_READY", "message": "成片缺失或未通过质量检查"},
+        )
+    if (inp.videoKey and inp.videoKey != video_key) or (inp.coverKey and inp.coverKey != cover_key):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "PUBLISH_ASSET_MISMATCH", "message": "发布资源与任务最终产物不一致"},
+        )
     ids = await publish_task_video(
         db,
         user_id,
-        inp.taskId or "",
+        inp.taskId,
         inp.platforms,
         inp.title,
-        inp.videoKey,
-        inp.coverKey,
+        video_key,
+        cover_key or None,
         inp.publishAt,
         inp.topics,
+        active_render.id,
+        active_render.version,
     )
     jobs = []
     for jid in ids:
@@ -339,8 +437,15 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
     return jobs
 
 
-async def list_jobs(db: AsyncSession, user_id: str, status_: str | None, page: int, page_size: int) -> JobPageOut:
-    items, total = await repo.list_jobs(db, user_id, status_, page, page_size)
+async def list_jobs(
+    db: AsyncSession,
+    user_id: str,
+    status_: str | None,
+    page: int,
+    page_size: int,
+    task_id: str = "",
+) -> JobPageOut:
+    items, total = await repo.list_jobs(db, user_id, status_, page, page_size, task_id)
     outs = []
     for j in items:
         acc = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
@@ -404,9 +509,9 @@ async def export_job(db: AsyncSession, user_id: str, job_id: str) -> ExportOut:
     await repo.save_job(db, j)
     return ExportOut(
         jobId=j.id,
-        videoUrl=f"/media/{j.video_key}",
+        videoUrl=signed_media_path(j.video_key),
         packageKey=j.export_key,
-        packageUrl=f"/media/{j.export_key}",
+        packageUrl=signed_media_path(j.export_key),
         metadata=metadata,
     )
 
@@ -561,7 +666,11 @@ async def _run_job(job_id: str) -> None:
 
 async def recover_publish_jobs(db: AsyncSession) -> int:
     """重启后恢复未入队发布；结果未知的 publishing 任务转人工导出。"""
-    jobs = await repo.list_recoverable_jobs(db)
+    # Publish actor 最长执行 15 分钟；给正在运行的独立 Worker 留出 5 分钟余量。
+    jobs = await repo.list_recoverable_jobs(
+        db,
+        publishing_stale_before=datetime.now(UTC) - timedelta(minutes=20),
+    )
     recovered = 0
     unknown_jobs: list[PublishJob] = []
     for job in jobs:
@@ -591,14 +700,45 @@ async def recover_publish_jobs(db: AsyncSession) -> int:
     return recovered
 
 
-async def _enqueue_job(db: AsyncSession, job: PublishJob) -> None:
+async def _enqueue_job(db: AsyncSession, job: PublishJob) -> bool:
     """先持久化可恢复状态，再投递 Broker，最后条件回写消息号。"""
     job.status = "queued"
+    job.error = ""
     job.queue_message_id = ""
     await repo.save_job(db, job)
-    message_id = _schedule_job(job.id, job.scheduled_at)
-    await repo.record_queue_message(db, job.id, message_id)
-    await db.refresh(job)
+    try:
+        message_id = _schedule_job(job.id, job.scheduled_at)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "publish_enqueue_failed",
+            job_id=job.id,
+            user_id=job.user_id,
+            platform=job.platform,
+        )
+        job.status = "failed"
+        job.error = "发布队列暂不可用，请稍后重试"
+        await repo.save_job(db, job)
+        await notify_user(
+            db,
+            job.user_id,
+            "error",
+            f"{PLATFORM_NAMES.get(job.platform)}发布任务排队失败",
+            "成片已保留，请稍后在发布管理中重试。",
+        )
+        return False
+    try:
+        await repo.record_queue_message(db, job.id, message_id)
+        await db.refresh(job)
+    except Exception:  # noqa: BLE001
+        # Broker 已接受消息，不能把任务改成 failed 后允许用户重复发布。
+        await db.rollback()
+        logger.exception(
+            "publish_queue_receipt_failed",
+            job_id=job.id,
+            user_id=job.user_id,
+            message_id=message_id,
+        )
+    return True
 
 
 def _can_reuse_publish_job(
@@ -610,18 +750,37 @@ def _can_reuse_publish_job(
     scheduled_at: str,
     topics_json: str,
 ) -> bool:
-    same_payload = (
-        job.title == title
-        and job.video_key == video_key
-        and job.cover_key == cover_key
-        and job.scheduled_at == scheduled_at
-        and job.topics_json == topics_json
+    same_payload = _same_publish_payload(
+        job,
+        title=title,
+        video_key=video_key,
+        cover_key=cover_key,
+        scheduled_at=scheduled_at,
+        topics_json=topics_json,
     )
     if not same_payload:
         return False
     if job.status in {"queued", "publishing", "success", "export_ready"}:
         return True
     return job.status == "failed" and "发布结果未知" in job.error
+
+
+def _same_publish_payload(
+    job: PublishJob,
+    *,
+    title: str,
+    video_key: str,
+    cover_key: str,
+    scheduled_at: str,
+    topics_json: str,
+) -> bool:
+    return (
+        job.title == title
+        and job.video_key == video_key
+        and job.cover_key == cover_key
+        and job.scheduled_at == scheduled_at
+        and job.topics_json == topics_json
+    )
 
 
 def _check_platform(platform: str) -> None:

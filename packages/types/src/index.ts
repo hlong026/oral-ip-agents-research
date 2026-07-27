@@ -61,11 +61,23 @@ export const STEP_LABELS: Record<PipelineStep, string> = {
 
 /** 步骤状态 */
 export type StepStatus =
-  "pending" | "running" | "done" | "failed" | "skipped" | "waiting_confirm";
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "waiting_confirm"
+  | "reconciliation_required";
 
 /** 任务状态机：PENDING → RUNNING → DONE / FAILED / CANCELED */
 export type TaskStatus =
-  "pending" | "running" | "done" | "failed" | "canceled" | "waiting_confirm";
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "canceled"
+  | "waiting_confirm"
+  | "reconciliation_required";
 
 /** 流水线模式：auto 全自动 / manual 每步暂停可干预（F-405） */
 export type PipelineMode = "auto" | "manual";
@@ -216,7 +228,13 @@ export interface Persona {
 }
 
 export type VoiceStatus =
-  "ready" | "training" | "pending_confirm" | "rejected" | "failed";
+  | "ready"
+  | "submitting"
+  | "training"
+  | "pending_confirm"
+  | "reconciliation_required"
+  | "rejected"
+  | "failed";
 
 export interface Voice {
   id: string;
@@ -237,7 +255,8 @@ export interface Avatar {
   style?: string;
   coverUrl?: string | null;
   previewUrl?: string | null;
-  status: "ready" | "training" | "failed";
+  status:
+    "ready" | "submitting" | "training" | "reconciliation_required" | "failed";
   createdAt: string;
 }
 
@@ -313,6 +332,9 @@ export interface Script {
   originalText: string;
   rewrittenText: string;
   similarityScore: number;
+  currentVersion: number;
+  modelName: string;
+  promptVersion: string;
   status: string;
   createdAt: string;
 }
@@ -337,6 +359,8 @@ export interface StepState {
 export interface PipelineTask {
   id: string;
   ipId: string;
+  scriptId?: string;
+  scriptVersion?: number;
   title: string;
   coverUrl?: string | null;
   sourceUrl?: string;
@@ -348,7 +372,38 @@ export interface PipelineTask {
   quotaCost: number;
   error?: string;
   artifacts?: Record<string, unknown>;
+  activeRenderVersion?: number;
   batchId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubtitleStyle {
+  fontSize: number;
+  color: string;
+  position: "bottom" | "middle" | "top";
+  stroke: number;
+}
+
+export interface EditConfig {
+  subtitleStyle: SubtitleStyle;
+  bgmMode: "off";
+  bgmVolume: 0;
+  coverTemplate: "bold-bottom" | "center-band" | "top-title" | "none";
+}
+
+export interface PipelineRenderVersion {
+  id: string;
+  taskId: string;
+  version: number;
+  baseVersion: number;
+  status: "pending" | "running" | "rendered" | "done" | "failed" | "canceled";
+  config: EditConfig;
+  videoUrl?: string | null;
+  coverUrl?: string | null;
+  quality: Record<string, unknown>;
+  error: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -389,6 +444,8 @@ export interface PublishAccount {
 export interface PublishJob {
   id: string;
   taskId: string;
+  renderVersionId?: string;
+  renderVersion?: number;
   platform: Platform;
   platformName: string;
   accountId: string;

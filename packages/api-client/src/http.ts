@@ -9,8 +9,13 @@ import { deviceFingerprint } from "./fingerprint";
 
 type ImportMetaWithEnv = ImportMeta & { env?: { VITE_API_BASE?: string } };
 
-const API_BASE =
-  (import.meta as ImportMetaWithEnv).env?.VITE_API_BASE ?? "/api/v1";
+export const API_BASE = (
+  (import.meta as ImportMetaWithEnv).env?.VITE_API_BASE ?? "/api/v1"
+).replace(/\/+$/, "");
+
+export function buildApiUrl(path: string, base = API_BASE): string {
+  return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
 
 let accessToken: string | null = null;
 let refreshToken: string | null = localStorage.getItem("oral_rt");
@@ -39,7 +44,7 @@ export function getAccessToken(): string | null {
 async function doRefresh(): Promise<boolean> {
   if (!refreshToken) return false;
   try {
-    const res = await fetch(`${API_BASE}/auth/refresh`, {
+    const res = await fetch(buildApiUrl("/auth/refresh"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -92,7 +97,7 @@ async function rawFetch<T>(
     headers.set("X-Trace-Id", genTraceId());
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
+  const res = await fetch(buildApiUrl(path), { ...init, headers });
 
   if (res.status === 401 && !retried) {
     refreshing ??= doRefresh().finally(() => (refreshing = null));

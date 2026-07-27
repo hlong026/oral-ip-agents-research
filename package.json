@@ -5,7 +5,7 @@
   "description": "口播IP智能体 — 口播视频全链路智能体（Monorepo）",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22.22.0",
     "pnpm": ">=9"
   },
   "scripts": {
@@ -15,7 +15,7 @@
     "build": "turbo run build",
     "lint": "prettier --check \"apps/web/src/**/*.{ts,tsx,js,jsx,mjs,cjs,json}\" \"apps/admin/src/**/*.{ts,tsx,js,jsx,mjs,cjs,json}\" \"apps/desktop/src-tauri/tauri.conf.json\" \"packages/api-client/src/**/*.{ts,tsx,js,jsx,mjs,cjs,json}\" \"packages/hooks/src/**/*.{ts,tsx,js,jsx,mjs,cjs,json}\" \"packages/types/src/**/*.{ts,tsx,js,jsx,mjs,cjs,json}\" \"packages/config/package.json\" \"scripts/*.mjs\" \"e2e/**/*.ts\" \".github/workflows/*.yml\" \"package.json\" \"turbo.json\" \"docs/10-项目三阶段修复与开发计划-复审版.md\" \"server/openapi.snapshot.json\"",
     "typecheck": "turbo run typecheck",
-    "test": "turbo run test",
+    "test": "node --test scripts/check-desktop-release.test.mjs && turbo run test",
     "gen:api": "node scripts/gen-api-types.mjs",
     "e2e": "playwright test",
     "clean": "turbo run clean"

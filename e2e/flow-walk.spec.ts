@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
-/** 13 个流程页（settings/account 不在动线内） */
-const FLOW_PAGES = [
+/** 当前已开放的核心流程页（settings/account 不在动线内） */
+const CORE_FLOW_PAGES = [
   "/",
   "/create",
   "/scripts",
@@ -9,20 +9,18 @@ const FLOW_PAGES = [
   "/assets/personas",
   "/assets/voices",
   "/assets/avatars",
-  "/assets/materials",
-  "/assets/templates",
   "/editor",
   "/publish/jobs",
   "/publish/accounts",
-  "/analytics",
 ];
 
 const FLOW_STEP_LABELS = [
-  "链接/选题",
-  "文案",
-  "声音",
+  "链接选题",
+  "文案二创",
+  "配音",
   "数字人",
-  "合成",
+  "视频合成",
+  "视频剪辑",
   "发布",
 ];
 
@@ -35,6 +33,11 @@ async function loginViaApi(
   page: Page,
   request: import("@playwright/test").APIRequestContext,
 ) {
+  const deviceUuid = crypto.randomUUID();
+  await page.addInitScript((uuid) => {
+    localStorage.setItem("oral_device_id", uuid);
+  }, deviceUuid);
+
   const adminLogin = await request.post(`${API_BASE}/admin/v1/auth/login`, {
     data: {
       phone: E2E_ADMIN_PHONE,
@@ -94,11 +97,11 @@ async function loginViaApi(
   );
   expect(batchResponse.ok()).toBeTruthy();
   const batch = await batchResponse.json();
-  // 空指纹 = 未绑定开户：避免与浏览器内自算指纹不一致导致 refresh 被拒
   const res = await request.post(`${API_BASE}/v1/auth/login`, {
     data: {
       code: batch.codes[0],
-      deviceFingerprint: "",
+      // 服务端只要求 UUID 段稳定；浏览器特征段允许升级后漂移。
+      deviceFingerprint: `${deviceUuid}.0000000000000000`,
     },
   });
   expect(res.ok()).toBeTruthy();
@@ -121,12 +124,12 @@ test("登录页渲染（公开路由）", async ({ page }) => {
   ).toBeVisible();
 });
 
-test("13 个流程页均可达且 flow-bar 六步可见", async ({ page }) => {
-  for (const path of FLOW_PAGES) {
+test("核心流程页均可达且 flow-bar 七步可见", async ({ page }) => {
+  for (const path of CORE_FLOW_PAGES) {
     await page.goto(path);
     // 未跳回登录页
     await expect(page).not.toHaveURL(/\/login/);
-    // flow-bar 六步动线齐全
+    // flow-bar 七步动线齐全
     const bar = page.getByTestId("flow-bar");
     await expect(bar).toBeVisible();
     for (const label of FLOW_STEP_LABELS) {
@@ -134,6 +137,14 @@ test("13 个流程页均可达且 flow-bar 六步可见", async ({ page }) => {
         bar.getByRole("link", { name: new RegExp(label) }),
       ).toBeVisible();
     }
+  }
+});
+
+test("默认关闭的 V1.1 预览路由不会向生产用户展示演示数据", async ({ page }) => {
+  for (const path of ["/assets/materials", "/assets/templates", "/analytics"]) {
+    await page.goto(path);
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("flow-bar")).toBeVisible();
   }
 });
 
@@ -148,12 +159,12 @@ test("一键成片 7 步向导：step 参数驱动 flow-bar 当前步高亮", as
   page,
 }) => {
   const cases: Array<{ step: string; active: string }> = [
-    { step: "link", active: "链接/选题" },
-    { step: "script", active: "文案" },
-    { step: "voice", active: "声音" },
+    { step: "link", active: "链接选题" },
+    { step: "script", active: "文案二创" },
+    { step: "voice", active: "配音" },
     { step: "avatar", active: "数字人" },
-    { step: "compose", active: "合成" },
-    { step: "edit", active: "合成" },
+    { step: "compose", active: "视频合成" },
+    { step: "edit", active: "视频剪辑" },
     { step: "publish", active: "发布" },
   ];
   for (const c of cases) {

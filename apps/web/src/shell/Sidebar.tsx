@@ -18,7 +18,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router";
 import { ANALYTICS_PREVIEW, IM_ENABLED } from "../config/features";
 
 interface NavItem {

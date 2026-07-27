@@ -7,30 +7,39 @@
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm --filter @oral/web dev",
-    "beforeBuildCommand": "pnpm --filter @oral/web build"
+    "beforeBuildCommand": "pnpm build:web"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "口播IP智能体",
         "width": 1440,
         "height": 900,
         "minWidth": 1200,
         "minHeight": 760,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "useHttpsScheme": true
       }
     ],
     "security": {
-      "csp": null
+      "capabilities": ["default"],
+      "csp": {
+        "default-src": "'self' customprotocol: asset:",
+        "connect-src": "'self' ipc: http://ipc.localhost https: wss:",
+        "font-src": "'self' data:",
+        "img-src": "'self' asset: http://asset.localhost https: blob: data:",
+        "media-src": "'self' asset: http://asset.localhost https: blob:",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'"
+      }
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "macOS": {
-      "signingIdentity": "-"
-    },
+    "macOS": {},
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -279,6 +279,7 @@ class FFmpegCompose:
                 output_path,
                 width,
                 height,
+                bgm_volume=inp.bgm_volume,
             )
             await _run_ffmpeg(command, limit_seconds=300)
             await _extract_cover_frame(output_path, cover_path)
@@ -388,6 +389,8 @@ def _compose_command(
     output: Path,
     width: int,
     height: int,
+    *,
+    bgm_volume: float = 0.12,
 ) -> list[str]:
     command = ["ffmpeg", "-y", "-i", str(video)]
     audio_index = None
@@ -428,9 +431,11 @@ def _compose_command(
 
     audio_map = f"{audio_index}:a:0" if audio_index is not None else "0:a:0?"
     if bgm_index is not None and audio_index is not None:
-        filter_parts.append(f"[{audio_index}:a]volume=1[voice]")
-        filter_parts.append(f"[{bgm_index}:a]volume=0.12[bgm]")
-        filter_parts.append("[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]")
+        volume = max(0.0, min(bgm_volume, 1.0))
+        filter_parts.append(f"[{audio_index}:a]volume=1,asplit=2[voice][sidechain]")
+        filter_parts.append(f"[{bgm_index}:a]volume={volume:g}[bgm]")
+        filter_parts.append("[bgm][sidechain]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=250[ducked]")
+        filter_parts.append("[voice][ducked]amix=inputs=2:duration=first:dropout_transition=2[aout]")
         audio_map = "[aout]"
 
     if filter_parts:
@@ -514,10 +519,7 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         outline = max(0, min(8, round(float(stroke))))
     except (TypeError, ValueError):
         outline = 3
-    return (
-        f"Style: Default,Arial,{font_size},{primary},&H00000000,1,"
-        f"{outline},0,{alignment},60,60,{margin_v},1"
-    )
+    return f"Style: Default,Arial,{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
 
 
 # 字幕分行：硬断句标点立即换行；软断句标点行长达标后换行；停顿间隙/行长上限兜底

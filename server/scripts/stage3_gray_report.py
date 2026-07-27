@@ -148,12 +148,25 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).resolve().parents[2] / "evidence/stage3",
     )
+    parser.add_argument(
+        "--evaluate-only",
+        action="store_true",
+        help="只读取已有证据并计算退出结论，不请求监控接口",
+    )
     parser.add_argument("--require-exit-ready", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if getattr(args, "evaluate_only", False):
+        try:
+            evaluation = evaluate_exit(_load_samples(args.output_dir))
+            print(json.dumps(evaluation, ensure_ascii=False, indent=2))
+            return 0 if evaluation["exitReady"] or not args.require_exit_ready else 3
+        except (OSError, RuntimeError, ValueError) as error:
+            print(str(error), file=sys.stderr)
+            return 2
     if not args.admin_token:
         print("缺少 STAGE3_ADMIN_TOKEN（或 --admin-token）", file=sys.stderr)
         return 2

@@ -4,12 +4,16 @@ import {
   type PipelineTask,
   type StepStatus,
 } from "@oral/types";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 const STATUS_TEXT: Record<string, { label: string; cls: string }> = {
   pending: { label: "排队中", cls: "text-text-3 border-stroke" },
   running: { label: "执行中", cls: "text-info border-info/40" },
   waiting_confirm: { label: "待确认", cls: "text-warning border-warning/40" },
+  reconciliation_required: {
+    label: "待对账",
+    cls: "text-warning border-warning/40",
+  },
   done: { label: "已完成", cls: "text-success border-success/40" },
   failed: { label: "失败", cls: "text-danger border-danger/40" },
   canceled: { label: "已取消", cls: "text-text-3 border-stroke" },
@@ -23,6 +27,8 @@ function stepDot(status: StepStatus | undefined) {
       return "animate-pulse bg-info";
     case "failed":
       return "bg-danger";
+    case "reconciliation_required":
+      return "bg-warning";
     case "skipped":
       return "bg-text-3/50";
     default:
@@ -77,7 +83,9 @@ export default function TaskCard({
             ? `${STEP_LABELS[currentStep.step]} 中…`
             : task.status === "waiting_confirm"
               ? `${task.currentStep ? (STEP_LABELS[task.currentStep as keyof typeof STEP_LABELS] ?? "") : ""} 完成，等待确认`
-              : `${doneCount}/${STEP_ORDER.length} 步`}
+              : task.status === "reconciliation_required"
+                ? "外部结果未知，等待管理员对账"
+                : `${doneCount}/${STEP_ORDER.length} 步`}
         </span>
         <span>
           {task.mode === "manual" ? "手动" : "自动"} · {pct}% ·{" "}

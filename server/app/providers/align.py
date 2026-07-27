@@ -52,8 +52,7 @@ def align_script_to_asr(script: str, asr_words: list[WordTs]) -> list[WordTs]:
 
     times = _interpolate(len(script_chars), anchors)
     words = [
-        WordTs(word=ch, start=round(s, 3), end=round(e, 3))
-        for ch, (s, e) in zip(script_chars, times, strict=True)
+        WordTs(word=ch, start=round(s, 3), end=round(e, 3)) for ch, (s, e) in zip(script_chars, times, strict=True)
     ]
     return _enforce_monotonic(words)
 

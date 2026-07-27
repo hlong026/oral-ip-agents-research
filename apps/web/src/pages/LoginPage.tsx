@@ -2,7 +2,7 @@ import { HttpError, activationApi } from "@oral/api-client";
 import type { CodeInfo } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useState } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router";
 
 /** 登录页（激活码即账号：首次登录自动开户并绑定本设备） */
 export default function LoginPage() {

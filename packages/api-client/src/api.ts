@@ -8,6 +8,7 @@ import type {
   ContentJob,
   DashboardOverview,
   FeedEvent,
+  EditConfig,
   ModulePriceCatalog,
   Notification,
   Page,
@@ -15,6 +16,7 @@ import type {
   Persona,
   PlanSku,
   PipelineMode,
+  PipelineRenderVersion,
   PipelineTask,
   Platform,
   PricePreview,
@@ -34,7 +36,7 @@ import type {
   Voice,
   WordTimestamp,
 } from "@oral/types";
-import { HttpError, http } from "./http";
+import { buildApiUrl, HttpError, http } from "./http";
 import { deviceFingerprint } from "./fingerprint";
 
 // ---------- auth（激活码即账号） ----------
@@ -89,7 +91,7 @@ export const billingApi = {
     ),
   pricePreview: (input: PricePreviewRequest) =>
     http.post<PricePreview>("/billing/price-preview", input),
-  exportCsvUrl: () => `/api/v1/billing/usage?export=csv`,
+  exportCsvUrl: () => buildApiUrl("/billing/usage?export=csv"),
 };
 
 // ---------- personas / ipasset ----------
@@ -216,6 +218,20 @@ export const contentApi = {
     platform?: string;
     topic?: string;
   }) => http.post<Script>("/content/scripts", input),
+  updateScript: (id: string, input: { title: string; text: string }) =>
+    http.put<Script>(`/content/scripts/${id}`, input),
+  scriptVersions: (id: string) =>
+    http.get<
+      Array<{
+        id: string;
+        version: number;
+        kind: string;
+        text: string;
+        modelName: string;
+        promptVersion: string;
+        createdAt: string;
+      }>
+    >(`/content/scripts/${id}/versions`),
 };
 
 // ---------- voices / avatars（克隆强制 consent_token；绑定 IP 走 personaApi.update） ----------
@@ -265,6 +281,8 @@ export interface CreatePipelineInput {
   sourceUrl?: string;
   topic?: string;
   scriptText?: string;
+  scriptId?: string;
+  scriptVersion?: number;
   voiceId?: string;
   avatarId?: string;
   mode: PipelineMode;
@@ -283,15 +301,26 @@ export const pipelineApi = {
       `/pipelines?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
     ),
   get: (id: string) => http.get<PipelineTask>(`/pipelines/${id}`),
+  renderVersions: (id: string) =>
+    http.get<PipelineRenderVersion[]>(`/pipelines/${id}/renders`),
+  recompose: (
+    id: string,
+    input: {
+      quoteId: string;
+      idempotencyKey: string;
+      baseVersion: number;
+      config: EditConfig;
+    },
+  ) => http.post<PipelineRenderVersion>(`/pipelines/${id}/recompose`, input),
+  cancelRender: (taskId: string, renderId: string) =>
+    http.post<PipelineRenderVersion>(
+      `/pipelines/${taskId}/renders/${renderId}/cancel`,
+    ),
   retryQuote: (id: string) =>
     http.post<PricePreview>(`/pipelines/${id}/retry-quote`),
   retryStep: (id: string, step: string, quoteId?: string) =>
     http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`, {
       quoteId,
-    }),
-  overrideStep: (id: string, step: string, artifacts: Record<string, string>) =>
-    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/override`, {
-      artifacts,
     }),
   confirm: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/confirm`),
   cancel: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/cancel`),
@@ -300,11 +329,11 @@ export const pipelineApi = {
 
 // ---------- publish（F-501~F-504） ----------
 export interface CreatePublishInput {
-  taskId?: string;
+  taskId: string;
   platforms: Platform[];
   title: string;
   topics?: string[];
-  videoKey: string;
+  videoKey?: string;
   coverKey?: string;
   publishAt?: string;
 }
@@ -331,9 +360,9 @@ export const publishApi = {
     http.delete<void>(`/publish/accounts/${accountId}`),
   renameAccount: (accountId: string, nickname: string) =>
     http.patch<PublishAccount>(`/publish/accounts/${accountId}`, { nickname }),
-  jobs: (status?: string, page = 1, pageSize = 20) =>
+  jobs: (status?: string, page = 1, pageSize = 20, taskId?: string) =>
     http.get<Page<PublishJob>>(
-      `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
+      `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ""}`,
     ),
   logs: (page = 1, pageSize = 50) =>
     http.get<Page<PublishJob>>(

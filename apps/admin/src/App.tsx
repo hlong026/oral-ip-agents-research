@@ -1,4 +1,5 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import type { ReactElement } from "react";
+import { Navigate, Route, Routes } from "react-router";
 import { getAdminToken } from "./lib/adminHttp";
 import ActivationPage from "./pages/ActivationPage";
 import CostAuditPage from "./pages/CostAuditPage";
@@ -11,7 +12,7 @@ import ProvidersPage from "./pages/ProvidersPage";
 import UsersPage from "./pages/UsersPage";
 import Shell from "./shell/Shell";
 
-function RequireAdmin({ children }: { children: JSX.Element }) {
+function RequireAdmin({ children }: { children: ReactElement }) {
   if (!getAdminToken()) return <Navigate to="/login" replace />;
   return children;
 }

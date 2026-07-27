@@ -83,6 +83,41 @@ async def test_account_heartbeat_persists_and_emits_expiry_notice(monkeypatch) -
     assert message["userId"] == "heartbeat-user"
 
 
+async def test_heartbeat_does_not_expire_account_when_concurrency_gate_is_unavailable(monkeypatch) -> None:
+    from app.core.distributed_semaphore import SemaphoreUnavailableError
+    from app.modules.notify import service as notify_service
+    from app.modules.publish import repository as publish_repo
+    from app.providers.publish import heartbeat
+
+    class InfrastructureFailureDriver:
+        async def check_cookie_valid(self, _session: dict, *, account_id: str) -> bool:
+            del account_id
+            raise SemaphoreUnavailableError("redis unavailable")
+
+    async with SessionLocal() as db:
+        account = await publish_repo.create_account(
+            db,
+            user_id="heartbeat-infra-user",
+            platform="xiaohongshu",
+            nickname="基础设施异常账号",
+            session_json="{}",
+            status="active",
+        )
+    monkeypatch.setattr(
+        heartbeat.registry,
+        "publish_driver",
+        lambda _platform: InfrastructureFailureDriver(),
+    )
+
+    await heartbeat.check_all_accounts()
+
+    async with SessionLocal() as db:
+        stored_account = await publish_repo.get_account(db, account.id, "heartbeat-infra-user")
+        notices = await notify_service.list_notifications(db, "heartbeat-infra-user")
+    assert stored_account is not None and stored_account.status == "active"
+    assert notices == []
+
+
 async def test_tasks_websocket_waits_for_all_subscription_cleanup(monkeypatch) -> None:
     from app.modules.notify import ws as ws_module
 

@@ -1,27 +1,38 @@
-"""pipeline 业务编排（F-405/406：批量扇出、单步重跑/覆盖、manual 确认）
+"""pipeline 业务编排（F-405/406：批量扇出、单步重跑、manual 确认）
 日志：任务生命周期（§10.6.8-B #1）
 """
 
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.storage import signed_media_path
 from app.core.white_label import public_metadata
 
 from . import repository as repo
 from .engine import schedule_run
-from .models import STEP_ORDER, PipelineTask
-from .schemas import CreatePipelineIn, StatsOut, StepStateOut, TaskOut, TaskPageOut
+from .models import STEP_ORDER, PipelineRenderVersion, PipelineTask
+from .schemas import (
+    CreatePipelineIn,
+    EditConfigIn,
+    RecomposeIn,
+    RenderVersionOut,
+    StatsOut,
+    StepStateOut,
+    TaskOut,
+    TaskPageOut,
+)
 
 logger = get_logger("oral.pipeline.service")
 settings = get_settings()
 _user_creation_locks: dict[str, asyncio.Lock] = {}
+_render_creation_locks: dict[str, asyncio.Lock] = {}
 
 
 def _default_steps() -> list[dict]:
@@ -68,11 +79,19 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
             status.HTTP_400_BAD_REQUEST,
             detail={"code": "QUOTE_REQUIRED", "message": "任务报价缺失，请重新计算积分后提交"},
         )
-    if not (inp.sourceUrl or inp.topic or inp.scriptText):
+    if not (inp.sourceUrl or inp.topic or inp.scriptText or inp.scriptId):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "INPUT_REQUIRED", "message": "链接/选题/文案至少填一项"},
         )
+    script_id, script_version, script_text = await resolve_script_snapshot(db, user_id, inp)
+    voice_id, avatar_id = await validate_ready_assets(
+        db,
+        user_id,
+        persona_id=inp.ipId,
+        voice_id=inp.voiceId,
+        avatar_id=inp.avatarId,
+    )
     count = max(1, min(inp.count, 20))
     from app.modules.activation import repository as activation_repo
     from app.modules.catalog import repository as catalog_repo
@@ -92,7 +111,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
                     },
                 )
     batch_id = uuid.uuid4().hex[:12] if count > 1 else None
-    title_src = (inp.topic or inp.scriptText or inp.sourceUrl or "未命名任务")[:24]
+    title_src = (inp.topic or script_text or inp.sourceUrl or "未命名任务")[:24]
     tasks: list[PipelineTask] = []
     reservation_ids: list[str] = []
     if inp.quoteId:
@@ -101,6 +120,13 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
 
         persona = await ipasset_repo.get(db, inp.ipId, user_id)
         task_for_quote = inp.model_dump()
+        task_for_quote.update(
+            voiceId=voice_id,
+            avatarId=avatar_id,
+            scriptText=script_text,
+            scriptId=script_id or None,
+            scriptVersion=script_version or None,
+        )
         task_for_quote["_targetDurationSeconds"] = max(
             1,
             persona.video_duration if persona else 60,
@@ -125,9 +151,11 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
                 title=title,
                 source_url=inp.sourceUrl or "",
                 topic=inp.topic or "",
-                script_text=inp.scriptText or "",
-                voice_id=inp.voiceId or "",
-                avatar_id=inp.avatarId or "",
+                script_text=script_text,
+                script_id=script_id,
+                script_version=script_version,
+                voice_id=voice_id,
+                avatar_id=avatar_id,
                 platforms_json=json.dumps(inp.platforms, ensure_ascii=False),
                 mode="manual" if inp.mode == "manual" else "auto",
                 intensity=inp.intensity if inp.intensity in ("light", "structure", "theme") else "structure",
@@ -147,8 +175,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         await db.rollback()
         raise
     for task in tasks:
-        message_id = schedule_run(task.id)
-        await repo.record_queue_message(db, task.id, message_id)
+        await _enqueue_created_task(db, task)
         await db.refresh(task)
     # 任务创建：记录 INFO（§10.6.8-B #1）
     logger.info(
@@ -162,6 +189,135 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
     return [to_out(t) for t in tasks]
 
 
+async def _enqueue_created_task(db: AsyncSession, task: PipelineTask) -> bool:
+    """投递新流水线；Broker 未接受时终止任务并恢复冻结积分。"""
+    try:
+        message_id = schedule_run(task.id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "pipeline_enqueue_failed",
+            task_id=task.id,
+            user_id=task.user_id,
+        )
+        task.status = "failed"
+        task.error = "任务队列暂不可用，积分已恢复，请稍后重试"
+        task.queue_message_id = ""
+        await repo.save(db, task)
+        if task.reservation_id:
+            from app.modules.billing.service import release_reservation
+
+            await release_reservation(db, task.reservation_id, task.user_id)
+        from app.modules.notify.service import notify_user
+
+        await notify_user(
+            db,
+            task.user_id,
+            "error",
+            f"任务排队失败：{task.title}",
+            "任务未开始执行，冻结积分已恢复，请稍后重新创建。",
+        )
+        return False
+    try:
+        await repo.record_queue_message(db, task.id, message_id)
+    except Exception:  # noqa: BLE001
+        # Broker 已接受消息，Worker 可能已经执行；保留 pending + 空回执供状态机认领。
+        await db.rollback()
+        logger.exception(
+            "pipeline_queue_receipt_failed",
+            task_id=task.id,
+            user_id=task.user_id,
+            message_id=message_id,
+        )
+    return True
+
+
+async def resolve_script_snapshot(
+    db: AsyncSession,
+    user_id: str,
+    inp: CreatePipelineIn,
+) -> tuple[str, int, str]:
+    """把文案版本解析为不可变快照，任务不再依赖前端临时状态。"""
+    if not inp.scriptId:
+        return "", 0, (inp.scriptText or "").strip()
+    if inp.scriptVersion is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "SCRIPT_VERSION_REQUIRED", "message": "引用文案时必须指定版本"},
+        )
+    from app.modules.content import repository as content_repo
+
+    script = await content_repo.get(db, inp.scriptId, user_id)
+    version = await content_repo.get_version(db, inp.scriptId, user_id, inp.scriptVersion)
+    if script is None or version is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "SCRIPT_VERSION_NOT_FOUND", "message": "文案版本不存在或不属于当前用户"},
+        )
+    version_text = version.text.strip()
+    if inp.scriptText and inp.scriptText.strip() != version_text:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "SCRIPT_VERSION_MISMATCH", "message": "提交文案与所选版本不一致，请先保存终稿"},
+        )
+    return script.id, version.version, version_text
+
+
+async def validate_ready_assets(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    persona_id: str,
+    voice_id: str | None,
+    avatar_id: str | None,
+) -> tuple[str, str]:
+    """流水线只接受当前用户已就绪的本地资产 ID，禁止透传 Provider ID。"""
+    from app.modules.avatar import repository as avatar_repo
+    from app.modules.ipasset import repository as persona_repo
+    from app.modules.voice import repository as voice_repo
+
+    persona = await persona_repo.get(db, persona_id, user_id)
+    if persona is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "PERSONA_NOT_FOUND", "message": "IP 档案不存在或不属于当前用户"},
+        )
+    effective_voice_id = voice_id or persona.voice_id
+    effective_avatar_id = avatar_id or persona.avatar_id
+    if not effective_voice_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VOICE_REQUIRED", "message": "当前 IP 尚未绑定已就绪声音"},
+        )
+    if not effective_avatar_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "AVATAR_REQUIRED", "message": "当前 IP 尚未绑定已就绪数字人"},
+        )
+    voice = await voice_repo.get(db, effective_voice_id, user_id)
+    if voice is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "VOICE_NOT_FOUND", "message": "声音不存在或不属于当前用户"},
+        )
+    if voice.status != "ready" or not voice.provider_voice_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VOICE_NOT_READY", "message": "声音尚未完成克隆确认"},
+        )
+    avatar = await avatar_repo.get(db, effective_avatar_id, user_id)
+    if avatar is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "AVATAR_NOT_FOUND", "message": "数字人不存在或不属于当前用户"},
+        )
+    if avatar.status != "ready" or not avatar.provider_avatar_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "AVATAR_NOT_READY", "message": "数字人尚未完成克隆"},
+        )
+    return effective_voice_id, effective_avatar_id
+
+
 async def list_tasks(db: AsyncSession, user_id: str, status_: str | None, page: int, page_size: int) -> TaskPageOut:
     items, total = await repo.list_by_user(db, user_id, status_, page, page_size)
     return TaskPageOut(items=[to_out(t) for t in items], total=total, page=page, pageSize=page_size)
@@ -170,6 +326,272 @@ async def list_tasks(db: AsyncSession, user_id: str, status_: str | None, page: 
 async def get_task(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     t = await _must_get(db, task_id, user_id)
     return to_out(t)
+
+
+async def recompose(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+    inp: RecomposeIn,
+) -> RenderVersionOut:
+    """为已完成任务创建一次独立、幂等、单独计费的重合成。"""
+    lock = _render_creation_locks.setdefault(task_id, asyncio.Lock())
+    async with lock:
+        task = await repo.get_for_update(db, task_id, user_id)
+        if task is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "NOT_FOUND", "message": "任务不存在"},
+            )
+        existing = await repo.get_render_by_idempotency(db, user_id, inp.idempotencyKey)
+        if existing is not None:
+            expected_config = json.dumps(inp.config.model_dump(), ensure_ascii=False, sort_keys=True)
+            actual_config = json.dumps(json.loads(existing.config_json or "{}"), ensure_ascii=False, sort_keys=True)
+            if (
+                existing.task_id != task_id
+                or existing.base_version != inp.baseVersion
+                or actual_config != expected_config
+            ):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "IDEMPOTENCY_KEY_REUSED",
+                        "message": "该幂等键已用于不同的重合成请求",
+                    },
+                )
+            return render_to_out(existing)
+        if task.status != "done":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "TASK_NOT_READY", "message": "仅已完成任务可重新合成"},
+            )
+        active = await ensure_active_render_version(db, task)
+        if inp.baseVersion != active.version:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RENDER_VERSION_CONFLICT",
+                    "message": f"成片已更新到 v{active.version}，请刷新后再提交",
+                },
+            )
+        render_history = await repo.list_renders(db, task_id, user_id)
+        inflight = next(
+            (item for item in render_history if item.status in {"pending", "running", "rendered"}),
+            None,
+        )
+        if inflight is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RENDER_IN_PROGRESS", "message": "已有重合成任务正在处理"},
+            )
+
+        from app.modules.billing.service import attach_reservation, reserve_quote
+
+        reservation_batch = await reserve_quote(
+            db,
+            user_id,
+            inp.quoteId,
+            operation={"module": "hd_export", "measures": {"assets": 1}},
+            commit=False,
+        )
+        reservation_id = reservation_batch.items[0].id
+        render = PipelineRenderVersion(
+            task_id=task.id,
+            user_id=user_id,
+            version=max((item.version for item in render_history), default=active.version) + 1,
+            base_version=active.version,
+            status="pending",
+            config_json=json.dumps(inp.config.model_dump(), ensure_ascii=False),
+            reservation_id=reservation_id,
+            idempotency_key=inp.idempotencyKey,
+        )
+        try:
+            db.add(render)
+            await db.flush()
+            await attach_reservation(db, reservation_id, user_id, render.id)
+            await db.commit()
+            await db.refresh(render)
+        except BaseException:
+            await db.rollback()
+            raise
+
+        render_id = render.id
+        try:
+            message_id = schedule_render(render_id)
+        except Exception:
+            logger.exception(
+                "pipeline_render_enqueue_failed",
+                task_id=task_id,
+                render_id=render_id,
+                user_id=user_id,
+            )
+            from app.modules.pipeline.render import _fail_render
+
+            await _fail_render(db, render, "重合成队列暂不可用")
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "RENDER_QUEUE_UNAVAILABLE", "message": "重合成队列暂不可用，积分已退回"},
+            ) from None
+        try:
+            await repo.record_render_queue_message(db, render.id, message_id)
+            await db.refresh(render)
+        except Exception:
+            await db.rollback()
+            logger.exception(
+                "pipeline_render_queue_receipt_failed",
+                task_id=task_id,
+                render_id=render_id,
+                user_id=user_id,
+            )
+            render = await repo.get_render(db, render_id, user_id) or render
+        logger.info(
+            "pipeline_render_created",
+            task_id=task_id,
+            render_id=render.id,
+            version=render.version,
+            user_id=user_id,
+        )
+        return render_to_out(render)
+
+
+async def list_render_versions(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> list[RenderVersionOut]:
+    task = await _must_get(db, task_id, user_id)
+    if task.status == "done":
+        task = await repo.get_for_update(db, task_id, user_id) or task
+        await ensure_active_render_version(db, task)
+        await db.commit()
+    return [render_to_out(item) for item in await repo.list_renders(db, task_id, user_id)]
+
+
+async def cancel_render(
+    db: AsyncSession,
+    task_id: str,
+    render_id: str,
+    user_id: str,
+) -> RenderVersionOut:
+    await _must_get(db, task_id, user_id)
+    render = await repo.get_render(db, render_id, user_id)
+    if render is None or render.task_id != task_id:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "RENDER_NOT_FOUND", "message": "重合成版本不存在"},
+        )
+    if render.status in {"done", "failed", "canceled"}:
+        return render_to_out(render)
+    if render.status == "running":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RENDER_ALREADY_RUNNING", "message": "成片已开始合成，当前不能取消"},
+        )
+    if render.status == "rendered":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RENDER_SETTLING", "message": "成片已生成，正在结算并切换版本"},
+        )
+    canceled = await repo.cancel_pending_render(db, render.id, user_id, task_id)
+    if not canceled:
+        current = await repo.get_render(db, render_id, user_id)
+        if current is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "RENDER_NOT_FOUND", "message": "重合成版本不存在"},
+            )
+        if current.status in {"done", "failed", "canceled"}:
+            return render_to_out(current)
+        if current.status == "running":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RENDER_ALREADY_RUNNING", "message": "成片已开始合成，当前不能取消"},
+            )
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RENDER_SETTLING", "message": "成片已生成，正在结算并切换版本"},
+        )
+    await db.refresh(render)
+    if render.reservation_id:
+        from app.modules.billing.service import release_reservation
+
+        released = await release_reservation(db, render.reservation_id, user_id)
+        if released is None or released.status != "released":
+            await db.rollback()
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RENDER_SETTLING", "message": "积分状态已变化，无法取消该成片"},
+            )
+    else:
+        await db.commit()
+    await db.refresh(render)
+    logger.info(
+        "pipeline_render_canceled",
+        task_id=task_id,
+        render_id=render_id,
+        user_id=user_id,
+    )
+    return render_to_out(render)
+
+
+async def ensure_active_render_version(
+    db: AsyncSession,
+    task: PipelineTask,
+) -> PipelineRenderVersion:
+    """为迁移前的完成任务补建 v1；已有版本只修正活动指针。"""
+    renders = await repo.list_renders(db, task.id, task.user_id)
+    active = next((item for item in renders if item.is_active), None)
+    if active is not None:
+        task.active_render_version = active.version
+        return active
+    completed = next((item for item in renders if item.status == "done"), None)
+    if completed is not None:
+        completed.is_active = True
+        task.active_render_version = completed.version
+        return completed
+
+    artifacts = json.loads(task.artifacts_json or "{}")
+    video_key = str(artifacts.get("final_video_key") or "")
+    cover_key = str(artifacts.get("cover_key") or "")
+    quality = artifacts.get("quality")
+    if not video_key or not isinstance(quality, dict) or not quality.get("passed"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VIDEO_NOT_READY", "message": "成片缺失或未通过质量检查"},
+        )
+    config = _edit_config_from_artifacts(artifacts)
+    initial = PipelineRenderVersion(
+        task_id=task.id,
+        user_id=task.user_id,
+        version=1,
+        base_version=0,
+        status="done",
+        config_json=json.dumps(config.model_dump(), ensure_ascii=False),
+        reservation_id=task.reservation_id,
+        idempotency_key=f"bootstrap:{task.id}",
+        video_key=video_key,
+        cover_key=cover_key,
+        quality_json=json.dumps(quality, ensure_ascii=False),
+        is_active=True,
+    )
+    db.add(initial)
+    task.active_render_version = 1
+    artifacts["render_version"] = 1
+    artifacts["edit_config"] = config.model_dump()
+    await db.flush()
+    artifacts["render_version_id"] = initial.id
+    task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
+    return initial
+
+
+def _edit_config_from_artifacts(artifacts: dict) -> EditConfigIn:
+    raw = artifacts.get("edit_config")
+    if isinstance(raw, dict):
+        try:
+            return EditConfigIn.model_validate(raw)
+        except ValueError:
+            pass
+    return EditConfigIn()
 
 
 async def create_retry_quote(db: AsyncSession, task_id: str, user_id: str) -> dict:
@@ -215,6 +637,11 @@ async def retry_step(
     """单步重跑：重置该步及后续步骤，从断点续跑（F-405）"""
     _check_step(step)
     t = await _must_get(db, task_id, user_id)
+    if t.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部服务结果未知，管理员对账前不可重试"},
+        )
     if t.status == "running":
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"}
@@ -258,46 +685,35 @@ async def retry_step(
     t.error = ""
     t.queue_message_id = ""
     await repo.save(db, t)
-    message_id = schedule_run(t.id, from_step=step)
-    await repo.record_queue_message(db, t.id, message_id)
+    try:
+        message_id = schedule_run(t.id, from_step=step)
+    except Exception:
+        logger.exception("pipeline_retry_enqueue_failed", task_id=task_id, step=step, user_id=user_id)
+        t.status = "failed"
+        t.error = "任务队列暂不可用，积分已恢复，请重新报价后重试"
+        await repo.save(db, t)
+        if t.reservation_id:
+            from app.modules.billing.service import release_reservation
+
+            await release_reservation(db, t.reservation_id, user_id)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PIPELINE_QUEUE_UNAVAILABLE", "message": "任务队列暂不可用，积分已恢复"},
+        ) from None
+    try:
+        await repo.record_queue_message(db, t.id, message_id)
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "pipeline_retry_queue_receipt_failed",
+            task_id=task_id,
+            step=step,
+            user_id=user_id,
+            message_id=message_id,
+        )
     await db.refresh(t)
     # 单步重跑：记录 INFO（§10.6.8-B #1）
     logger.info("task_retry", task_id=task_id, step=step, user_id=user_id)
-    return to_out(t)
-
-
-async def override_step(db: AsyncSession, task_id: str, step: str, user_id: str, artifacts: dict[str, str]) -> TaskOut:
-    """人工覆盖：写入该步产物并标记完成，从下一步续跑（F-405 人工干预）"""
-    _check_step(step)
-    t = await _must_get(db, task_id, user_id)
-    if t.status == "running":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"}
-        )
-    steps = json.loads(t.steps_json or "[]") or _default_steps()
-    ctx = json.loads(t.artifacts_json or "{}")
-    ctx.update(artifacts)
-    idx = STEP_ORDER.index(step)
-    now = datetime.now(UTC).isoformat()
-    steps[idx].update(
-        {
-            "status": "done",
-            "progress": 100,
-            "message": "人工覆盖",
-            "artifacts": {k: str(v)[:200] for k, v in artifacts.items()},
-            "finishedAt": now,
-        }
-    )
-    t.steps_json = json.dumps(steps, ensure_ascii=False)
-    t.artifacts_json = json.dumps(ctx, ensure_ascii=False)
-    t.status = "pending"
-    t.error = ""
-    t.queue_message_id = ""
-    await repo.save(db, t)
-    if idx + 1 < len(STEP_ORDER):
-        message_id = schedule_run(t.id, from_step=STEP_ORDER[idx + 1])
-        await repo.record_queue_message(db, t.id, message_id)
-        await db.refresh(t)
     return to_out(t)
 
 
@@ -309,8 +725,27 @@ async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     t.status = "pending"
     t.queue_message_id = ""
     await repo.save(db, t)
-    message_id = schedule_run(t.id)
-    await repo.record_queue_message(db, t.id, message_id)
+    try:
+        message_id = schedule_run(t.id)
+    except Exception:
+        logger.exception("pipeline_confirm_enqueue_failed", task_id=task_id, user_id=user_id)
+        t.status = "waiting_confirm"
+        t.queue_message_id = ""
+        await repo.save(db, t)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PIPELINE_QUEUE_UNAVAILABLE", "message": "任务队列暂不可用，请稍后再次确认"},
+        ) from None
+    try:
+        await repo.record_queue_message(db, t.id, message_id)
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "pipeline_confirm_queue_receipt_failed",
+            task_id=task_id,
+            user_id=user_id,
+            message_id=message_id,
+        )
     await db.refresh(t)
     # manual 确认：记录 INFO（§10.6.8-B #1）
     logger.info("task_confirmed", task_id=task_id, user_id=user_id)
@@ -319,6 +754,11 @@ async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
 
 async def cancel(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     t = await _must_get(db, task_id, user_id)
+    if t.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部服务结果未知，管理员对账前不可取消"},
+        )
     if t.status in ("done", "failed", "canceled"):
         return to_out(t)
     t.status = "canceled"
@@ -338,7 +778,11 @@ async def stats(db: AsyncSession, user_id: str) -> StatsOut:
 
 async def recover_incomplete_tasks(db: AsyncSession) -> int:
     """API 重启时补投安全步骤；结果未知的非幂等步骤禁止自动重放。"""
-    tasks = await repo.list_recoverable(db)
+    # Pipeline actor 最长执行 30 分钟；API 滚动重启不能抢走仍在工作的任务。
+    tasks = await repo.list_recoverable(
+        db,
+        running_stale_before=datetime.now(UTC) - timedelta(minutes=35),
+    )
     recoverable: list[tuple[PipelineTask, str | None]] = []
     for task in tasks:
         from_step = task.current_step or None if task.status == "running" else None
@@ -348,13 +792,9 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
         )
         if provider_result_unknown:
             step_name = "语音" if from_step == "voice" else "数字人"
-            task.status = "failed"
+            task.status = "reconciliation_required"
             task.queue_message_id = ""
-            task.error = f"{from_step}: 外部服务结果未知，为避免重复调用已停止自动恢复，请重新报价后重试"
-            if task.reservation_id:
-                from app.modules.billing.service import release_reservation
-
-                await release_reservation(db, task.reservation_id, task.user_id)
+            task.error = f"{from_step}: 外部服务结果未知，为避免重复调用已停止自动恢复，等待管理员对账"
             logger.error(
                 "pipeline_recovery_requires_reconciliation",
                 task_id=task.id,
@@ -368,7 +808,7 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
                 task.user_id,
                 "error",
                 f"任务需要人工确认：{task.title}",
-                f"{step_name}外部服务结果未知，为避免重复调用已停止自动恢复；请重新报价后从该步骤重试。",
+                f"{step_name}外部服务结果未知，为避免重复调用已停止自动恢复；积分冻结保留，等待管理员对账。",
             )
             continue
         task.status = "pending"
@@ -384,6 +824,27 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
     return len(recoverable)
 
 
+async def recover_render_versions(db: AsyncSession) -> int:
+    """重启后恢复本地可重放的重合成；已渲染版本只继续结算和切换。"""
+    # Worker 最长执行 30 分钟；额外留 5 分钟，避免 API 单独重启时重投仍在运行的任务。
+    renders = await repo.list_recoverable_renders(
+        db,
+        running_stale_before=datetime.now(UTC) - timedelta(minutes=35),
+    )
+    for render in renders:
+        if render.status == "running":
+            render.status = "pending"
+        render.queue_message_id = ""
+    if renders:
+        await db.commit()
+    for render in renders:
+        message_id = schedule_render(render.id)
+        await repo.record_render_queue_message(db, render.id, message_id)
+    if renders:
+        logger.warning("pipeline_renders_recovered", count=len(renders))
+    return len(renders)
+
+
 async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
     from app.modules.ipasset import repository as ipasset_repo
 
@@ -393,6 +854,8 @@ async def _task_for_quote(db: AsyncSession, task: PipelineTask) -> dict:
         "sourceUrl": task.source_url,
         "topic": task.topic,
         "scriptText": task.script_text,
+        "scriptId": task.script_id or None,
+        "scriptVersion": task.script_version or None,
         "voiceId": task.voice_id,
         "avatarId": task.avatar_id,
         "platforms": json.loads(task.platforms_json or "[]"),
@@ -437,7 +900,13 @@ async def _must_get(db: AsyncSession, task_id: str, user_id: str) -> PipelineTas
 def to_out(t: PipelineTask) -> TaskOut:
     steps_raw = json.loads(t.steps_json or "[]") or _default_steps()
     ctx = json.loads(t.artifacts_json or "{}")
-    cover = ctx.get("cover_key")
+    cover = str(ctx.get("cover_key") or "")
+    final_video = str(ctx.get("final_video_key") or "")
+    public_ctx = public_metadata(ctx, redact_values=True)
+    if final_video:
+        public_ctx["final_video_url"] = signed_media_path(final_video)
+    if cover:
+        public_ctx["cover_url"] = signed_media_path(cover)
     public_steps: list[StepStateOut] = []
     for step in steps_raw:
         public_step = {
@@ -450,8 +919,10 @@ def to_out(t: PipelineTask) -> TaskOut:
     return TaskOut(
         id=t.id,
         ipId=t.ip_id,
+        scriptId=getattr(t, "script_id", ""),
+        scriptVersion=getattr(t, "script_version", 0),
         title=t.title,
-        coverUrl=f"/media/{cover}" if cover else None,
+        coverUrl=signed_media_path(cover) if cover else None,
         sourceUrl=t.source_url,
         mode=t.mode,
         status=t.status,
@@ -460,8 +931,36 @@ def to_out(t: PipelineTask) -> TaskOut:
         compute=t.compute,
         quotaCost=t.quota_cost,
         error="处理失败，请稍后重试" if t.error else "",
-        artifacts=public_metadata(ctx, redact_values=True),
+        artifacts=public_ctx,
+        activeRenderVersion=getattr(t, "active_render_version", 0),
         batchId=t.batch_id,
         createdAt=t.created_at.astimezone(UTC).isoformat(),
         updatedAt=t.updated_at.astimezone(UTC).isoformat(),
     )
+
+
+def render_to_out(render: PipelineRenderVersion) -> RenderVersionOut:
+    config = EditConfigIn.model_validate(json.loads(render.config_json or "{}"))
+    quality = json.loads(render.quality_json or "{}")
+    return RenderVersionOut(
+        id=render.id,
+        taskId=render.task_id,
+        version=render.version,
+        baseVersion=render.base_version,
+        status=render.status,
+        config=config,
+        videoUrl=signed_media_path(render.video_key) if render.video_key else None,
+        coverUrl=signed_media_path(render.cover_key) if render.cover_key else None,
+        quality=quality if isinstance(quality, dict) else {},
+        error="重新合成失败，请稍后重试" if render.error else "",
+        isActive=render.is_active,
+        createdAt=render.created_at.astimezone(UTC).isoformat(),
+        updatedAt=render.updated_at.astimezone(UTC).isoformat(),
+    )
+
+
+def schedule_render(render_id: str) -> str:
+    from app.workers.tasks import run_pipeline_render
+
+    message = run_pipeline_render.send(render_id)
+    return message.message_id

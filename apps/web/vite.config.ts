@@ -1,6 +1,9 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+const proxyTarget = process.env.VITE_PROXY_TARGET ?? "http://localhost:8000";
+const websocketTarget = proxyTarget.replace(/^http/, "ws");
+
 export default defineConfig({
   plugins: [react()],
   test: {
@@ -11,9 +14,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": { target: "http://localhost:8000", changeOrigin: true },
-      "/media": { target: "http://localhost:8000", changeOrigin: true },
-      "/ws": { target: "ws://localhost:8000", ws: true },
+      "/api": { target: proxyTarget, changeOrigin: true },
+      "/media": { target: proxyTarget, changeOrigin: true },
+      "/ws": { target: websocketTarget, ws: true },
     },
   },
   build: {

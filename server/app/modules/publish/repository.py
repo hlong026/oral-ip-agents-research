@@ -1,5 +1,7 @@
 """publish 数据访问"""
 
+from datetime import datetime
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,10 +74,13 @@ async def delete_account(db: AsyncSession, account: PublishAccount) -> None:
     await db.commit()
 
 
-async def create_job(db: AsyncSession, **fields) -> PublishJob:
+async def create_job(db: AsyncSession, *, commit: bool = True, **fields) -> PublishJob:
     j = PublishJob(**fields)
     db.add(j)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(j)
     return j
 
@@ -99,6 +104,56 @@ async def get_task_platform_job(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def get_task_render_platform_job(
+    db: AsyncSession,
+    user_id: str,
+    task_id: str,
+    render_version_id: str,
+    platform: str,
+) -> PublishJob | None:
+    if not task_id or not render_version_id:
+        return None
+    return (
+        await db.execute(
+            select(PublishJob)
+            .where(
+                PublishJob.user_id == user_id,
+                PublishJob.task_id == task_id,
+                PublishJob.render_version_id == render_version_id,
+                PublishJob.platform == platform,
+            )
+            .with_for_update()
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def pin_task_render_version(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    task_id: str,
+    video_key: str,
+    render_version_id: str,
+    render_version: int,
+) -> None:
+    """为流水线内已创建的发布任务补齐最终结算后的成片版本。"""
+    await db.execute(
+        update(PublishJob)
+        .where(
+            PublishJob.user_id == user_id,
+            PublishJob.task_id == task_id,
+            PublishJob.video_key == video_key,
+            PublishJob.render_version_id == "",
+        )
+        .values(
+            render_version_id=render_version_id,
+            render_version=render_version,
+        )
+        .execution_options(synchronize_session=False)
+    )
 
 
 async def get_job(db: AsyncSession, job_id: str, user_id: str | None = None) -> PublishJob | None:
@@ -144,11 +199,18 @@ async def record_queue_message(db: AsyncSession, job_id: str, message_id: str) -
 
 
 async def list_jobs(
-    db: AsyncSession, user_id: str, status: str | None, page: int, page_size: int
+    db: AsyncSession,
+    user_id: str,
+    status: str | None,
+    page: int,
+    page_size: int,
+    task_id: str = "",
 ) -> tuple[list[PublishJob], int]:
     cond = PublishJob.user_id == user_id
     if status:
         cond = cond & (PublishJob.status == status)
+    if task_id:
+        cond = cond & (PublishJob.task_id == task_id)
     total = (await db.execute(select(func.count(PublishJob.id)).where(cond))).scalar() or 0
     res = await db.execute(
         select(PublishJob)
@@ -160,10 +222,14 @@ async def list_jobs(
     return list(res.scalars().all()), int(total)
 
 
-async def list_recoverable_jobs(db: AsyncSession) -> list[PublishJob]:
+async def list_recoverable_jobs(
+    db: AsyncSession,
+    *,
+    publishing_stale_before: datetime,
+) -> list[PublishJob]:
     result = await db.execute(
         select(PublishJob).where(
-            (PublishJob.status == "publishing")
+            ((PublishJob.status == "publishing") & (PublishJob.updated_at < publishing_stale_before))
             | ((PublishJob.status == "queued") & (PublishJob.queue_message_id == ""))
         )
     )

@@ -22,6 +22,94 @@ async def test_pipeline_schedule_uses_dramatiq_message() -> None:
     assert len(message_id) >= 16
 
 
+async def test_pipeline_enqueue_failure_marks_task_failed_and_releases_points(monkeypatch) -> None:
+    from app.modules.pipeline import repository as pipeline_repo
+    from app.modules.pipeline import service
+
+    released: list[tuple[str, str]] = []
+
+    async def fake_release(_db, reservation_id: str, user_id: str):
+        released.append((reservation_id, user_id))
+        return SimpleNamespace(status="released")
+
+    async def no_notify(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        service,
+        "schedule_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("redis unavailable")),
+    )
+    monkeypatch.setattr("app.modules.billing.service.release_reservation", fake_release)
+    monkeypatch.setattr("app.modules.notify.service.notify_user", no_notify)
+
+    async with SessionLocal() as db:
+        task = await pipeline_repo.create(
+            db,
+            user_id="pipeline-queue-failure-user",
+            status="pending",
+            reservation_id="pipeline-queue-reservation",
+        )
+        await db.commit()
+        accepted = await service._enqueue_created_task(db, task)
+        await db.refresh(task)
+
+    assert accepted is False
+    assert task.status == "failed"
+    assert "队列" in task.error
+    assert released == [("pipeline-queue-reservation", "pipeline-queue-failure-user")]
+
+
+async def test_pipeline_gate_failure_does_not_leave_an_accepted_task_stuck(monkeypatch) -> None:
+    from app.core.distributed_semaphore import SemaphoreUnavailableError
+    from app.modules.pipeline import engine
+    from app.modules.pipeline import repository as pipeline_repo
+
+    released: list[tuple[str, str]] = []
+
+    class UnavailableGate:
+        async def acquire(self):
+            raise SemaphoreUnavailableError("redis unavailable")
+
+    async def fake_release(_db, reservation_id: str, user_id: str):
+        released.append((reservation_id, user_id))
+        return SimpleNamespace(status="released")
+
+    async def fake_recover(_db, reservation_id: str, user_id: str):
+        return await fake_release(_db, reservation_id, user_id)
+
+    async def no_notify(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(engine, "_gate", UnavailableGate())
+    monkeypatch.setattr(
+        "app.modules.billing.service.recover_reservation_after_failure",
+        fake_recover,
+    )
+    monkeypatch.setattr(engine, "notify_user", no_notify)
+
+    async with SessionLocal() as db:
+        task = await pipeline_repo.create(
+            db,
+            user_id="pipeline-gate-failure-user",
+            status="pending",
+            reservation_id="pipeline-gate-reservation",
+            queue_message_id="accepted-message",
+        )
+        await db.commit()
+        task_id = task.id
+
+    await engine.run_task(task_id)
+
+    async with SessionLocal() as db:
+        task = await pipeline_repo.get(db, task_id)
+    assert task is not None
+    assert task.status == "failed"
+    assert task.queue_message_id == ""
+    assert "并发调度" in task.error
+    assert released == [("pipeline-gate-reservation", "pipeline-gate-failure-user")]
+
+
 async def test_scheduled_publish_uses_broker_delay_without_sleep(monkeypatch) -> None:
     from app.modules.publish import service
     from app.workers import tasks
@@ -107,6 +195,7 @@ async def test_running_pipeline_is_requeued_from_failed_step(monkeypatch) -> Non
             current_step="avatar",
             queue_message_id="old-message",
             artifacts_json=json.dumps({"avatar_render_task_id": "persisted-render-id"}),
+            updated_at=datetime.now(UTC) - timedelta(minutes=40),
         )
         recovered = await service.recover_incomplete_tasks(db)
         await db.refresh(task)
@@ -139,6 +228,35 @@ async def test_pipeline_task_can_only_be_claimed_once() -> None:
     assert second is None
 
 
+async def test_fresh_running_pipeline_is_not_requeued_during_api_restart(monkeypatch) -> None:
+    from app.modules.pipeline import repository as pipeline_repo
+    from app.modules.pipeline import service
+
+    scheduled: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        service,
+        "schedule_run",
+        lambda task_id, from_step=None: scheduled.append((task_id, from_step)) or "unexpected",
+    )
+
+    async with SessionLocal() as db:
+        task = await pipeline_repo.create(
+            db,
+            user_id="fresh-pipeline-user",
+            status="running",
+            current_step="compose",
+            queue_message_id="active-worker-message",
+        )
+        await db.commit()
+        recovered = await service.recover_incomplete_tasks(db)
+        await db.refresh(task)
+
+    assert recovered == 0
+    assert scheduled == []
+    assert task.status == "running"
+    assert task.queue_message_id == "active-worker-message"
+
+
 async def test_running_voice_is_not_replayed_after_restart(monkeypatch) -> None:
     from app.modules.pipeline import repository as pipeline_repo
     from app.modules.pipeline import service
@@ -157,13 +275,14 @@ async def test_running_voice_is_not_replayed_after_restart(monkeypatch) -> None:
             status="running",
             current_step="voice",
             queue_message_id="lost-worker-message",
+            updated_at=datetime.now(UTC) - timedelta(minutes=40),
         )
         recovered = await service.recover_incomplete_tasks(db)
         await db.refresh(task)
 
     assert recovered == 0
     assert scheduled == []
-    assert task.status == "failed"
+    assert task.status == "reconciliation_required"
     assert "避免重复调用" in task.error
 
 
@@ -185,14 +304,32 @@ async def test_running_avatar_without_provider_task_id_is_not_replayed(monkeypat
             status="running",
             current_step="avatar",
             queue_message_id="lost-worker-message",
+            updated_at=datetime.now(UTC) - timedelta(minutes=40),
         )
         recovered = await service.recover_incomplete_tasks(db)
         await db.refresh(task)
 
     assert recovered == 0
     assert scheduled == []
-    assert task.status == "failed"
+    assert task.status == "reconciliation_required"
     assert "避免重复调用" in task.error
+
+
+async def test_reconciliation_task_counts_as_active_and_alerting() -> None:
+    from app.modules.pipeline import repository as pipeline_repo
+
+    async with SessionLocal() as db:
+        await pipeline_repo.create(
+            db,
+            user_id="reconciliation-active-user",
+            status="reconciliation_required",
+            current_step="voice",
+        )
+
+        assert await pipeline_repo.active_count(db, "reconciliation-active-user") == 1
+        stats = await pipeline_repo.stats(db, "reconciliation-active-user")
+
+    assert stats["pendingAlerts"] == 1
 
 
 async def test_avatar_resume_reuses_persisted_provider_task(monkeypatch) -> None:
@@ -246,6 +383,7 @@ async def test_publish_recovery_never_repeats_unknown_publish(monkeypatch) -> No
             platform="douyin",
             status="publishing",
             queue_message_id="old-message",
+            updated_at=datetime.now(UTC) - timedelta(minutes=20),
         )
         recovered = await service.recover_publish_jobs(db)
         await db.refresh(queued)
@@ -255,3 +393,55 @@ async def test_publish_recovery_never_repeats_unknown_publish(monkeypatch) -> No
     assert queued.queue_message_id == "queued-again"
     assert unknown.status == "failed"
     assert "避免重复发布" in unknown.error
+
+
+async def test_fresh_publishing_job_is_not_failed_during_api_restart(monkeypatch) -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    monkeypatch.setattr(
+        service,
+        "_schedule_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("fresh job must not be requeued")),
+    )
+
+    async with SessionLocal() as db:
+        publishing = await publish_repo.create_job(
+            db,
+            user_id="fresh-publish-user",
+            platform="douyin",
+            status="publishing",
+            queue_message_id="active-publish-message",
+        )
+        recovered = await service.recover_publish_jobs(db)
+        await db.refresh(publishing)
+
+    assert recovered == 0
+    assert publishing.status == "publishing"
+    assert publishing.queue_message_id == "active-publish-message"
+
+
+async def test_publish_enqueue_failure_becomes_retryable_failure(monkeypatch) -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    monkeypatch.setattr(
+        service,
+        "_schedule_job",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("redis unavailable")),
+    )
+
+    async with SessionLocal() as db:
+        job = await publish_repo.create_job(
+            db,
+            user_id="publish-queue-failure-user",
+            platform="douyin",
+            status="queued",
+        )
+        accepted = await service._enqueue_job(db, job)
+        await db.refresh(job)
+
+    assert accepted is False
+    assert job.status == "failed"
+    assert job.queue_message_id == ""
+    assert "队列" in job.error

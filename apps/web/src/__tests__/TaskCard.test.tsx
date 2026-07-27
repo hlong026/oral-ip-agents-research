@@ -1,6 +1,6 @@
 import { STEP_ORDER, type PipelineTask, type StepState } from "@oral/types";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import TaskCard from "../components/TaskCard";

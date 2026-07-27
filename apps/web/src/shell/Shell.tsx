@@ -7,7 +7,7 @@ import {
 import { useIp, useQuota, useSession, useTasks } from "@oral/stores";
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router";
 import FlowBar from "./FlowBar";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";

@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import PipelineTask
+from .models import PipelineRenderVersion, PipelineTask
 
 
 async def create(db: AsyncSession, **fields) -> PipelineTask:
@@ -22,6 +22,14 @@ async def get(db: AsyncSession, task_id: str, user_id: str | None = None) -> Pip
         q = q.where(PipelineTask.user_id == user_id)
     res = await db.execute(q)
     return res.scalar_one_or_none()
+
+
+async def get_for_update(db: AsyncSession, task_id: str, user_id: str) -> PipelineTask | None:
+    return (
+        await db.execute(
+            select(PipelineTask).where(PipelineTask.id == task_id, PipelineTask.user_id == user_id).with_for_update()
+        )
+    ).scalar_one_or_none()
 
 
 async def save(db: AsyncSession, task: PipelineTask) -> PipelineTask:
@@ -98,7 +106,7 @@ async def stats(db: AsyncSession, user_id: str) -> dict:
         PipelineTask.updated_at >= today - timedelta(days=14),
         PipelineTask.updated_at < today - timedelta(days=7),
     )
-    failed = await cnt(PipelineTask.status == "failed")
+    failed = await cnt(PipelineTask.status.in_(["failed", "reconciliation_required"]))
     return {
         "todayDone": today_done,
         "todayDelta": today_done - yesterday_done,
@@ -115,7 +123,7 @@ async def active_count(db: AsyncSession, user_id: str) -> int:
             await db.scalar(
                 select(func.count(PipelineTask.id)).where(
                     PipelineTask.user_id == user_id,
-                    PipelineTask.status.in_(["pending", "running", "waiting_confirm"]),
+                    PipelineTask.status.in_(["pending", "running", "waiting_confirm", "reconciliation_required"]),
                 )
             )
         )
@@ -123,11 +131,125 @@ async def active_count(db: AsyncSession, user_id: str) -> int:
     )
 
 
-async def list_recoverable(db: AsyncSession) -> list[PipelineTask]:
+async def list_recoverable(
+    db: AsyncSession,
+    *,
+    running_stale_before: datetime,
+) -> list[PipelineTask]:
     result = await db.execute(
         select(PipelineTask).where(
-            (PipelineTask.status == "running")
+            ((PipelineTask.status == "running") & (PipelineTask.updated_at < running_stale_before))
             | ((PipelineTask.status == "pending") & (PipelineTask.queue_message_id == ""))
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_render(
+    db: AsyncSession,
+    render_id: str,
+    user_id: str | None = None,
+) -> PipelineRenderVersion | None:
+    query = select(PipelineRenderVersion).where(PipelineRenderVersion.id == render_id)
+    if user_id:
+        query = query.where(PipelineRenderVersion.user_id == user_id)
+    return (await db.execute(query)).scalar_one_or_none()
+
+
+async def get_render_by_idempotency(
+    db: AsyncSession,
+    user_id: str,
+    idempotency_key: str,
+) -> PipelineRenderVersion | None:
+    return (
+        await db.execute(
+            select(PipelineRenderVersion).where(
+                PipelineRenderVersion.user_id == user_id,
+                PipelineRenderVersion.idempotency_key == idempotency_key,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def list_renders(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> list[PipelineRenderVersion]:
+    result = await db.execute(
+        select(PipelineRenderVersion)
+        .where(PipelineRenderVersion.task_id == task_id, PipelineRenderVersion.user_id == user_id)
+        .order_by(PipelineRenderVersion.version.desc())
+    )
+    return list(result.scalars().all())
+
+
+async def claim_render(db: AsyncSession, render_id: str) -> PipelineRenderVersion | None:
+    claimed = await db.execute(
+        update(PipelineRenderVersion)
+        .where(PipelineRenderVersion.id == render_id, PipelineRenderVersion.status == "pending")
+        .values(
+            status="running",
+            queue_message_id="",
+            updated_at=datetime.now(UTC),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if int(getattr(claimed, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        return None
+    await db.commit()
+    return await get_render(db, render_id)
+
+
+async def cancel_pending_render(
+    db: AsyncSession,
+    render_id: str,
+    user_id: str,
+    task_id: str,
+) -> bool:
+    canceled = await db.execute(
+        update(PipelineRenderVersion)
+        .where(
+            PipelineRenderVersion.id == render_id,
+            PipelineRenderVersion.user_id == user_id,
+            PipelineRenderVersion.task_id == task_id,
+            PipelineRenderVersion.status == "pending",
+        )
+        .values(status="canceled", queue_message_id="")
+        .execution_options(synchronize_session=False)
+    )
+    if int(getattr(canceled, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        return False
+    await db.flush()
+    return True
+
+
+async def record_render_queue_message(db: AsyncSession, render_id: str, message_id: str) -> None:
+    await db.execute(
+        update(PipelineRenderVersion)
+        .where(
+            PipelineRenderVersion.id == render_id,
+            PipelineRenderVersion.status == "pending",
+            PipelineRenderVersion.queue_message_id == "",
+        )
+        .values(queue_message_id=message_id)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+
+
+async def list_recoverable_renders(
+    db: AsyncSession,
+    *,
+    running_stale_before: datetime,
+) -> list[PipelineRenderVersion]:
+    result = await db.execute(
+        select(PipelineRenderVersion).where(
+            ((PipelineRenderVersion.status == "running") & (PipelineRenderVersion.updated_at < running_stale_before))
+            | (PipelineRenderVersion.status == "rendered")
+            | ((PipelineRenderVersion.status == "pending") & (PipelineRenderVersion.queue_message_id == ""))
         )
     )
     return list(result.scalars().all())

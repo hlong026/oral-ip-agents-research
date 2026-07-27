@@ -1,6 +1,8 @@
 """content 数据访问"""
 
-from sqlalchemy import select, update
+from datetime import datetime
+
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import ContentJob, Script, ScriptVersion
@@ -16,10 +18,19 @@ async def get(db: AsyncSession, script_id: str, user_id: str) -> Script | None:
     return res.scalar_one_or_none()
 
 
-async def create(db: AsyncSession, **fields) -> Script:
+async def get_for_update(db: AsyncSession, script_id: str, user_id: str) -> Script | None:
+    return (
+        await db.execute(select(Script).where(Script.id == script_id, Script.user_id == user_id).with_for_update())
+    ).scalar_one_or_none()
+
+
+async def create(db: AsyncSession, *, commit: bool = True, **fields) -> Script:
     s = Script(**fields)
     db.add(s)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(s)
     return s
 
@@ -38,6 +49,7 @@ async def append_version(
     text: str,
     model_name: str,
     prompt_version: str,
+    commit: bool = True,
 ) -> ScriptVersion:
     version = ScriptVersion(
         script_id=script.id,
@@ -49,7 +61,10 @@ async def append_version(
         prompt_version=prompt_version,
     )
     db.add(version)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(version)
     return version
 
@@ -61,6 +76,23 @@ async def list_versions(db: AsyncSession, script_id: str, user_id: str) -> list[
         .order_by(ScriptVersion.version)
     )
     return list(result.scalars().all())
+
+
+async def get_version(
+    db: AsyncSession,
+    script_id: str,
+    user_id: str,
+    version: int,
+) -> ScriptVersion | None:
+    return (
+        await db.execute(
+            select(ScriptVersion).where(
+                ScriptVersion.script_id == script_id,
+                ScriptVersion.user_id == user_id,
+                ScriptVersion.version == version,
+            )
+        )
+    ).scalar_one_or_none()
 
 
 async def create_job(db: AsyncSession, **fields) -> ContentJob:
@@ -95,6 +127,17 @@ async def record_job_message(db: AsyncSession, job_id: str, message_id: str) -> 
     await db.commit()
 
 
-async def pending_jobs(db: AsyncSession) -> list[ContentJob]:
-    result = await db.execute(select(ContentJob).where(ContentJob.status == "pending"))
+async def recoverable_jobs(
+    db: AsyncSession,
+    *,
+    running_stale_before: datetime,
+) -> list[ContentJob]:
+    result = await db.execute(
+        select(ContentJob).where(
+            or_(
+                ContentJob.status == "pending",
+                (ContentJob.status == "running") & (ContentJob.updated_at < running_stale_before),
+            )
+        )
+    )
     return list(result.scalars().all())
