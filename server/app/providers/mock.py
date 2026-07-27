@@ -271,13 +271,14 @@ class MockPublishDriver:
         return {"qrcodeUrl": f"https://mock.qr/{self.platform}/{ticket}", "ticket": ticket}
 
     async def check_login(self, ticket: str) -> dict[str, Any] | None:
-        # Mock：第二次轮询视为已扫码
+        # Mock：首次轮询返回等待中，第二次轮询视为已扫码；None 严格表示票据不存在（与真实驱动语义对齐）
         state = self._tickets.get(ticket)
         if state is None:
             return None
         if not state["scanned"]:
             state["scanned"] = True
-            return None
+            return {"_waiting": True}
+        del self._tickets[ticket]
         return {"sessionId": uuid.uuid4().hex, "nickname": f"{self.platform} 运营号", "platform": self.platform}
 
     async def publish(

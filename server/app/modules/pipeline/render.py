@@ -19,6 +19,7 @@ logger = get_logger("oral.pipeline.render")
 
 def _apply_config(artifacts: dict, config: EditConfigIn) -> dict:
     updated = dict(artifacts)
+    updated["subtitle_enabled"] = config.subtitleEnabled
     updated["subtitle_style"] = config.subtitleStyle.model_dump()
     updated["bgm_mode"] = config.bgmMode
     updated["bgm_volume"] = config.bgmVolume / 100

@@ -346,7 +346,13 @@ async def recompose(
         existing = await repo.get_render_by_idempotency(db, user_id, inp.idempotencyKey)
         if existing is not None:
             expected_config = json.dumps(inp.config.model_dump(), ensure_ascii=False, sort_keys=True)
-            actual_config = json.dumps(json.loads(existing.config_json or "{}"), ensure_ascii=False, sort_keys=True)
+            # 旧版本 config_json 可能缺少后来新增的带默认值字段（如 subtitleEnabled），
+            # 先过一遍模型归一化再比对，避免跨部署重试被误判为幂等键冲突
+            actual_config = json.dumps(
+                EditConfigIn.model_validate(json.loads(existing.config_json or "{}")).model_dump(),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
             if (
                 existing.task_id != task_id
                 or existing.base_version != inp.baseVersion

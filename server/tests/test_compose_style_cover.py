@@ -145,3 +145,49 @@ def test_cover_text_priority():
     assert _cover_text_from_ctx(task, {"script": "口播文案" * 10}) == ("口播文案" * 10)[:18]
     task_named = SimpleNamespace(title="真实任务标题")
     assert _cover_text_from_ctx(task_named, {}) == "真实任务标题"
+
+
+# ---------- 字幕开关（关闭时跳过 ASS 烧录） ----------
+
+
+async def _capture_compose_input(monkeypatch, ctx: dict):
+    from app.modules.pipeline import engine
+    from app.providers.base import ComposeResult
+
+    captured = {}
+
+    async def fake_run(_module, _chain, _step, inp, **_kwargs):
+        captured["inp"] = inp
+        result = ComposeResult(
+            video_key="compose/out.mp4", cover_key="compose/out.jpg", duration=1.0, quality={"passed": True}
+        )
+        return result, "ffmpeg-local"
+
+    monkeypatch.setattr(engine.registry, "run_with_fallback", fake_run)
+    task = SimpleNamespace(title="开关测试", randomize=False, trace_id="trace-sub", id="task-sub")
+    await engine._compose_with_ctx(task, ctx)
+    return captured["inp"]
+
+
+async def test_compose_skips_subtitle_words_when_disabled(monkeypatch):
+    ctx = {
+        "avatar_video_key": "avatar/a.mp4",
+        "audio_key": "tts/a.mp3",
+        "tts_words": [{"word": "你好", "start": 0.0, "end": 0.4}],
+        "subtitle_enabled": False,
+    }
+    inp = await _capture_compose_input(monkeypatch, ctx)
+    assert inp.subtitle_words == []
+
+
+async def test_compose_keeps_subtitle_words_by_default(monkeypatch):
+    # 未显式关闭（含存量任务无 subtitle_enabled 字段）时维持烧录行为
+    ctx = {
+        "avatar_video_key": "avatar/a.mp4",
+        "audio_key": "tts/a.mp3",
+        "tts_words": [{"word": "你好", "start": 0.0, "end": 0.4}],
+    }
+    inp = await _capture_compose_input(monkeypatch, ctx)
+    assert [w.word for w in inp.subtitle_words] == ["你好"]
+    inp_on = await _capture_compose_input(monkeypatch, {**ctx, "subtitle_enabled": True})
+    assert [w.word for w in inp_on.subtitle_words] == ["你好"]

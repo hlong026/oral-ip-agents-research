@@ -15,10 +15,9 @@ from app.providers.base import StepRecoverableError
 
 from .browser_pool import BrowserSlot
 from .cookie_manager import (
-    cleanup_cookie_file,
     cleanup_cookie_path,
     create_private_cookie_path,
-    file_to_session,
+    read_session_file,
     session_to_file,
 )
 from .sau_conf import LOCAL_CHROME_PATH, setup_sau
@@ -90,6 +89,9 @@ class SAUPublishDriverBase:
         if not session_data:
             return None
         if session_data["status"] == "success":
+            # 先原子性摘除会话：并发轮询只有一个能拿到 success，避免重复建账号/二次 del 报错
+            if self._login_sessions.pop(ticket, None) is None:
+                return None
             # 读取 Cookie 文件内容作为 session
             cookie_path = session_data["account_file"]
             try:
@@ -105,11 +107,11 @@ class SAUPublishDriverBase:
                 session = {"nickname": f"{self._platform_cn}账号"}
             finally:
                 cleanup_cookie_path(cookie_path)
-                del self._login_sessions[ticket]
             return session
         if session_data["status"] == "failed":
+            if self._login_sessions.pop(ticket, None) is None:
+                return None
             cleanup_cookie_path(session_data["account_file"])
-            del self._login_sessions[ticket]
             return {"_failed": True, "message": session_data.get("error", "登录失败，请重试")}
         info = session_data.get("qrcode_info") or {}
         return {"_waiting": True, "qrcode_url": info.get("image_data_url", "")}
@@ -154,7 +156,7 @@ class SAUPublishDriverBase:
                     publish_date=publish_date,
                 )
             # 5. 发布后回写 Cookie（SAU 发布过程中可能刷新）
-            updated_session = file_to_session(account_id or "tmp", self.platform)
+            updated_session = read_session_file(cookie_file)
             if updated_session and updated_session != "{}":
                 account_session.clear()
                 account_session.update(json.loads(updated_session))
@@ -164,7 +166,7 @@ class SAUPublishDriverBase:
         except Exception as e:
             raise StepRecoverableError(f"{self.platform} 发布失败: {e}") from e
         finally:
-            cleanup_cookie_file(account_id or "tmp", self.platform)
+            cleanup_cookie_path(cookie_file)
 
     async def check_cookie_valid(self, account_session: dict[str, Any], account_id: str = "") -> bool:
         """检测 Cookie 是否仍然有效（心跳用）"""
@@ -180,7 +182,7 @@ class SAUPublishDriverBase:
         except Exception:
             return False
         finally:
-            cleanup_cookie_file(account_id or "hb", self.platform)
+            cleanup_cookie_path(cookie_file)
 
     # ============ 子类必须实现的抽象方法 ============
 

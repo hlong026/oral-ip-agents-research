@@ -49,6 +49,8 @@ class SubtitleStyleIn(BaseModel):
 
 
 class EditConfigIn(BaseModel):
+    # 字幕开关：关闭时重合成跳过 ASS 烧录，输出无字幕成片；样式配置保留，便于随时重新开启
+    subtitleEnabled: bool = True
     subtitleStyle: SubtitleStyleIn = Field(default_factory=SubtitleStyleIn)
     # 素材库尚未开放真实归属校验前，只允许关闭 BGM，避免伪曲库或任意 storage key。
     bgmMode: Literal["off"] = "off"

@@ -47,6 +47,22 @@ _PLATFORM_MODES = {
     "shipinhao": "semi_automatic",
 }
 
+# 重新授权票据绑定：ticket → (account_id, 过期时间)。与驱动登录会话同属进程内状态，扫码成功后原地更新旧账号；
+# 带 TTL 惰性清理，用户中途放弃的 reauth 不会在长期运行的进程里永久驻留
+_REAUTH_TICKETS: dict[str, tuple[str, datetime]] = {}
+_REAUTH_TICKET_TTL = timedelta(minutes=10)
+
+
+def _reauth_binding(ticket: str) -> str:
+    entry = _REAUTH_TICKETS.get(ticket)
+    if entry is None:
+        return ""
+    account_id, expires_at = entry
+    if datetime.now(UTC) >= expires_at:
+        _REAUTH_TICKETS.pop(ticket, None)
+        return ""
+    return account_id
+
 
 def account_to_out(a: PublishAccount) -> AccountOut:
     return AccountOut(
@@ -157,21 +173,53 @@ async def qrcode_poll(db: AsyncSession, user_id: str, platform: str, ticket: str
             detail={"code": "AUTOMATION_NOT_VERIFIED", "message": "该平台自动发布尚未完成真实验收"},
         )
     driver = registry.publish_driver(platform)
+    # 竞态防护：await 前先快照 reauth 绑定（只读不摘除）。并发轮询中败者会拿到 None，
+    # 若由败者清理绑定，胜者的原地更新会退化为新建重复账号
+    reauth_account_id = _reauth_binding(ticket)
     session = await driver.check_login(ticket)
     if session is None:
-        return QrcodePollOut(status="waiting")
+        # 驱动不认识该票据：服务重启丢失登录会话或票据已被并发轮询消费，终止本次轮询即可，
+        # 绑定留待 TTL 过期清理
+        return QrcodePollOut(status="expired", message="登录会话不存在或已失效，请重新发起扫码")
     # 等待扫码中：透传最新二维码（平台二维码过期刷新后前端同步换图）
     if session.get("_waiting"):
         return QrcodePollOut(status="waiting", qrcodeUrl=session.get("qrcode_url") or None)
     # 登录失败：返回 expired 状态告知前端
     if session.get("_failed"):
+        _REAUTH_TICKETS.pop(ticket, None)
         return QrcodePollOut(status="expired", message=session.get("message") or "登录失败，请重新发起")
+    nickname = session.get("nickname", f"{PLATFORM_NAMES[platform]} 账号")
+    session_json = json.dumps(session, ensure_ascii=False)
+    # 重新授权：原地更新旧账号会话并恢复 active，避免同平台账号重复、失效告警残留（终态才摘除绑定）
+    _REAUTH_TICKETS.pop(ticket, None)
+    if reauth_account_id:
+        existing = await repo.get_account(db, reauth_account_id, user_id)
+        if existing is not None and existing.platform == platform:
+            existing.session_json = session_json
+            existing.status = "active"
+            if nickname:
+                existing.nickname = nickname
+            account = await repo.save_account(db, existing)
+            await emit(
+                CHANNEL_FEED,
+                {
+                    "kind": "feed",
+                    "userId": user_id,
+                    "event": {
+                        "id": account.id[:12],
+                        "type": "ok",
+                        "text": f"{PLATFORM_NAMES[platform]} 账号「{account.nickname}」重新授权成功",
+                        "createdAt": datetime.now(UTC).isoformat(),
+                    },
+                },
+            )
+            return QrcodePollOut(status="success", account=account_to_out(account))
     account = await repo.create_account(
         db,
         user_id=user_id,
         platform=platform,
-        nickname=session.get("nickname", f"{PLATFORM_NAMES[platform]} 账号"),
-        session_json=json.dumps(session, ensure_ascii=False),
+        nickname=nickname,
+        session_json=session_json,
         status="active",
     )
     await emit(
@@ -214,11 +262,17 @@ async def rename_account(db: AsyncSession, user_id: str, account_id: str, nickna
 
 
 async def reauth_account(db: AsyncSession, user_id: str, account_id: str) -> QrcodeStartOut:
-    """登录态失效 → 一键重新授权（发起新扫码）"""
+    """登录态失效 → 一键重新授权（发起新扫码，扫码成功后原地更新本账号）"""
     a = await repo.get_account(db, account_id, user_id)
     if not a:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "账号不存在"})
-    return await qrcode_start(a.platform)
+    started = await qrcode_start(a.platform)
+    now = datetime.now(UTC)
+    # 惰性清理过期绑定，再写入新票据
+    for stale in [t for t, (_, exp) in _REAUTH_TICKETS.items() if now >= exp]:
+        _REAUTH_TICKETS.pop(stale, None)
+    _REAUTH_TICKETS[started.ticket] = (a.id, now + _REAUTH_TICKET_TTL)
+    return started
 
 
 # ============ 发布任务（F-503/504） ============
@@ -459,9 +513,13 @@ async def retry_job(db: AsyncSession, user_id: str, job_id: str) -> JobOut:
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "NOT_FAILED", "message": "仅失败任务可重试"})
     account = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
     if account is None or account.status != "active":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "ACCOUNT_EXPIRED", "message": "账号登录态失效，请重新授权"}
-        )
+        # 原账号失效/被解绑：重绑该平台最新 active 账号（重新授权后重试可直接恢复）
+        account = await repo.active_account_for(db, user_id, j.platform)
+        if account is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, detail={"code": "ACCOUNT_EXPIRED", "message": "账号登录态失效，请重新授权"}
+            )
+        j.account_id = account.id
     j.status = "queued"
     j.error = ""
     j.retry_count = str(int(j.retry_count or "0") + 1)
@@ -590,7 +648,9 @@ async def _run_job(job_id: str) -> None:
                 job.title,
                 json.loads(job.topics_json or "[]"),
                 job.cover_key or None,
-                scheduled_at=job.scheduled_at or None,
+                # 定时策略：队列延迟到点后立即发布。不再透传 scheduled_at 给驱动，
+                # 否则平台侧会把已到点的时间当作“过去的定时时间”而拒绝（双重调度冲突）
+                scheduled_at=None,
                 account_id=account.id,
             )
             # SAU 发布过程中可能刷新 Cookie，回写 DB

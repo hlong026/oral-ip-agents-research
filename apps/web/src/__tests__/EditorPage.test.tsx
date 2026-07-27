@@ -67,6 +67,7 @@ const activeRender: PipelineRenderVersion = {
   baseVersion: 0,
   status: "done",
   config: {
+    subtitleEnabled: true,
     subtitleStyle: {
       fontSize: 52,
       color: "#FDE047",
@@ -164,6 +165,7 @@ describe("EditorPage 原子重合成", () => {
           baseVersion: 1,
           idempotencyKey: expect.any(String),
           config: expect.objectContaining({
+            subtitleEnabled: true,
             subtitleStyle: expect.objectContaining({ fontSize: 56 }),
             bgmMode: "off",
             bgmVolume: 0,
@@ -190,5 +192,52 @@ describe("EditorPage 原子重合成", () => {
     expect(
       screen.getByRole("button", { name: "保存并重新合成" }),
     ).toBeEnabled();
+  });
+
+  it("关闭字幕开关后预览隐藏字幕，保存提交 subtitleEnabled=false", async () => {
+    renderEditor();
+
+    const toggle = await screen.findByRole("switch", { name: "显示字幕" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(toggle);
+
+    expect(
+      screen.getByRole("switch", { name: "字幕已关闭" }),
+    ).toHaveAttribute("aria-checked", "false");
+    expect(
+      screen.getByText("重新合成后成片将不含字幕"),
+    ).toBeInTheDocument();
+    // 预览叠层随开关隐藏（取脚本第三句作为预览样本）
+    expect(screen.queryByText(/字幕效果实时预览/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存并重新合成" }));
+
+    await waitFor(() => {
+      expect(pipelineApi.recompose).toHaveBeenCalledWith(
+        task.id,
+        expect.objectContaining({
+          config: expect.objectContaining({ subtitleEnabled: false }),
+        }),
+      );
+    });
+  });
+
+  it("旧渲染版本配置缺 subtitleEnabled 字段时默认视为开启", async () => {
+    const legacyConfig: Partial<PipelineRenderVersion["config"]> = {
+      ...activeRender.config,
+    };
+    delete legacyConfig.subtitleEnabled;
+    vi.mocked(pipelineApi.renderVersions).mockResolvedValue([
+      {
+        ...activeRender,
+        config: legacyConfig as PipelineRenderVersion["config"],
+      },
+    ]);
+
+    renderEditor();
+
+    expect(
+      await screen.findByRole("switch", { name: "显示字幕" }),
+    ).toHaveAttribute("aria-checked", "true");
   });
 });

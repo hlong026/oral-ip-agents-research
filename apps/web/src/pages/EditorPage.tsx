@@ -31,6 +31,7 @@ const COVER_TEMPLATES = [
 ] as const;
 
 interface EditConfig {
+  subtitleEnabled: boolean;
   fontSize: number;
   color: string;
   position: "bottom" | "middle" | "top";
@@ -41,6 +42,7 @@ interface EditConfig {
 }
 
 const DEFAULT_CONFIG: EditConfig = {
+  subtitleEnabled: true,
   fontSize: 44,
   color: "#FFFFFF",
   position: "bottom",
@@ -144,6 +146,7 @@ export default function EditorPage() {
   useEffect(() => {
     if (!activeRender || dirty || submittedRenderId) return;
     setCfg({
+      subtitleEnabled: activeRender.config.subtitleEnabled ?? true,
       fontSize: activeRender.config.subtitleStyle.fontSize,
       color: activeRender.config.subtitleStyle.color,
       position: activeRender.config.subtitleStyle.position,
@@ -157,6 +160,7 @@ export default function EditorPage() {
   useEffect(() => {
     if (!terminalAttempt) return;
     setCfg({
+      subtitleEnabled: terminalAttempt.config.subtitleEnabled ?? true,
       fontSize: terminalAttempt.config.subtitleStyle.fontSize,
       color: terminalAttempt.config.subtitleStyle.color,
       position: terminalAttempt.config.subtitleStyle.position,
@@ -225,6 +229,7 @@ export default function EditorPage() {
         globalThis.crypto?.randomUUID?.() ??
         `editor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const config: ApiEditConfig = {
+        subtitleEnabled: cfg.subtitleEnabled,
         subtitleStyle: {
           fontSize: cfg.fontSize,
           color: cfg.color,
@@ -311,26 +316,28 @@ export default function EditorPage() {
                 <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
                   1080P
                 </span>
-                {/* 字幕预览：随样式实时变化（不拦截播放器控件点击） */}
-                <span
-                  className={`pointer-events-none absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
-                    cfg.position === "bottom"
-                      ? "bottom-14"
-                      : cfg.position === "middle"
-                        ? "top-1/2 -translate-y-1/2"
-                        : "top-6"
-                  }`}
-                  style={{
-                    color: cfg.color,
-                    fontSize: Math.max(12, cfg.fontSize / 2.2),
-                    textShadow:
-                      cfg.stroke > 0
-                        ? `0 0 ${cfg.stroke * 2}px rgba(0,0,0,.9), 0 ${cfg.stroke}px ${cfg.stroke}px rgba(0,0,0,.8)`
-                        : "none",
-                  }}
-                >
-                  {subtitleLines[2] ?? "字幕效果实时预览"}
-                </span>
+                {/* 字幕预览：随开关与样式实时变化（不拦截播放器控件点击） */}
+                {cfg.subtitleEnabled && (
+                  <span
+                    className={`pointer-events-none absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
+                      cfg.position === "bottom"
+                        ? "bottom-14"
+                        : cfg.position === "middle"
+                          ? "top-1/2 -translate-y-1/2"
+                          : "top-6"
+                    }`}
+                    style={{
+                      color: cfg.color,
+                      fontSize: Math.max(12, cfg.fontSize / 2.2),
+                      textShadow:
+                        cfg.stroke > 0
+                          ? `0 0 ${cfg.stroke * 2}px rgba(0,0,0,.9), 0 ${cfg.stroke}px ${cfg.stroke}px rgba(0,0,0,.8)`
+                          : "none",
+                    }}
+                  >
+                    {subtitleLines[2] ?? "字幕效果实时预览"}
+                  </span>
+                )}
               </div>
               <div className="mt-3 flex items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -356,10 +363,33 @@ export default function EditorPage() {
             </div>
 
             <div className="space-y-4">
-              {/* 字幕样式（F-401） */}
+              {/* 字幕样式（F-401）：开关关闭时重合成输出无字幕成片，样式配置保留 */}
               <div className="glass p-5">
-                <h2 className="mb-4 font-medium">字幕样式</h2>
-                <div className="grid gap-4 md:grid-cols-2">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h2 className="font-medium">字幕样式</h2>
+                  <div className="flex items-center gap-2">
+                    {!cfg.subtitleEnabled && (
+                      <span className="text-xs text-text-3">
+                        重新合成后成片将不含字幕
+                      </span>
+                    )}
+                    <button
+                      role="switch"
+                      aria-checked={cfg.subtitleEnabled}
+                      onClick={() =>
+                        update({ subtitleEnabled: !cfg.subtitleEnabled })
+                      }
+                      className={`chip px-3 py-1 text-xs ${cfg.subtitleEnabled ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+                    >
+                      {cfg.subtitleEnabled ? "显示字幕" : "字幕已关闭"}
+                    </button>
+                  </div>
+                </div>
+                {/* fieldset disabled：关闭字幕时鼠标/键盘/辅助技术一致禁用样式控件 */}
+                <fieldset
+                  disabled={!cfg.subtitleEnabled}
+                  className={`grid gap-4 md:grid-cols-2 ${cfg.subtitleEnabled ? "" : "opacity-40"}`}
+                >
                   <div>
                     <label className="label">字号（{cfg.fontSize}px）</label>
                     <input
@@ -420,7 +450,7 @@ export default function EditorPage() {
                       ))}
                     </div>
                   </div>
-                </div>
+                </fieldset>
               </div>
 
               {/* BGM 在真实素材归属链路开放前保持关闭，避免伪曲库与任意 key。 */}

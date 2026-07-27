@@ -32,6 +32,45 @@ def _config(*, cover_template: str = "bold-bottom") -> EditConfigIn:
     )
 
 
+def test_apply_config_writes_subtitle_switch() -> None:
+    from app.modules.pipeline.render import _apply_config
+
+    # 默认开启；显式关闭时写入 False，重合成据此跳过 ASS 烧录
+    assert _apply_config({}, _config())["subtitle_enabled"] is True
+    disabled = _config()
+    disabled.subtitleEnabled = False
+    updated = _apply_config({"tts_words": [{"word": "测", "start": 0.0, "end": 0.3}]}, disabled)
+    assert updated["subtitle_enabled"] is False
+    # 样式配置保留，便于重新开启后恢复
+    assert updated["subtitle_style"]["fontSize"] == 48
+
+
+def test_render_to_out_backfills_subtitle_enabled_for_legacy_config() -> None:
+    from app.modules.pipeline.service import render_to_out
+
+    # 存量 config_json 无 subtitleEnabled 字段 → 出参契约按默认值补齐为开启
+    legacy = PipelineRenderVersion(
+        id="render-legacy",
+        task_id="task-legacy",
+        version=1,
+        base_version=0,
+        status="done",
+        config_json=(
+            '{"bgmMode":"off","bgmVolume":0,"coverTemplate":"bold-bottom",'
+            '"subtitleStyle":{"fontSize":44,"color":"#FFFFFF","position":"bottom","stroke":2}}'
+        ),
+        video_key="",
+        cover_key="",
+        quality_json="{}",
+        error="",
+        is_active=True,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    out = render_to_out(legacy)
+    assert out.config.subtitleEnabled is True
+
+
 async def _done_task_with_quote() -> tuple[str, str, str]:
     user_id = uuid.uuid4().hex
     quote_id = f"quote_{uuid.uuid4().hex}"

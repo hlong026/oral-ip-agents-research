@@ -5952,6 +5952,11 @@
       },
       "EditConfigIn": {
         "properties": {
+          "subtitleEnabled": {
+            "type": "boolean",
+            "title": "Subtitleenabled",
+            "default": true
+          },
           "subtitleStyle": {
             "$ref": "#/components/schemas/SubtitleStyleIn"
           },

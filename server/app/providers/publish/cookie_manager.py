@@ -8,6 +8,7 @@ Cookie 管理器
 import json
 import os
 import tempfile
+import uuid
 from pathlib import Path
 
 from app.core.logging import get_logger
@@ -32,8 +33,11 @@ def _write_private(filepath: Path, content: str) -> None:
 
 
 def session_to_file(session_json: str, account_id: str, platform: str) -> str:
-    """将 DB 中的 session_json 写入临时文件，返回文件路径供 SAU 使用"""
-    filename = f"{platform}_{account_id}.json"
+    """将 DB 中的 session_json 写入临时文件，返回文件路径供 SAU 使用
+
+    文件名带随机后缀：同账号并发发布/心跳各用独立文件，互不覆盖、互不误删。
+    """
+    filename = f"{platform}_{account_id}_{uuid.uuid4().hex[:8]}.json"
     filepath = _COOKIE_DIR / filename
     try:
         data = json.loads(session_json) if session_json else {}
@@ -43,27 +47,15 @@ def session_to_file(session_json: str, account_id: str, platform: str) -> str:
     return str(filepath)
 
 
-def file_to_session(account_id: str, platform: str) -> str:
+def read_session_file(filepath: str) -> str:
     """发布完成后，从临时文件回读 Cookie（SAU 发布过程中可能刷新 Cookie）"""
-    filename = f"{platform}_{account_id}.json"
-    filepath = _COOKIE_DIR / filename
-    if not filepath.exists():
+    path = Path(filepath)
+    if not path.exists():
         return "{}"
     try:
-        return filepath.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except OSError:
         return "{}"
-
-
-def cleanup_cookie_file(account_id: str, platform: str) -> None:
-    """清理临时 Cookie 文件"""
-    filename = f"{platform}_{account_id}.json"
-    filepath = _COOKIE_DIR / filename
-    try:
-        if filepath.exists():
-            filepath.unlink()
-    except OSError:
-        logger.warning("cookie_temp_cleanup_failed", platform=platform, account_id=account_id)
 
 
 def create_private_cookie_path(filename: str) -> str:

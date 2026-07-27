@@ -392,6 +392,8 @@ export interface SubtitleStyle {
 }
 
 export interface EditConfig {
+  /** 字幕开关：关闭时重合成输出无字幕成片 */
+  subtitleEnabled: boolean;
   subtitleStyle: SubtitleStyle;
   bgmMode: "off";
   bgmVolume: 0;

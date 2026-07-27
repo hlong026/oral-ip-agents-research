@@ -538,8 +538,8 @@ def _cover_text_from_ctx(task: PipelineTask, ctx: dict) -> str:
 
 async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
     """合成执行体：compose 首跑与 edit 步按剪辑台配置重合成共用（字幕样式/封面模板真链路）"""
-    # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底
-    words = ctx.get("tts_words") or ctx.get("words") or []
+    # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底；剪辑台显式关闭字幕时跳过烧录
+    words = [] if ctx.get("subtitle_enabled") is False else (ctx.get("tts_words") or ctx.get("words") or [])
     bgm_mode = str(ctx.get("bgm_mode") or "off")
     bgm_volume = float(ctx.get("bgm_volume") or 0.0)
     inp = ComposeInput(
@@ -604,7 +604,8 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
             task.user_id,
             task.id,
             platforms,
-            title=(ctx.get("script") or task.title)[:30],
+            # 发布标题与封面取值策略对齐：上游 LLM 标题优先，兜底口播文案截断
+            title=(_cover_text_from_ctx(task, ctx) or ctx.get("script") or task.title)[:30],
             video_key=ctx.get("final_video_key", ""),
             cover_key=ctx.get("cover_key", ""),
             scheduled_at=task.publish_at or None,
