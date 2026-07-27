@@ -131,10 +131,14 @@ async def active_count(db: AsyncSession, user_id: str) -> int:
     )
 
 
-async def list_recoverable(db: AsyncSession) -> list[PipelineTask]:
+async def list_recoverable(
+    db: AsyncSession,
+    *,
+    running_stale_before: datetime,
+) -> list[PipelineTask]:
     result = await db.execute(
         select(PipelineTask).where(
-            (PipelineTask.status == "running")
+            ((PipelineTask.status == "running") & (PipelineTask.updated_at < running_stale_before))
             | ((PipelineTask.status == "pending") & (PipelineTask.queue_message_id == ""))
         )
     )

@@ -7,7 +7,7 @@
 
 import json
 import zipfile
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
@@ -437,8 +437,15 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
     return jobs
 
 
-async def list_jobs(db: AsyncSession, user_id: str, status_: str | None, page: int, page_size: int) -> JobPageOut:
-    items, total = await repo.list_jobs(db, user_id, status_, page, page_size)
+async def list_jobs(
+    db: AsyncSession,
+    user_id: str,
+    status_: str | None,
+    page: int,
+    page_size: int,
+    task_id: str = "",
+) -> JobPageOut:
+    items, total = await repo.list_jobs(db, user_id, status_, page, page_size, task_id)
     outs = []
     for j in items:
         acc = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
@@ -659,7 +666,11 @@ async def _run_job(job_id: str) -> None:
 
 async def recover_publish_jobs(db: AsyncSession) -> int:
     """重启后恢复未入队发布；结果未知的 publishing 任务转人工导出。"""
-    jobs = await repo.list_recoverable_jobs(db)
+    # Publish actor 最长执行 15 分钟；给正在运行的独立 Worker 留出 5 分钟余量。
+    jobs = await repo.list_recoverable_jobs(
+        db,
+        publishing_stale_before=datetime.now(UTC) - timedelta(minutes=20),
+    )
     recovered = 0
     unknown_jobs: list[PublishJob] = []
     for job in jobs:
@@ -689,14 +700,45 @@ async def recover_publish_jobs(db: AsyncSession) -> int:
     return recovered
 
 
-async def _enqueue_job(db: AsyncSession, job: PublishJob) -> None:
+async def _enqueue_job(db: AsyncSession, job: PublishJob) -> bool:
     """先持久化可恢复状态，再投递 Broker，最后条件回写消息号。"""
     job.status = "queued"
+    job.error = ""
     job.queue_message_id = ""
     await repo.save_job(db, job)
-    message_id = _schedule_job(job.id, job.scheduled_at)
-    await repo.record_queue_message(db, job.id, message_id)
-    await db.refresh(job)
+    try:
+        message_id = _schedule_job(job.id, job.scheduled_at)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "publish_enqueue_failed",
+            job_id=job.id,
+            user_id=job.user_id,
+            platform=job.platform,
+        )
+        job.status = "failed"
+        job.error = "发布队列暂不可用，请稍后重试"
+        await repo.save_job(db, job)
+        await notify_user(
+            db,
+            job.user_id,
+            "error",
+            f"{PLATFORM_NAMES.get(job.platform)}发布任务排队失败",
+            "成片已保留，请稍后在发布管理中重试。",
+        )
+        return False
+    try:
+        await repo.record_queue_message(db, job.id, message_id)
+        await db.refresh(job)
+    except Exception:  # noqa: BLE001
+        # Broker 已接受消息，不能把任务改成 failed 后允许用户重复发布。
+        await db.rollback()
+        logger.exception(
+            "publish_queue_receipt_failed",
+            job_id=job.id,
+            user_id=job.user_id,
+            message_id=message_id,
+        )
+    return True
 
 
 def _can_reuse_publish_job(

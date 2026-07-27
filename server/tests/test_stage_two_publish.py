@@ -74,6 +74,47 @@ async def test_unverified_publish_creates_export_ready_job_without_account(monke
     assert job.account_id == ""
 
 
+async def test_pipeline_publish_uses_the_settled_render_version(monkeypatch) -> None:
+    from app.modules.pipeline import engine
+    from app.modules.pipeline.models import PipelineTask
+    from app.modules.publish import service
+
+    captured: dict[str, object] = {}
+
+    async def fake_publish(_db, user_id, task_id, platforms, **kwargs):
+        captured.update(
+            user_id=user_id,
+            task_id=task_id,
+            platforms=platforms,
+            **kwargs,
+        )
+        return ["publish-v2"]
+
+    monkeypatch.setattr(service, "publish_task_video", fake_publish)
+    task = PipelineTask(
+        id="pipeline-render-v2",
+        user_id="pipeline-render-user",
+        title="发布结算后的活动成片",
+        platforms_json='["douyin"]',
+    )
+
+    result = await engine.step_publish(
+        task,
+        {
+            "script": "发布结算后的活动成片",
+            "final_video_key": "compose/v2.mp4",
+            "cover_key": "compose/v2.jpg",
+            "quality": {"passed": True},
+            "render_version_id": "render-v2",
+            "render_version": 2,
+        },
+    )
+
+    assert result == {"publish_job_ids": ["publish-v2"]}
+    assert captured["render_version_id"] == "render-v2"
+    assert captured["render_version"] == 2
+
+
 async def test_pipeline_publish_reentry_reuses_existing_platform_job(monkeypatch) -> None:
     from app.modules.publish import repository as publish_repo
     from app.modules.publish import service
@@ -107,6 +148,40 @@ async def test_pipeline_publish_reentry_reuses_existing_platform_job(monkeypatch
     assert first == second
     assert total == 1
     assert [item.id for item in items] == first
+
+
+async def test_publish_job_list_filters_by_task_before_pagination() -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    async with SessionLocal() as db:
+        await publish_repo.create_job(
+            db,
+            user_id="task-filter-user",
+            task_id="other-task",
+            platform="douyin",
+            title="其它任务",
+            status="export_ready",
+        )
+        expected = await publish_repo.create_job(
+            db,
+            user_id="task-filter-user",
+            task_id="target-task",
+            platform="xiaohongshu",
+            title="目标任务",
+            status="export_ready",
+        )
+        result = await service.list_jobs(
+            db,
+            "task-filter-user",
+            None,
+            1,
+            1,
+            "target-task",
+        )
+
+    assert result.total == 1
+    assert [item.id for item in result.items] == [expected.id]
 
 
 async def test_failed_publish_job_is_not_reused_after_account_is_fixed(monkeypatch) -> None:

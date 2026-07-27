@@ -1,6 +1,59 @@
 """Provider 运行时配置切换回归测试。"""
 
 
+async def test_cookie_check_propagates_concurrency_infrastructure_failure(monkeypatch) -> None:
+    import pytest
+
+    from app.core.distributed_semaphore import SemaphoreUnavailableError
+    from app.providers.publish import base_driver
+
+    class BrokenSlot:
+        async def __aenter__(self):
+            raise SemaphoreUnavailableError("redis unavailable")
+
+        async def __aexit__(self, *_exc) -> None:
+            return None
+
+    class Driver(base_driver.SAUPublishDriverBase):
+        async def _do_check_cookie(self, _cookie_file: str) -> bool:
+            return True
+
+    monkeypatch.setattr(base_driver, "BrowserSlot", BrokenSlot)
+
+    with pytest.raises(SemaphoreUnavailableError):
+        await Driver().check_cookie_valid({}, account_id="infra-account")
+
+
+async def test_app_lifespan_cancels_publish_heartbeat(monkeypatch) -> None:
+    import asyncio
+
+    from app.main import app, lifespan
+    from app.providers.publish import heartbeat
+
+    stopped = asyncio.Event()
+    started: list[asyncio.Task] = []
+
+    async def forever() -> None:
+        try:
+            await asyncio.Future()
+        finally:
+            stopped.set()
+
+    def start_fake_heartbeat() -> asyncio.Task:
+        task = asyncio.create_task(forever())
+        started.append(task)
+        return task
+
+    monkeypatch.setattr(heartbeat, "start_heartbeat", start_fake_heartbeat)
+
+    async with lifespan(app):
+        await asyncio.sleep(0)
+        assert not stopped.is_set()
+
+    assert stopped.is_set()
+    assert started[0].cancelled()
+
+
 async def test_deepseek_rebuilds_client_when_base_url_changes(monkeypatch) -> None:
     from app.providers import real
 

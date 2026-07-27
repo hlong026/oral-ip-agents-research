@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./oral.db"
     redis_url: str = "redis://localhost:6379/0"
     task_queue_name: str = "oral"
+    redis_operation_timeout_seconds: float = 3.0
 
     # 存储
     storage_driver: str = "local"  # local | s3
@@ -61,6 +62,8 @@ class Settings(BaseSettings):
     feiying_poll_interval: float = 5.0  # 轮询间隔（秒）
     feiying_poll_max_attempts: int = 60  # 最大轮询次数（5分钟超时）
     feiying_webhook_secret: str = ""  # 回调验签（预留）
+    webhook_retry_max_attempts: int = 3
+    webhook_retry_base_seconds: int = 30
 
     # 第三方解析兜底
     parse_api_url: str = ""

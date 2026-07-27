@@ -19,7 +19,6 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       renderVersions: vi.fn(),
       recompose: vi.fn(),
       cancelRender: vi.fn(),
-      overrideStep: vi.fn(),
       retryStep: vi.fn(),
     },
   };
@@ -173,7 +172,6 @@ describe("EditorPage 原子重合成", () => {
         }),
       );
     });
-    expect(pipelineApi.overrideStep).not.toHaveBeenCalled();
     expect(pipelineApi.retryStep).not.toHaveBeenCalled();
   });
 

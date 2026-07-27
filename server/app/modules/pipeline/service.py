@@ -1,4 +1,4 @@
-"""pipeline 业务编排（F-405/406：批量扇出、单步重跑/覆盖、manual 确认）
+"""pipeline 业务编排（F-405/406：批量扇出、单步重跑、manual 确认）
 日志：任务生命周期（§10.6.8-B #1）
 """
 
@@ -175,8 +175,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         await db.rollback()
         raise
     for task in tasks:
-        message_id = schedule_run(task.id)
-        await repo.record_queue_message(db, task.id, message_id)
+        await _enqueue_created_task(db, task)
         await db.refresh(task)
     # 任务创建：记录 INFO（§10.6.8-B #1）
     logger.info(
@@ -188,6 +187,48 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         source_type="url" if inp.sourceUrl else ("topic" if inp.topic else "script"),
     )
     return [to_out(t) for t in tasks]
+
+
+async def _enqueue_created_task(db: AsyncSession, task: PipelineTask) -> bool:
+    """投递新流水线；Broker 未接受时终止任务并恢复冻结积分。"""
+    try:
+        message_id = schedule_run(task.id)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "pipeline_enqueue_failed",
+            task_id=task.id,
+            user_id=task.user_id,
+        )
+        task.status = "failed"
+        task.error = "任务队列暂不可用，积分已恢复，请稍后重试"
+        task.queue_message_id = ""
+        await repo.save(db, task)
+        if task.reservation_id:
+            from app.modules.billing.service import release_reservation
+
+            await release_reservation(db, task.reservation_id, task.user_id)
+        from app.modules.notify.service import notify_user
+
+        await notify_user(
+            db,
+            task.user_id,
+            "error",
+            f"任务排队失败：{task.title}",
+            "任务未开始执行，冻结积分已恢复，请稍后重新创建。",
+        )
+        return False
+    try:
+        await repo.record_queue_message(db, task.id, message_id)
+    except Exception:  # noqa: BLE001
+        # Broker 已接受消息，Worker 可能已经执行；保留 pending + 空回执供状态机认领。
+        await db.rollback()
+        logger.exception(
+            "pipeline_queue_receipt_failed",
+            task_id=task.id,
+            user_id=task.user_id,
+            message_id=message_id,
+        )
+    return True
 
 
 async def resolve_script_snapshot(
@@ -644,56 +685,35 @@ async def retry_step(
     t.error = ""
     t.queue_message_id = ""
     await repo.save(db, t)
-    message_id = schedule_run(t.id, from_step=step)
-    await repo.record_queue_message(db, t.id, message_id)
+    try:
+        message_id = schedule_run(t.id, from_step=step)
+    except Exception:
+        logger.exception("pipeline_retry_enqueue_failed", task_id=task_id, step=step, user_id=user_id)
+        t.status = "failed"
+        t.error = "任务队列暂不可用，积分已恢复，请重新报价后重试"
+        await repo.save(db, t)
+        if t.reservation_id:
+            from app.modules.billing.service import release_reservation
+
+            await release_reservation(db, t.reservation_id, user_id)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PIPELINE_QUEUE_UNAVAILABLE", "message": "任务队列暂不可用，积分已恢复"},
+        ) from None
+    try:
+        await repo.record_queue_message(db, t.id, message_id)
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "pipeline_retry_queue_receipt_failed",
+            task_id=task_id,
+            step=step,
+            user_id=user_id,
+            message_id=message_id,
+        )
     await db.refresh(t)
     # 单步重跑：记录 INFO（§10.6.8-B #1）
     logger.info("task_retry", task_id=task_id, step=step, user_id=user_id)
-    return to_out(t)
-
-
-async def override_step(db: AsyncSession, task_id: str, step: str, user_id: str, artifacts: dict[str, str]) -> TaskOut:
-    """人工覆盖：写入该步产物并标记完成，从下一步续跑（F-405 人工干预）"""
-    _check_step(step)
-    t = await _must_get(db, task_id, user_id)
-    if step == "edit":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "USE_RECOMPOSE_API", "message": "剪辑修改请通过版本化重合成接口提交"},
-        )
-    if t.status in {"done", "canceled", "reconciliation_required"}:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "TASK_TERMINAL", "message": "已结束任务不可人工覆盖"},
-        )
-    if t.status == "running":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"}
-        )
-    steps = json.loads(t.steps_json or "[]") or _default_steps()
-    ctx = json.loads(t.artifacts_json or "{}")
-    ctx.update(artifacts)
-    idx = STEP_ORDER.index(step)
-    now = datetime.now(UTC).isoformat()
-    steps[idx].update(
-        {
-            "status": "done",
-            "progress": 100,
-            "message": "人工覆盖",
-            "artifacts": {k: str(v)[:200] for k, v in artifacts.items()},
-            "finishedAt": now,
-        }
-    )
-    t.steps_json = json.dumps(steps, ensure_ascii=False)
-    t.artifacts_json = json.dumps(ctx, ensure_ascii=False)
-    t.status = "pending"
-    t.error = ""
-    t.queue_message_id = ""
-    await repo.save(db, t)
-    if idx + 1 < len(STEP_ORDER):
-        message_id = schedule_run(t.id, from_step=STEP_ORDER[idx + 1])
-        await repo.record_queue_message(db, t.id, message_id)
-        await db.refresh(t)
     return to_out(t)
 
 
@@ -705,8 +725,27 @@ async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     t.status = "pending"
     t.queue_message_id = ""
     await repo.save(db, t)
-    message_id = schedule_run(t.id)
-    await repo.record_queue_message(db, t.id, message_id)
+    try:
+        message_id = schedule_run(t.id)
+    except Exception:
+        logger.exception("pipeline_confirm_enqueue_failed", task_id=task_id, user_id=user_id)
+        t.status = "waiting_confirm"
+        t.queue_message_id = ""
+        await repo.save(db, t)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "PIPELINE_QUEUE_UNAVAILABLE", "message": "任务队列暂不可用，请稍后再次确认"},
+        ) from None
+    try:
+        await repo.record_queue_message(db, t.id, message_id)
+    except Exception:
+        await db.rollback()
+        logger.exception(
+            "pipeline_confirm_queue_receipt_failed",
+            task_id=task_id,
+            user_id=user_id,
+            message_id=message_id,
+        )
     await db.refresh(t)
     # manual 确认：记录 INFO（§10.6.8-B #1）
     logger.info("task_confirmed", task_id=task_id, user_id=user_id)
@@ -739,7 +778,11 @@ async def stats(db: AsyncSession, user_id: str) -> StatsOut:
 
 async def recover_incomplete_tasks(db: AsyncSession) -> int:
     """API 重启时补投安全步骤；结果未知的非幂等步骤禁止自动重放。"""
-    tasks = await repo.list_recoverable(db)
+    # Pipeline actor 最长执行 30 分钟；API 滚动重启不能抢走仍在工作的任务。
+    tasks = await repo.list_recoverable(
+        db,
+        running_stale_before=datetime.now(UTC) - timedelta(minutes=35),
+    )
     recoverable: list[tuple[PipelineTask, str | None]] = []
     for task in tasks:
         from_step = task.current_step or None if task.status == "running" else None

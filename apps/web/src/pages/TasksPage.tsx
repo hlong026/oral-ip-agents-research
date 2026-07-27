@@ -46,7 +46,7 @@ export default function TasksPage() {
         <div>
           <h1 className="text-xl font-bold">任务中心</h1>
           <p className="mt-1 text-sm text-text-3">
-            8 步流水线实时进度 · 单步重跑 / 人工覆盖 / 批量队列
+            8 步流水线实时进度 · 单步重跑 / 版本化精修 / 批量队列
           </p>
         </div>
         <Link to="/create" className="btn-primary flex items-center gap-1.5">

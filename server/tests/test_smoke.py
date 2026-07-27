@@ -143,6 +143,35 @@ async def test_healthz(client: AsyncClient):
     assert r.json()["ok"] is True
 
 
+async def test_readyz_reports_live_dependency_status(client: AsyncClient):
+    r = await client.get("/readyz")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["dependencies"]["database"]["ok"] is True
+    assert body["dependencies"]["storage"]["ok"] is True
+    assert body["dependencies"]["redis"]["required"] is False
+
+
+async def test_readyz_fails_when_required_dependency_is_unavailable(client: AsyncClient, monkeypatch):
+    from app import main
+
+    async def unavailable() -> bool:
+        return False
+
+    monkeypatch.setattr(main, "database_ready", unavailable)
+
+    r = await client.get("/readyz")
+
+    assert r.status_code == 503
+    assert r.json()["ok"] is False
+    assert r.json()["dependencies"]["database"] == {
+        "ok": False,
+        "required": True,
+    }
+
+
 async def test_auth_and_quota_flow(client: AsyncClient):
     """里程碑：登录联通（首次码登录开户赠额度 → JWT → me → 额度卡真实余额）"""
     tokens = await _register(client, _phone())

@@ -28,18 +28,14 @@
     "/readyz": {
       "get": {
         "summary": "Readyz",
-        "description": "部署验证端点：暴露运行环境、provider 模式与各链名单，切生产后用于确认零 Mock",
+        "description": "生产就绪探针：验证实时依赖，并保留 Provider 配置快照。",
         "operationId": "readyz_readyz_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Readyz Readyz Get"
-                }
+                "schema": {}
               }
             }
           }
@@ -2464,71 +2460,6 @@
         }
       }
     },
-    "/api/v1/pipelines/{task_id}/steps/{step}/override": {
-      "post": {
-        "tags": ["pipeline"],
-        "summary": "Override Step",
-        "description": "人工覆盖产物，从下一步续跑（F-405）",
-        "operationId": "override_step_api_v1_pipelines__task_id__steps__step__override_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "task_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Task Id"
-            }
-          },
-          {
-            "name": "step",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Step"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OverrideIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/pipelines/{task_id}/confirm": {
       "post": {
         "tags": ["pipeline"],
@@ -2987,6 +2918,16 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Taskid"
             }
           },
           {
@@ -6596,20 +6537,6 @@
         "type": "object",
         "required": ["id", "level", "title", "body", "read", "createdAt"],
         "title": "NotificationOut"
-      },
-      "OverrideIn": {
-        "properties": {
-          "artifacts": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Artifacts"
-          }
-        },
-        "type": "object",
-        "required": ["artifacts"],
-        "title": "OverrideIn"
       },
       "OverviewOut": {
         "properties": {

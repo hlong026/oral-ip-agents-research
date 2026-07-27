@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import hmac
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -249,3 +250,18 @@ async def get_accessible_url(
         )
     base_url = base_url or "http://127.0.0.1:8000"
     return f"{base_url}{signed_media_path(key, expires_in=expires_in)}"
+
+
+async def storage_ready() -> bool:
+    """检查当前存储后端是否可用，不创建探针对象。"""
+    if settings.storage_driver == "local":
+        path = Path(settings.local_storage_dir)
+        return await asyncio.to_thread(
+            lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK)
+        )
+    try:
+        client = _s3_client()
+        await asyncio.to_thread(client.head_bucket, Bucket=settings.s3_bucket)
+        return True
+    except Exception:
+        return False

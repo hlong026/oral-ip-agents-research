@@ -2,7 +2,7 @@
 
 import json
 import math
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -345,13 +345,65 @@ async def _update_progress(job_id: str, progress: int, stage: str) -> None:
 
 
 async def recover_pending_jobs(db: AsyncSession) -> int:
-    jobs = await repository.pending_jobs(db)
+    # Content actor 最长执行 30 分钟；只处理超过宽限期的 running，避免 API
+    # 滚动重启与仍在运行的独立 Worker 争抢同一任务。
+    jobs = await repository.recoverable_jobs(
+        db,
+        running_stale_before=datetime.now(UTC) - timedelta(minutes=35),
+    )
+    scheduled = 0
+    stale_failed = 0
+    stale_settled = 0
     for job in jobs:
+        if job.status == "running":
+            if json.loads(job.result_json or "{}"):
+                try:
+                    settled = await settle_reservation(
+                        db,
+                        job.reservation_id,
+                        job.id,
+                        step=_billing_step(job.kind),
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "content_job_recovery_settlement_failed",
+                        job_id=job.id,
+                        user_id=job.user_id,
+                    )
+                    settled = 0
+                if settled > 0:
+                    job.status = "done"
+                    job.progress = 100
+                    job.stage = "处理完成"
+                    job.error = ""
+                    await db.commit()
+                    await _emit(job)
+                    stale_settled += 1
+                    continue
+                await recover_reservation_after_failure(db, job.reservation_id, job.user_id)
+                job = await repository.get_job(db, job.id) or job
+            else:
+                await release_reservation(db, job.reservation_id, job.user_id)
+                job = await repository.get_job(db, job.id) or job
+            job.status = "failed"
+            job.stage = "处理失败"
+            job.error = "服务中断时任务结果未能确认，积分已恢复，请重新提交"
+            job.queue_message_id = ""
+            await db.commit()
+            await _emit(job)
+            stale_failed += 1
+            continue
         message_id = schedule_content_job(job.id)
         await repository.record_job_message(db, job.id, message_id)
+        scheduled += 1
     if jobs:
-        logger.warning("content_jobs_recovered", count=len(jobs))
-    return len(jobs)
+        logger.warning(
+            "content_jobs_recovered",
+            scheduled=scheduled,
+            stale_failed=stale_failed,
+            stale_settled=stale_settled,
+        )
+    return scheduled
 
 
 async def _emit(job: ContentJob) -> None:

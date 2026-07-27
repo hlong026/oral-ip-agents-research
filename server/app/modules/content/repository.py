@@ -1,6 +1,8 @@
 """content 数据访问"""
 
-from sqlalchemy import select, update
+from datetime import datetime
+
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import ContentJob, Script, ScriptVersion
@@ -125,6 +127,17 @@ async def record_job_message(db: AsyncSession, job_id: str, message_id: str) -> 
     await db.commit()
 
 
-async def pending_jobs(db: AsyncSession) -> list[ContentJob]:
-    result = await db.execute(select(ContentJob).where(ContentJob.status == "pending"))
+async def recoverable_jobs(
+    db: AsyncSession,
+    *,
+    running_stale_before: datetime,
+) -> list[ContentJob]:
+    result = await db.execute(
+        select(ContentJob).where(
+            or_(
+                ContentJob.status == "pending",
+                (ContentJob.status == "running") & (ContentJob.updated_at < running_stale_before),
+            )
+        )
+    )
     return list(result.scalars().all())

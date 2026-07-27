@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T06:40:48.944Z
+ * API 版本：1.0.0 · 生成时间：2026-07-27T07:11:20.626Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -317,10 +317,6 @@ export interface NotificationOut {
   body: string;
   read: boolean;
   createdAt: string;
-}
-
-export interface OverrideIn {
-  artifacts: Record<string, string>;
 }
 
 export interface OverviewOut {

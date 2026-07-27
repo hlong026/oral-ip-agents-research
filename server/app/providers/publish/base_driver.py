@@ -8,6 +8,7 @@ import asyncio
 import uuid
 from typing import Any
 
+from app.core.distributed_semaphore import SemaphoreUnavailableError
 from app.core.logging import get_logger
 from app.core.storage import local_path
 from app.providers.base import StepRecoverableError
@@ -174,6 +175,8 @@ class SAUPublishDriverBase:
         try:
             async with BrowserSlot():
                 return await self._do_check_cookie(cookie_file)
+        except SemaphoreUnavailableError:
+            raise
         except Exception:
             return False
         finally:

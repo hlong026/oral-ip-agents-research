@@ -1,7 +1,6 @@
 """pipeline 路由（/pipelines，F-405/406）"""
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
@@ -19,10 +18,6 @@ from .schemas import (
 )
 
 router = APIRouter(prefix="/pipelines", tags=["pipeline"])
-
-
-class OverrideIn(BaseModel):
-    artifacts: dict[str, str]
 
 
 @router.post("", response_model=list[TaskOut])
@@ -111,18 +106,6 @@ async def retry_step(
 ) -> TaskOut:
     """单步重跑（F-405）"""
     return await service.retry_step(db, task_id, step, user_id, inp.quoteId if inp else None)
-
-
-@router.post("/{task_id}/steps/{step}/override", response_model=TaskOut)
-async def override_step(
-    task_id: str,
-    step: str,
-    inp: OverrideIn,
-    user_id: str = Depends(get_current_user_id),
-    db: AsyncSession = Depends(get_db),
-) -> TaskOut:
-    """人工覆盖产物，从下一步续跑（F-405）"""
-    return await service.override_step(db, task_id, step, user_id, inp.artifacts)
 
 
 @router.post("/{task_id}/confirm", response_model=TaskOut)

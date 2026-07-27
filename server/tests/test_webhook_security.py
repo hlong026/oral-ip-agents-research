@@ -61,10 +61,17 @@ async def test_forged_webhook_is_rejected_and_duplicate_event_is_dispatched_once
 async def test_webhook_dispatch_failure_persists_context(client: AsyncClient, monkeypatch) -> None:
     from app.modules.webhook import service as webhook_service
 
+    scheduled: list[tuple[str, int]] = []
+
     async def fail_dispatch(_db, _payload: dict) -> None:
         raise RuntimeError("provider timeout")
 
     monkeypatch.setattr(webhook_service, "_dispatch_callback", fail_dispatch)
+    monkeypatch.setattr(
+        webhook_service,
+        "_schedule_webhook_retry",
+        lambda event_id, delay_ms: scheduled.append((event_id, delay_ms)) or "retry-message",
+    )
     payload = {
         "event_id": "event-failed",
         "type": 2,
@@ -80,6 +87,8 @@ async def test_webhook_dispatch_failure_persists_context(client: AsyncClient, mo
     assert event.status == "failed"
     assert "task=provider-task-failed" in event.error_context
     assert "RuntimeError:provider timeout" in event.error_context
+    assert json.loads(event.payload_json)["task_id"] == "provider-task-failed"
+    assert scheduled == [(event.id, webhook_service.settings.webhook_retry_base_seconds * 1000)]
 
 
 async def test_failed_webhook_delivery_can_be_retried(client: AsyncClient, monkeypatch) -> None:
@@ -139,3 +148,44 @@ async def test_webhook_identity_collision_is_not_retried(client: AsyncClient, mo
 
     assert processed is False
     assert calls == 2
+
+
+async def test_internal_webhook_retry_does_not_require_provider_redelivery(client: AsyncClient, monkeypatch) -> None:
+    from app.modules.webhook import service as webhook_service
+
+    payload = {
+        "event_id": "event-internal-retry",
+        "type": 3,
+        "task_id": "provider-task-internal-retry",
+        "status": 3,
+    }
+    calls: list[str] = []
+
+    async def recovered_dispatch(_db, body: dict) -> None:
+        calls.append(str(body["task_id"]))
+
+    monkeypatch.setattr(webhook_service, "_dispatch_callback", recovered_dispatch)
+
+    async with SessionLocal() as db:
+        event = WebhookEvent(
+            provider="hifly",
+            event_id=payload["event_id"],
+            msg_type=3,
+            provider_task_id=payload["task_id"],
+            payload_hash="hash",
+            payload_json=json.dumps(payload),
+            status="failed",
+        )
+        db.add(event)
+        await db.commit()
+        event_id = event.id
+
+    processed = await webhook_service.retry_failed_event(event_id)
+
+    assert processed is True
+    assert calls == ["provider-task-internal-retry"]
+    async with SessionLocal() as db:
+        event = await db.get(WebhookEvent, event_id)
+    assert event is not None
+    assert event.status == "succeeded"
+    assert event.retry_count == 1

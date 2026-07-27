@@ -322,10 +322,6 @@ export const pipelineApi = {
     http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/retry`, {
       quoteId,
     }),
-  overrideStep: (id: string, step: string, artifacts: Record<string, string>) =>
-    http.post<PipelineTask>(`/pipelines/${id}/steps/${step}/override`, {
-      artifacts,
-    }),
   confirm: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/confirm`),
   cancel: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/cancel`),
   stats: () => http.get<TaskStats>("/pipelines/stats"),
@@ -364,9 +360,9 @@ export const publishApi = {
     http.delete<void>(`/publish/accounts/${accountId}`),
   renameAccount: (accountId: string, nickname: string) =>
     http.patch<PublishAccount>(`/publish/accounts/${accountId}`, { nickname }),
-  jobs: (status?: string, page = 1, pageSize = 20) =>
+  jobs: (status?: string, page = 1, pageSize = 20, taskId?: string) =>
     http.get<Page<PublishJob>>(
-      `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}`,
+      `/publish/jobs?page=${page}&pageSize=${pageSize}${status ? `&status=${status}` : ""}${taskId ? `&taskId=${encodeURIComponent(taskId)}` : ""}`,
     ),
   logs: (page = 1, pageSize = 50) =>
     http.get<Page<PublishJob>>(

@@ -25,7 +25,7 @@ const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
   reconciliation_required: { icon: Hand, cls: "text-warning" },
 };
 
-/** 单步时间线节点（重跑/人工覆盖入口） */
+/** 单步时间线节点（受控重跑入口） */
 function StepNode({
   task,
   step,
@@ -37,9 +37,6 @@ function StepNode({
   isLast: boolean;
   onAction: () => void;
 }) {
-  const [overrideOpen, setOverrideOpen] = useState(false);
-  const [overrideKey, setOverrideKey] = useState("");
-  const [overrideVal, setOverrideVal] = useState("");
   const [busy, setBusy] = useState(false);
   const [retryQuote, setRetryQuote] = useState<{
     quoteId: string;
@@ -54,12 +51,6 @@ function StepNode({
     task.status !== "running" &&
     task.status !== "reconciliation_required" &&
     (step.status === "failed" || step.status === "done");
-  const canOverride =
-    step.status !== "running" &&
-    task.status !== "running" &&
-    task.status !== "reconciliation_required" &&
-    task.status !== "done";
-
   const retry = async () => {
     setBusy(true);
     setActionError("");
@@ -87,20 +78,6 @@ function StepNode({
           error instanceof HttpError ? error.body.message : "步骤重跑失败",
         );
       }
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const override = async () => {
-    if (!overrideKey.trim()) return;
-    setBusy(true);
-    try {
-      await pipelineApi.overrideStep(task.id, step.step, {
-        [overrideKey.trim()]: overrideVal,
-      });
-      setOverrideOpen(false);
-      onAction();
     } finally {
       setBusy(false);
     }
@@ -136,15 +113,6 @@ function StepNode({
               className="btn-ghost px-2.5 py-0.5 text-xs"
             >
               重跑此步
-            </button>
-          )}
-          {canOverride && (
-            <button
-              onClick={() => setOverrideOpen((v) => !v)}
-              disabled={busy}
-              className="btn-ghost px-2.5 py-0.5 text-xs"
-            >
-              人工覆盖
             </button>
           )}
         </div>
@@ -202,35 +170,12 @@ function StepNode({
             )}
           </div>
         )}
-        {overrideOpen && (
-          <div className="glass-strong mt-3 flex flex-wrap items-center gap-2 p-3">
-            <input
-              className="input h-8 w-40 text-xs"
-              placeholder="产物键（如 script）"
-              value={overrideKey}
-              onChange={(e) => setOverrideKey(e.target.value)}
-            />
-            <input
-              className="input h-8 flex-1 text-xs"
-              placeholder="产物值（文本或 /media 链接）"
-              value={overrideVal}
-              onChange={(e) => setOverrideVal(e.target.value)}
-            />
-            <button
-              onClick={override}
-              disabled={busy || !overrideKey.trim()}
-              className="btn-primary px-3 py-1 text-xs"
-            >
-              覆盖并续跑
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
-/** 任务详情：成片预览为主 + 进度条弱化展示（F-405，步骤详情可展开重跑/覆盖） */
+/** 任务详情：成片预览为主 + 进度条弱化展示（F-405，步骤详情可展开重跑） */
 export default function TaskDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
@@ -342,7 +287,7 @@ export default function TaskDetailPage() {
             <Hand className="h-4 w-4" />
           </span>
           <span className="flex-1 text-sm">
-            当前步骤已完成，检查产物后确认继续（或直接重跑/覆盖）
+            当前步骤已完成，检查产物后确认继续；如有问题可重跑当前步骤
           </span>
           <button
             className="btn-primary px-5"
@@ -391,7 +336,7 @@ export default function TaskDetailPage() {
                 去剪辑精修
               </Link>
               <Link
-                to="/publish/jobs"
+                to={`/publish/jobs?task=${task.id}`}
                 className="btn-primary px-3 py-1.5 text-xs"
               >
                 去发布
@@ -509,7 +454,7 @@ export default function TaskDetailPage() {
           <ChevronDown
             className={`h-3.5 w-3.5 transition-transform ${detailsOpen ? "rotate-180" : ""}`}
           />
-          {detailsOpen ? "收起步骤详情" : "展开步骤详情（重跑 / 人工覆盖）"}
+          {detailsOpen ? "收起步骤详情" : "展开步骤详情（单步重跑）"}
         </button>
         {detailsOpen && (
           <div className="mt-4 border-t border-stroke pt-4">

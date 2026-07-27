@@ -1,5 +1,7 @@
 """publish 数据访问"""
 
+from datetime import datetime
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,11 +199,18 @@ async def record_queue_message(db: AsyncSession, job_id: str, message_id: str) -
 
 
 async def list_jobs(
-    db: AsyncSession, user_id: str, status: str | None, page: int, page_size: int
+    db: AsyncSession,
+    user_id: str,
+    status: str | None,
+    page: int,
+    page_size: int,
+    task_id: str = "",
 ) -> tuple[list[PublishJob], int]:
     cond = PublishJob.user_id == user_id
     if status:
         cond = cond & (PublishJob.status == status)
+    if task_id:
+        cond = cond & (PublishJob.task_id == task_id)
     total = (await db.execute(select(func.count(PublishJob.id)).where(cond))).scalar() or 0
     res = await db.execute(
         select(PublishJob)
@@ -213,10 +222,14 @@ async def list_jobs(
     return list(res.scalars().all()), int(total)
 
 
-async def list_recoverable_jobs(db: AsyncSession) -> list[PublishJob]:
+async def list_recoverable_jobs(
+    db: AsyncSession,
+    *,
+    publishing_stale_before: datetime,
+) -> list[PublishJob]:
     result = await db.execute(
         select(PublishJob).where(
-            (PublishJob.status == "publishing")
+            ((PublishJob.status == "publishing") & (PublishJob.updated_at < publishing_stale_before))
             | ((PublishJob.status == "queued") & (PublishJob.queue_message_id == ""))
         )
     )
