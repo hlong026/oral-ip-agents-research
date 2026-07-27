@@ -23,7 +23,15 @@ class PlanCreateIn(BaseModel):
     description: str = ""
     badge: str = Field(default="", max_length=32)
     sortOrder: int = 0
-    skuType: Literal["trial", "annual_bundle", "internal_annual", "points_pack"] = "annual_bundle"
+    skuType: Literal[
+        "trial",
+        "weekly_bundle",
+        "monthly_bundle",
+        "quarterly_bundle",
+        "annual_bundle",
+        "internal_annual",
+        "points_pack",
+    ] = "annual_bundle"
     audience: Literal["public", "internal"] = "public"
     durationDays: int = Field(default=365, ge=0)
     monthlyPoints: int = Field(default=0, ge=0)

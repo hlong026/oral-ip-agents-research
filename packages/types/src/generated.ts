@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T08:01:48.411Z
+ * API 版本：1.0.0 · 生成时间：2026-07-27T15:23:36.959Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -21,19 +21,6 @@ export interface AdminLoginIn {
   phone: string;
   password: string;
   deviceId?: string | null;
-}
-
-export interface AutomationConsentIn {
-  accountId: string;
-  accepted: boolean;
-  riskVersion: string;
-}
-
-export interface AutomationStatusOut {
-  accountId: string;
-  authorized: boolean;
-  riskVersion?: string;
-  acceptedAt?: string | null;
 }
 
 export interface AvatarOut {
@@ -171,26 +158,6 @@ export interface ContentJobOut {
   updatedAt: string;
 }
 
-export interface ConversationOut {
-  id: string;
-  accountId: string;
-  platform: string;
-  remoteUid: string;
-  remoteNickname: string;
-  remoteAvatar: string;
-  lastMessageAt: string;
-  unreadCount: number;
-  status: string;
-  createdAt: string;
-}
-
-export interface ConversationPageOut {
-  items: ConversationOut[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
 export interface CreatePipelineIn {
   ipId: string;
   sourceUrl?: string | null;
@@ -281,44 +248,6 @@ export interface KillSwitchIn {
 export interface KillSwitchOut {
   stopped: boolean;
   canceledMessages?: number;
-}
-
-export interface ListenerControlIn {
-  accountId: string;
-}
-
-export interface ListenerStatusOut {
-  accountId: string;
-  accountNickname?: string;
-  platform?: string;
-  status: string;
-  lastHeartbeat?: string | null;
-  errorMsg?: string;
-  startedAt?: string | null;
-}
-
-export interface MessageOut {
-  id: string;
-  conversationId: string;
-  direction: string;
-  msgType: number;
-  content: string;
-  autoReplied: boolean;
-  replyContent: string;
-  sendStatus: string;
-  sendError: string;
-  retryCount: number;
-  manualTakeover: boolean;
-  moderationStatus: string;
-  moderationReason: string;
-  createdAt: string;
-}
-
-export interface MessagePageOut {
-  items: MessageOut[];
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 export interface ModulePriceCatalogOut {
@@ -481,7 +410,14 @@ export interface PlanCreateIn {
   description?: string;
   badge?: string;
   sortOrder?: number;
-  skuType?: "trial" | "annual_bundle" | "internal_annual" | "points_pack";
+  skuType?:
+    | "trial"
+    | "weekly_bundle"
+    | "monthly_bundle"
+    | "quarterly_bundle"
+    | "annual_bundle"
+    | "internal_annual"
+    | "points_pack";
   audience?: "public" | "internal";
   durationDays?: number;
   monthlyPoints?: number;
@@ -707,55 +643,6 @@ export interface RewriteOut {
   validationPassed?: boolean;
 }
 
-export interface RuleCreateIn {
-  accountId?: string;
-  name: string;
-  triggerType?: string;
-  triggerPattern?: string;
-  replyMode?: string;
-  replyTemplate?: string;
-  llmPrompt?: string;
-  priority?: number;
-  dailyLimit?: number;
-  delayMin?: number;
-  delayMax?: number;
-  deliveryMode?: string;
-  enabled?: boolean;
-}
-
-export interface RuleOut {
-  id: string;
-  accountId: string;
-  name: string;
-  triggerType: string;
-  triggerPattern: string;
-  replyMode: string;
-  replyTemplate: string;
-  llmPrompt: string;
-  priority: number;
-  dailyLimit: number;
-  delayMin: number;
-  delayMax: number;
-  deliveryMode: string;
-  enabled: boolean;
-  createdAt: string;
-}
-
-export interface RuleUpdateIn {
-  name?: string | null;
-  triggerType?: string | null;
-  triggerPattern?: string | null;
-  replyMode?: string | null;
-  replyTemplate?: string | null;
-  llmPrompt?: string | null;
-  priority?: number | null;
-  dailyLimit?: number | null;
-  delayMin?: number | null;
-  delayMax?: number | null;
-  deliveryMode?: string | null;
-  enabled?: boolean | null;
-}
-
 export interface ScriptCreateIn {
   title?: string;
   text: string;
@@ -791,11 +678,6 @@ export interface ScriptVersionOut {
   modelName: string;
   promptVersion: string;
   createdAt: string;
-}
-
-export interface SendMessageIn {
-  content: string;
-  msgType?: number;
 }
 
 export interface SettingsIn {

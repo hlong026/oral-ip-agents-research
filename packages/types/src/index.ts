@@ -118,7 +118,13 @@ export interface QuotaUsageItem {
 }
 
 export type PlanSkuType =
-  "trial" | "annual_bundle" | "internal_annual" | "points_pack";
+  | "trial"
+  | "weekly_bundle"
+  | "monthly_bundle"
+  | "quarterly_bundle"
+  | "annual_bundle"
+  | "internal_annual"
+  | "points_pack";
 export type PlanAudience = "public" | "internal";
 export type BillingUnit =
   | "per_action"
