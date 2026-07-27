@@ -60,20 +60,20 @@ describe("provider configuration page", () => {
     );
 
     const heading = await screen.findByRole("heading", {
-      name: "Douyidou 视频解析",
+      name: "视频解析服务",
     });
     const section = heading.closest("section");
     expect(section).not.toBeNull();
     const form = within(section as HTMLElement);
-    const appId = form.getByLabelText("App ID");
+    const appId = form.getByLabelText("应用编号");
     await waitFor(() => {
       expect(appId).toHaveValue("existing-app-id");
       expect(
-        form.getByLabelText("App Secret（已保存，输入新密钥可替换）"),
+        form.getByLabelText("应用密钥（已保存，输入新密钥可替换）"),
       ).toHaveValue("");
     });
     expect(
-      form.getByLabelText("App Secret（已保存，输入新密钥可替换）"),
+      form.getByLabelText("应用密钥（已保存，输入新密钥可替换）"),
     ).toHaveAttribute("placeholder", "••••••••••••••••");
     expect(
       form.getByText("密钥已安全保存，服务端不会回传明文。"),
@@ -81,9 +81,8 @@ describe("provider configuration page", () => {
     expect(form.queryByLabelText("优先级")).not.toBeInTheDocument();
 
     fireEvent.change(appId, { target: { value: "new-app-id" } });
-    const appSecret = form.getByLabelText(
-      "App Secret（已保存，输入新密钥可替换）",
-    );
+    const appSecret =
+      form.getByLabelText("应用密钥（已保存，输入新密钥可替换）");
     fireEvent.change(appSecret, { target: { value: "new-app-secret" } });
     expect(appSecret).toHaveAttribute("type", "password");
     fireEvent.click(form.getByRole("button", { name: "显示密钥" }));
@@ -151,19 +150,19 @@ describe("provider configuration page", () => {
     );
 
     const heading = await screen.findByRole("heading", {
-      name: "DashScope ASR",
+      name: "语音识别服务",
     });
     const section = heading.closest("section");
     expect(section).not.toBeNull();
     const form = within(section as HTMLElement);
     await waitFor(() => {
-      expect(form.getByLabelText("Workspace ID（可选）")).toHaveValue(
+      expect(form.getByLabelText("工作空间编号（可选）")).toHaveValue(
         "workspace-old",
       );
     });
-    expect(form.queryByLabelText("Base URL")).not.toBeInTheDocument();
+    expect(form.queryByLabelText("服务地址")).not.toBeInTheDocument();
 
-    fireEvent.change(form.getByLabelText("Workspace ID（可选）"), {
+    fireEvent.change(form.getByLabelText("工作空间编号（可选）"), {
       target: { value: "workspace-new" },
     });
     fireEvent.change(form.getByLabelText("地域"), {
@@ -249,17 +248,17 @@ describe("provider configuration page", () => {
     );
 
     const deepseek = (
-      await screen.findByRole("heading", { name: "DeepSeek / LLM" })
+      await screen.findByRole("heading", { name: "大模型服务" })
     ).closest("section") as HTMLElement;
-    expect(await within(deepseek).findByText("缺少：API Key")).toBeVisible();
+    expect(await within(deepseek).findByText("缺少：接口密钥")).toBeVisible();
 
     const hifly = screen
-      .getByRole("heading", { name: "HiFly 数字人/声音" })
+      .getByRole("heading", { name: "数字人和声音服务" })
       .closest("section") as HTMLElement;
     fireEvent.click(within(hifly).getByRole("button", { name: "测试连接" }));
 
     const successToast = await screen.findByRole("status", {
-      name: "HiFly 数字人/声音连接测试成功",
+      name: "数字人和声音服务连接测试成功",
     });
     expect(successToast).toHaveTextContent("凭据有效，账户连接正常");
   });
@@ -313,12 +312,12 @@ describe("provider configuration page", () => {
     );
 
     const deepseek = (
-      await screen.findByRole("heading", { name: "DeepSeek / LLM" })
+      await screen.findByRole("heading", { name: "大模型服务" })
     ).closest("section") as HTMLElement;
     fireEvent.click(within(deepseek).getByRole("button", { name: "测试连接" }));
 
     const failureToast = await screen.findByRole("alert", {
-      name: "DeepSeek / LLM连接测试失败",
+      name: "大模型服务连接测试失败",
     });
     expect(failureToast).toHaveTextContent("连接失败：401 Unauthorized");
   });

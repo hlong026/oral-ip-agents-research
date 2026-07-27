@@ -30,7 +30,7 @@ export default function LoginPage() {
         onSubmit={submit}
       >
         <div>
-          <p className="text-sm text-brand-to">Admin Console</p>
+          <p className="text-sm text-brand-to">管理后台</p>
           <h1 className="mt-2 text-2xl font-semibold">管理员登录</h1>
           <p className="mt-2 text-sm text-text-3">
             管理套餐 SKU、积分价格、激活码和供应商配置。

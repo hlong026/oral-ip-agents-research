@@ -11,33 +11,91 @@ import {
 const fallbackProviders: ProviderConfig[] = [
   {
     provider: "deepseek",
-    displayName: "DeepSeek / LLM",
+    displayName: "大模型服务",
     enabled: false,
     baseUrl: "https://api.deepseek.com/v1",
     model: "deepseek-chat",
   },
   {
     provider: "dashscope_asr",
-    displayName: "DashScope ASR",
+    displayName: "语音识别服务",
     enabled: false,
     baseUrl: "https://dashscope.aliyuncs.com",
     model: "fun-asr",
   },
   {
     provider: "hifly",
-    displayName: "HiFly 数字人/声音",
+    displayName: "数字人和声音服务",
     enabled: false,
     baseUrl: "https://hfw-api.hifly.cc",
     model: "",
   },
   {
     provider: "douyidou",
-    displayName: "Douyidou 视频解析",
+    displayName: "视频解析服务",
     enabled: false,
     baseUrl: "https://gateway.diadi.cn",
     model: "",
   },
 ];
+
+const providerNames: Record<string, string> = {
+  deepseek: "大模型服务",
+  dashscope_asr: "语音识别服务",
+  hifly: "数字人和声音服务",
+  douyidou: "视频解析服务",
+};
+
+const missingFieldNames: Record<string, string> = {
+  "API Key": "接口密钥",
+  "App ID": "应用编号",
+  "App Secret": "应用密钥",
+  "Base URL": "服务地址",
+  "Workspace ID": "工作空间编号",
+};
+
+const environmentNames: Record<string, string> = {
+  dev: "开发环境",
+  test: "测试环境",
+  production: "生产环境",
+};
+
+const chainNames: Record<string, string> = {
+  llm: "大模型",
+  parse: "视频解析",
+  asr: "语音识别",
+  voice: "声音生成",
+  avatar: "数字人",
+  compose: "视频合成",
+  publish: "发布",
+};
+
+const runtimeProviderNames: Record<string, string> = {
+  "deepseek-v3": "深度求索大模型",
+  douyidou: "视频解析服务",
+  "aliyun-fun-asr": "阿里云语音识别",
+  "hifly-voice": "飞影声音服务",
+  "hifly-avatar": "飞影数字人服务",
+  "ffmpeg-local": "本地视频合成",
+  "third-party-parse": "第三方视频解析",
+  "sau-douyin": "抖音发布服务",
+  "sau-xiaohongshu": "小红书发布服务",
+  "sau-tencent": "视频号发布服务",
+  "mock-llm": "模拟大模型",
+  "mock-parse": "模拟视频解析",
+  "mock-faster-whisper": "模拟语音识别",
+  "mock-voice": "模拟声音服务",
+  "mock-avatar": "模拟数字人服务",
+  "mock-ffmpeg": "模拟视频合成",
+};
+
+function providerName(provider: string, fallback?: string) {
+  return providerNames[provider] ?? fallback ?? "未命名服务";
+}
+
+function formatMissingFields(fields: string[]) {
+  return fields.map((field) => missingFieldNames[field] ?? field).join("、");
+}
 
 type ProbeFeedback = {
   providerName: string;
@@ -66,29 +124,27 @@ export default function ProvidersPage() {
     mutationFn: (provider: ProviderConfig) =>
       adminApi.saveProvider(provider.provider, provider),
     onSuccess: async () => {
-      setMessage("Provider 配置已保存");
+      setMessage("服务商配置已保存");
       await queryClient.invalidateQueries({ queryKey: ["admin-providers"] });
     },
   });
   const probe = useMutation({
     mutationFn: adminApi.probeProvider,
     onSuccess: (result) => {
-      const providerName =
-        items.find((item) => item.provider === result.provider)?.displayName ||
-        result.provider;
+      const item = items.find(
+        (candidate) => candidate.provider === result.provider,
+      );
       const presentation = probePresentation(result);
       setProbeFeedback({
-        providerName,
+        providerName: providerName(result.provider, item?.displayName),
         message: result.message,
         ...presentation,
       });
     },
     onError: (probeError, provider) => {
-      const providerName =
-        items.find((item) => item.provider === provider)?.displayName ||
-        provider;
+      const item = items.find((candidate) => candidate.provider === provider);
       setProbeFeedback({
-        providerName,
+        providerName: providerName(provider, item?.displayName),
         title: "连接测试失败",
         message:
           probeError instanceof Error ? probeError.message : "连接测试失败",
@@ -114,7 +170,7 @@ export default function ProvidersPage() {
         />
       )}
       <div>
-        <h1 className="text-2xl font-semibold">Provider 配置</h1>
+        <h1 className="text-2xl font-semibold">服务商配置</h1>
         <p className="mt-2 text-sm text-text-3">
           密钥会加密保存在本地数据库；用户端只消费业务能力，不接触供应商凭据。
         </p>
@@ -135,15 +191,16 @@ export default function ProvidersPage() {
           <section key={provider.provider} className="glass space-y-4 p-5">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 className="font-semibold">{provider.displayName}</h2>
-                <p className="mt-1 text-xs text-text-3">{provider.provider}</p>
+                <h2 className="font-semibold">
+                  {providerName(provider.provider, provider.displayName)}
+                </h2>
                 <span className="chip mt-2">
                   {provider.configured ? "配置完整" : "配置不完整"}
                 </span>
                 {provider.missingFields &&
                   provider.missingFields.length > 0 && (
                     <p className="mt-2 text-xs text-warning">
-                      缺少：{provider.missingFields.join("、")}
+                      缺少：{formatMissingFields(provider.missingFields)}
                     </p>
                   )}
               </div>
@@ -160,14 +217,14 @@ export default function ProvidersPage() {
             </div>
             {provider.provider !== "dashscope_asr" && (
               <Field
-                label="Base URL"
+                label="服务地址"
                 value={provider.baseUrl}
                 onChange={(baseUrl) => update(index, { baseUrl })}
               />
             )}
             {provider.provider === "douyidou" && (
               <Field
-                label="App ID"
+                label="应用编号"
                 value={provider.appId || ""}
                 onChange={(appId) => update(index, { appId })}
               />
@@ -180,9 +237,7 @@ export default function ProvidersPage() {
               />
             )}
             <SecretField
-              label={
-                provider.provider === "douyidou" ? "App Secret" : "API Key"
-              }
+              label={provider.provider === "douyidou" ? "应用密钥" : "接口密钥"}
               value={provider.apiKey || ""}
               configured={Boolean(provider.apiKeyConfigured)}
               onChange={(apiKey) => update(index, { apiKey })}
@@ -190,7 +245,7 @@ export default function ProvidersPage() {
             {provider.provider === "dashscope_asr" && (
               <>
                 <Field
-                  label="Workspace ID（可选）"
+                  label="工作空间编号（可选）"
                   value={provider.workspaceId || ""}
                   onChange={(workspaceId) => update(index, { workspaceId })}
                 />
@@ -253,13 +308,6 @@ export default function ProvidersPage() {
   );
 }
 
-const readinessNames: Record<string, string> = {
-  deepseek: "DeepSeek / LLM",
-  dashscope_asr: "DashScope ASR",
-  hifly: "数字人/声音",
-  douyidou: "视频解析",
-};
-
 function ReadinessBoard() {
   const [withProbe, setWithProbe] = useState(false);
   const { data, isLoading, isFetching, refetch } = useQuery<ProviderReadiness>({
@@ -274,7 +322,7 @@ function ReadinessBoard() {
       </section>
     );
   }
-  // 后端升级中或代理返回旧结构时，不让辅助看板拖垮 Provider 配置主功能。
+  // 后端升级中或代理返回旧结构时，不让辅助看板拖垮服务商配置主功能。
   if (!data || !Array.isArray(data.items)) return null;
 
   const mockLeaked = data.providerMode === "mock_fallback";
@@ -311,12 +359,14 @@ function ReadinessBoard() {
         </div>
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
-        <span className="chip">环境：{data.env}</span>
+        <span className="chip">
+          环境：{environmentNames[data.env] ?? "未知环境"}
+        </span>
         <span
           className={`chip ${mockLeaked ? "border-warning/60 text-warning" : "border-success/60 text-success"}`}
         >
-          Provider 模式：
-          {mockLeaked ? "含 Mock 降级（仅限开发/测试）" : "全真实链路"}
+          服务商模式：
+          {mockLeaked ? "含模拟降级（仅限开发/测试）" : "全真实链路"}
         </span>
         <span
           className={`chip ${data.allReady ? "border-success/60 text-success" : "border-warning/60 text-warning"}`}
@@ -336,7 +386,7 @@ function ReadinessBoard() {
           >
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">
-                {readinessNames[item.provider] || item.provider}
+                {providerName(item.provider)}
               </span>
               {item.ready ? (
                 <Check className="h-4 w-4 text-success" />
@@ -350,7 +400,7 @@ function ReadinessBoard() {
                 配置：
                 {item.configured
                   ? "完整"
-                  : `缺少 ${item.missingFields.join("、")}`}
+                  : `缺少 ${formatMissingFields(item.missingFields)}`}
               </li>
               {item.probeStatus && (
                 <li>
@@ -367,7 +417,13 @@ function ReadinessBoard() {
         <ul className="mt-2 space-y-1">
           {Object.entries(providerChains).map(([kind, names]) => (
             <li key={kind}>
-              <span className="font-medium">{kind}</span>：{names.join(" → ")}
+              <span className="font-medium">
+                {chainNames[kind] ?? "其他服务"}
+              </span>
+              ：
+              {names
+                .map((name) => runtimeProviderNames[name] ?? "未命名服务")
+                .join(" → ")}
             </li>
           ))}
         </ul>

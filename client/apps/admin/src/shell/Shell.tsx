@@ -41,7 +41,7 @@ const navGroups: Array<{ title: string; items: NavItem[] }> = [
   },
   {
     title: "系统配置",
-    items: [{ to: "/providers", label: "Provider 配置", icon: ServerCog }],
+    items: [{ to: "/providers", label: "服务商配置", icon: ServerCog }],
   },
 ];
 
@@ -52,7 +52,7 @@ export default function Shell() {
     <div className="flex h-full">
       <aside className="flex w-64 flex-col border-r border-stroke bg-bg-1/80 px-4 py-5">
         <div className="mb-8">
-          <p className="text-xs text-text-3">ORAL IP AGENTS</p>
+          <p className="text-xs text-text-3">口播智能体</p>
           <h1 className="mt-1 text-lg font-semibold">管理控制台</h1>
         </div>
         <nav className="space-y-5 overflow-y-auto">
