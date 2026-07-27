@@ -4,6 +4,17 @@ import { useSession } from "@oral/stores";
 import { useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
+/** 套餐类型编码 → 用户可读名称 */
+const PLAN_TYPE_LABELS: Record<string, string> = {
+  trial: "试用体验",
+  weekly_bundle: "周会员",
+  monthly_bundle: "月度会员",
+  quarterly_bundle: "季度会员",
+  annual_bundle: "年度会员",
+  internal_annual: "内部年度",
+  points_pack: "积分加油包",
+};
+
 /** 登录页（激活码即账号：首次登录自动开户并绑定本设备） */
 export default function LoginPage() {
   const [code, setCode] = useState("");
@@ -96,7 +107,8 @@ export default function LoginPage() {
 
           {codeInfo?.valid && (
             <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
-              新激活码可用：{codeInfo.planType} 套餐 · {codeInfo.durationDays}{" "}
+              新激活码可用：{PLAN_TYPE_LABELS[codeInfo.planType] ?? codeInfo.planType}
+              套餐 · {codeInfo.durationDays}{" "}
               天 · {codeInfo.quotaAmount.toLocaleString()} 点算力
             </div>
           )}

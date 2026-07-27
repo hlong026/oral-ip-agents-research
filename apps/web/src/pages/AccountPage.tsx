@@ -4,6 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
+/** 套餐类型编码 → 用户可读名称（planName 缺失时兜底） */
+const PLAN_TYPE_LABELS: Record<string, string> = {
+  trial: "试用体验",
+  weekly_bundle: "周会员",
+  monthly_bundle: "月度会员",
+  quarterly_bundle: "季度会员",
+  annual_bundle: "年度会员",
+  internal_annual: "内部年度",
+  points_pack: "积分加油包",
+};
+
 /** 账号与额度（F-602：额度查询 / 用量明细 / CSV 导出） */
 export default function AccountPage() {
   const { user } = useSession();
@@ -77,7 +88,11 @@ export default function AccountPage() {
             <div>
               <div className="text-sm text-text-2">当前套餐</div>
               <div className="mt-1 text-lg font-bold text-text-1">
-                {subscription?.planName || subscription?.planType || "未激活"}
+                {subscription?.planName ||
+                  (subscription?.planType
+                    ? (PLAN_TYPE_LABELS[subscription.planType] ??
+                      subscription.planType)
+                    : "未激活")}
               </div>
             </div>
             <Link to="/pricing" className="btn-ghost px-3 py-1 text-xs">
