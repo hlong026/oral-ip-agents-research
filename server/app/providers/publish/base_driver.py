@@ -123,7 +123,11 @@ class SAUPublishDriverBase:
         scheduled_at: str | None = None,
         account_id: str = "",
     ) -> str:
-        """执行发布，返回 post_id（平台作品ID）"""
+        """执行发布，返回 post_id。
+
+        注意：SAU 浏览器发布无法取回平台真实作品 ID，子类返回的是哈希生成的
+        内部追踪号（postIdSource=internal），绝不可当作平台作品 ID 展示/跳转。
+        """
         # 1. Cookie → 临时文件
         import json
 
@@ -184,7 +188,7 @@ class SAUPublishDriverBase:
     async def _do_publish(
         self, cookie_file: str, video_path: str, title: str, topics: list[str], cover_path: str | None, publish_date
     ) -> str:
-        """执行平台发布（子类实现），返回 post_id"""
+        """执行平台发布（子类实现），返回内部追踪号（非平台作品 ID）"""
         raise NotImplementedError
 
     async def _do_check_cookie(self, cookie_file: str) -> bool:
