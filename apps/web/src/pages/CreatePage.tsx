@@ -1123,6 +1123,7 @@ export default function CreatePage() {
           rewrittenText: s.rewrittenText || "",
           scriptText: s.rewrittenText || s.originalText,
           scriptId: s.id,
+          title: s.title,
         }));
       });
       return;
@@ -1225,11 +1226,33 @@ export default function CreatePage() {
         setError("积分余额不足，请先兑换积分包或续费套餐");
         return;
       }
+      const scriptTitle =
+        wiz.title.trim() ||
+        wiz.topic.trim() ||
+        wiz.scriptText
+          .trim()
+          .split(/[。！？!?\n]/)[0]
+          ?.slice(0, 24) ||
+        "口播文案";
+      const savedScript = wiz.scriptId
+        ? await contentApi.updateScript(wiz.scriptId, {
+            title: scriptTitle,
+            text: wiz.scriptText,
+          })
+        : await contentApi.createScript({
+            title: scriptTitle,
+            text: wiz.scriptText,
+            platform: wiz.topic ? "topic" : "manual",
+            topic: wiz.topic || undefined,
+          });
       const tasks = await pipelineApi.create({
         ipId: current.id,
         sourceUrl: wiz.sourceUrl || undefined,
         topic: wiz.topic || undefined,
-        scriptText: wiz.scriptText || undefined,
+        scriptText:
+          savedScript.rewrittenText || savedScript.originalText || undefined,
+        scriptId: savedScript.id,
+        scriptVersion: savedScript.currentVersion,
         voiceId: wiz.voiceId || undefined,
         avatarId: wiz.avatarId || undefined,
         mode: wiz.mode,

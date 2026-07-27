@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T05:54:06.992Z
+ * API 版本：1.0.0 · 生成时间：2026-07-27T06:40:48.944Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -163,6 +163,8 @@ export interface CreatePipelineIn {
   sourceUrl?: string | null;
   topic?: string | null;
   scriptText?: string | null;
+  scriptId?: string | null;
+  scriptVersion?: number | null;
   voiceId?: string | null;
   avatarId?: string | null;
   mode?: string;
@@ -178,6 +180,13 @@ export interface CreditAdjustIn {
   points: number;
   reason: string;
   expiresAt?: string | null;
+}
+
+export interface EditConfigIn {
+  subtitleStyle?: SubtitleStyleIn;
+  bgmMode?: string;
+  bgmVolume?: number;
+  coverTemplate?: "bold-bottom" | "center-band" | "top-title" | "none";
 }
 
 export interface ExportOut {
@@ -206,6 +215,8 @@ export interface GrayAccountOut {
 export interface JobOut {
   id: string;
   taskId: string;
+  renderVersionId?: string;
+  renderVersion?: number;
   platform: string;
   platformName: string;
   accountId: string;
@@ -538,6 +549,13 @@ export interface QuotaOut {
   total: number;
 }
 
+export interface RecomposeIn {
+  quoteId: string;
+  idempotencyKey: string;
+  baseVersion: number;
+  config: EditConfigIn;
+}
+
 export interface ReconciliationIn {
   action: "release" | "settle" | "resume";
   reason: string;
@@ -559,6 +577,22 @@ export interface RedeemOut {
 export interface RefreshIn {
   refreshToken: string;
   deviceFingerprint?: string;
+}
+
+export interface RenderVersionOut {
+  id: string;
+  taskId: string;
+  version: number;
+  baseVersion: number;
+  status: string;
+  config: EditConfigIn;
+  videoUrl?: string | null;
+  coverUrl?: string | null;
+  quality?: Record<string, unknown>;
+  error?: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ReservationBatchOut {
@@ -701,6 +735,13 @@ export interface SubscriptionOut {
   quotaBalance?: number;
 }
 
+export interface SubtitleStyleIn {
+  fontSize?: number;
+  color?: string;
+  position?: "bottom" | "middle" | "top";
+  stroke?: number;
+}
+
 export interface SynthesizeIn {
   voiceId: string;
   text: string;
@@ -716,6 +757,8 @@ export interface SynthesizeOut {
 export interface TaskOut {
   id: string;
   ipId: string;
+  scriptId?: string;
+  scriptVersion?: number;
   title: string;
   coverUrl?: string | null;
   sourceUrl: string;
@@ -727,6 +770,7 @@ export interface TaskOut {
   quotaCost: number;
   error?: string;
   artifacts?: Record<string, unknown>;
+  activeRenderVersion?: number;
   batchId?: string | null;
   createdAt: string;
   updatedAt: string;

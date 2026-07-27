@@ -63,6 +63,8 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
     return JobOut(
         id=j.id,
         taskId=j.task_id,
+        renderVersionId=j.render_version_id,
+        renderVersion=j.render_version,
         platform=j.platform,
         platformName=PLATFORM_NAMES.get(j.platform, j.platform),
         accountId=j.account_id,
@@ -232,13 +234,27 @@ async def publish_task_video(
     cover_key: str | None,
     scheduled_at: str | None = None,
     topics: list[str] | None = None,
+    render_version_id: str = "",
+    render_version: int = 0,
 ) -> list[str]:
     """供 pipeline engine step_publish 调用：为各平台建发布任务并调度执行"""
     job_ids: list[str] = []
+    enqueue_ids: list[str] = []
+    notifications: list[tuple[str, str, str]] = []
     for platform in platforms:
         _check_platform(platform)
         topics_json = json.dumps(topics or [], ensure_ascii=False)
-        existing = await repo.get_task_platform_job(db, user_id, task_id, platform)
+        existing = (
+            await repo.get_task_render_platform_job(
+                db,
+                user_id,
+                task_id,
+                render_version_id,
+                platform,
+            )
+            if render_version_id
+            else None
+        ) or await repo.get_task_platform_job(db, user_id, task_id, platform)
         if existing is not None and _can_reuse_publish_job(
             existing,
             title=title,
@@ -247,69 +263,120 @@ async def publish_task_video(
             scheduled_at=scheduled_at or "",
             topics_json=topics_json,
         ):
+            if render_version_id and not existing.render_version_id:
+                existing.render_version_id = render_version_id
+                existing.render_version = render_version
             job_ids.append(existing.id)
             continue
+        mutable_existing = None
+        if existing is not None and render_version_id and existing.render_version_id == render_version_id:
+            if existing.status in {"queued", "publishing", "success"}:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "PUBLISH_ALREADY_STARTED",
+                        "message": f"{PLATFORM_NAMES[platform]}发布已开始，不能修改发布信息",
+                    },
+                )
+            existing.title = title
+            existing.video_key = video_key
+            existing.cover_key = cover_key or ""
+            existing.scheduled_at = scheduled_at or ""
+            existing.topics_json = topics_json
+            mutable_existing = existing
         capability = _capability(platform)
         if not capability.automaticEnabled:
-            job = await repo.create_job(
-                db,
-                user_id=user_id,
-                task_id=task_id,
-                platform=platform,
-                title=title,
-                topics_json=topics_json,
-                video_key=video_key,
-                cover_key=cover_key or "",
-                scheduled_at=scheduled_at or "",
-                status="export_ready",
-                error=capability.reason,
-            )
-            await notify_user(
-                db,
-                user_id,
-                "warn",
-                f"{PLATFORM_NAMES[platform]}任务等待人工发布",
-                "自动发布尚未完成真实验收，可在发布任务中下载完整发布包。",
+            if mutable_existing is not None:
+                job = mutable_existing
+                job.status = "export_ready"
+                job.error = capability.reason
+            else:
+                job = await repo.create_job(
+                    db,
+                    user_id=user_id,
+                    task_id=task_id,
+                    render_version_id=render_version_id,
+                    render_version=render_version,
+                    platform=platform,
+                    title=title,
+                    topics_json=topics_json,
+                    video_key=video_key,
+                    cover_key=cover_key or "",
+                    scheduled_at=scheduled_at or "",
+                    status="export_ready",
+                    error=capability.reason,
+                    commit=False,
+                )
+            notifications.append(
+                (
+                    "warn",
+                    f"{PLATFORM_NAMES[platform]}任务等待人工发布",
+                    "自动发布尚未完成真实验收，可在发布任务中下载完整发布包。",
+                )
             )
             job_ids.append(job.id)
             continue
         account = await repo.active_account_for(db, user_id, platform)
         if account is None:
+            if mutable_existing is not None:
+                job = mutable_existing
+            else:
+                job = await repo.create_job(
+                    db,
+                    user_id=user_id,
+                    task_id=task_id,
+                    render_version_id=render_version_id,
+                    render_version=render_version,
+                    platform=platform,
+                    title=title,
+                    video_key=video_key,
+                    cover_key=cover_key or "",
+                    topics_json=topics_json,
+                    status="failed",
+                    commit=False,
+                )
+            job.status = "failed"
+            job.error = f"未授权{PLATFORM_NAMES[platform]}账号，请到「发布-账号」扫码授权"
+            notifications.append(
+                (
+                    "error",
+                    f"{PLATFORM_NAMES[platform]}发布失败：未授权账号",
+                    "请到「发布-账号」扫码授权，或下载完整人工发布包。",
+                )
+            )
+            job_ids.append(job.id)
+            continue
+        if mutable_existing is not None:
+            job = mutable_existing
+            job.account_id = account.id
+            job.status = "queued"
+            job.error = ""
+            job.queue_message_id = ""
+        else:
             job = await repo.create_job(
                 db,
                 user_id=user_id,
                 task_id=task_id,
+                render_version_id=render_version_id,
+                render_version=render_version,
+                account_id=account.id,
                 platform=platform,
                 title=title,
                 video_key=video_key,
                 cover_key=cover_key or "",
                 topics_json=topics_json,
-                status="failed",
-                error=f"未授权{PLATFORM_NAMES[platform]}账号，请到「发布-账号」扫码授权",
+                scheduled_at=scheduled_at or "",
+                commit=False,
             )
-            await notify_user(
-                db,
-                user_id,
-                "error",
-                f"{PLATFORM_NAMES[platform]}发布失败：未授权账号",
-                "请到「发布-账号」扫码授权，或下载完整人工发布包。",
-            )
-            job_ids.append(job.id)
-            continue
-        job = await repo.create_job(
-            db,
-            user_id=user_id,
-            task_id=task_id,
-            account_id=account.id,
-            platform=platform,
-            title=title,
-            video_key=video_key,
-            cover_key=cover_key or "",
-            topics_json=topics_json,
-            scheduled_at=scheduled_at or "",
-        )
         job_ids.append(job.id)
-        await _enqueue_job(db, job)
+        enqueue_ids.append(job.id)
+    await db.commit()
+    for level, notification_title, body in notifications:
+        await notify_user(db, user_id, level, notification_title, body)
+    for job_id in enqueue_ids:
+        queued_job = await repo.get_job(db, job_id, user_id)
+        if queued_job is not None:
+            await _enqueue_job(db, queued_job)
     return job_ids
 
 
@@ -321,7 +388,7 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
         )
     from app.modules.pipeline import repository as pipeline_repo
 
-    task = await pipeline_repo.get(db, inp.taskId, user_id)
+    task = await pipeline_repo.get_for_update(db, inp.taskId, user_id)
     if task is None:
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
@@ -332,10 +399,12 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
             status.HTTP_409_CONFLICT,
             detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能创建发布任务"},
         )
-    artifacts = json.loads(task.artifacts_json or "{}")
-    video_key = str(artifacts.get("final_video_key") or "")
-    cover_key = str(artifacts.get("cover_key") or "")
-    quality = artifacts.get("quality")
+    from app.modules.pipeline.service import ensure_active_render_version
+
+    active_render = await ensure_active_render_version(db, task)
+    video_key = active_render.video_key
+    cover_key = active_render.cover_key
+    quality = json.loads(active_render.quality_json or "{}")
     if not video_key or not isinstance(quality, dict) or not quality.get("passed"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -356,6 +425,8 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
         cover_key or None,
         inp.publishAt,
         inp.topics,
+        active_render.id,
+        active_render.version,
     )
     jobs = []
     for jid in ids:
@@ -637,18 +708,37 @@ def _can_reuse_publish_job(
     scheduled_at: str,
     topics_json: str,
 ) -> bool:
-    same_payload = (
-        job.title == title
-        and job.video_key == video_key
-        and job.cover_key == cover_key
-        and job.scheduled_at == scheduled_at
-        and job.topics_json == topics_json
+    same_payload = _same_publish_payload(
+        job,
+        title=title,
+        video_key=video_key,
+        cover_key=cover_key,
+        scheduled_at=scheduled_at,
+        topics_json=topics_json,
     )
     if not same_payload:
         return False
     if job.status in {"queued", "publishing", "success", "export_ready"}:
         return True
     return job.status == "failed" and "发布结果未知" in job.error
+
+
+def _same_publish_payload(
+    job: PublishJob,
+    *,
+    title: str,
+    video_key: str,
+    cover_key: str,
+    scheduled_at: str,
+    topics_json: str,
+) -> bool:
+    return (
+        job.title == title
+        and job.video_key == video_key
+        and job.cover_key == cover_key
+        and job.scheduled_at == scheduled_at
+        and job.topics_json == topics_json
+    )
 
 
 def _check_platform(platform: str) -> None:

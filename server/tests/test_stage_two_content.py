@@ -86,6 +86,45 @@ async def test_manual_edit_appends_traceable_script_version() -> None:
     assert versions[-1].promptVersion == "manual"
 
 
+async def test_manual_edit_and_version_snapshot_commit_atomically(monkeypatch) -> None:
+    """版本快照失败时不得先推进 Script.current_version。"""
+    from app.modules.content import service
+
+    async with SessionLocal() as db:
+        created = await service.create_script(
+            db,
+            "stage2-atomic-version-user",
+            None,
+            "原始标题",
+            "原始正文",
+            "manual",
+            None,
+        )
+
+    async def fail_append(*_args, **_kwargs):
+        raise RuntimeError("version insert failed")
+
+    monkeypatch.setattr(content_repo, "append_version", fail_append)
+    async with SessionLocal() as db:
+        with pytest.raises(RuntimeError, match="version insert failed"):
+            await service.update_script(
+                db,
+                "stage2-atomic-version-user",
+                created.id,
+                title="不应落库的新标题",
+                text="不应落库的新正文",
+            )
+        await db.rollback()
+
+    async with SessionLocal() as db:
+        unchanged = await content_repo.get(db, created.id, "stage2-atomic-version-user")
+
+    assert unchanged is not None
+    assert unchanged.title == "原始标题"
+    assert unchanged.rewritten_text == ""
+    assert unchanged.current_version == 1
+
+
 async def test_script_versions_are_isolated_by_user() -> None:
     from app.modules.content import service
 
@@ -106,6 +145,75 @@ async def test_script_versions_are_isolated_by_user() -> None:
             assert exc.status_code == 404
         else:
             raise AssertionError("其他用户不应读取文案版本")
+
+
+async def test_pipeline_resolves_exact_saved_script_version() -> None:
+    from app.modules.content import service as content_service
+    from app.modules.pipeline.schemas import CreatePipelineIn
+    from app.modules.pipeline.service import resolve_script_snapshot
+
+    async with SessionLocal() as db:
+        created = await content_service.create_script(
+            db,
+            "stage2-pipeline-script-user",
+            None,
+            "口播终稿",
+            "来源原文",
+            "manual",
+            None,
+        )
+        saved = await content_service.update_script(
+            db,
+            "stage2-pipeline-script-user",
+            created.id,
+            title="口播终稿",
+            text="人工确认后的最终口播稿",
+        )
+        script_id, version, snapshot = await resolve_script_snapshot(
+            db,
+            "stage2-pipeline-script-user",
+            CreatePipelineIn(
+                ipId="test-ip",
+                scriptId=saved.id,
+                scriptVersion=saved.currentVersion,
+                scriptText="人工确认后的最终口播稿",
+            ),
+        )
+
+    assert script_id == created.id
+    assert version == 2
+    assert snapshot == "人工确认后的最终口播稿"
+
+
+async def test_pipeline_rejects_unsaved_script_text_against_version() -> None:
+    from app.modules.content import service as content_service
+    from app.modules.pipeline.schemas import CreatePipelineIn
+    from app.modules.pipeline.service import resolve_script_snapshot
+
+    async with SessionLocal() as db:
+        created = await content_service.create_script(
+            db,
+            "stage2-unsaved-script-user",
+            None,
+            "口播稿",
+            "已保存版本",
+            "manual",
+            None,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await resolve_script_snapshot(
+                db,
+                "stage2-unsaved-script-user",
+                CreatePipelineIn(
+                    ipId="test-ip",
+                    scriptId=created.id,
+                    scriptVersion=created.currentVersion,
+                    scriptText="仅存在浏览器内的未保存修改",
+                ),
+            )
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "SCRIPT_VERSION_MISMATCH"
 
 
 async def test_asr_routes_by_verified_duration(monkeypatch) -> None:

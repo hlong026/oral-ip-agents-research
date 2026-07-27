@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await seed_initial_price_catalog(db)
         from app.modules.avatar.service import recover_unknown_submissions as recover_unknown_avatar_submissions
         from app.modules.content.jobs import recover_pending_jobs
-        from app.modules.pipeline.service import recover_incomplete_tasks
+        from app.modules.pipeline.service import recover_incomplete_tasks, recover_render_versions
         from app.modules.publish.service import recover_publish_jobs
         from app.modules.voice.service import recover_unknown_submissions as recover_unknown_voice_submissions
 
@@ -63,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await recover_unknown_voice_submissions(db)
         await recover_unknown_avatar_submissions(db)
         await recover_incomplete_tasks(db)
+        await recover_render_versions(db)
         await recover_publish_jobs(db)
     # 发布模块：启动 Cookie 心跳检测后台任务
     from app.providers.publish.heartbeat import start_heartbeat

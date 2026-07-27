@@ -29,6 +29,13 @@ def run_pipeline_task(task_id: str, from_step: str | None = None) -> None:
     _run_async(run_task(task_id, from_step))
 
 
+@dramatiq.actor(queue_name="pipeline", max_retries=0, time_limit=1_800_000)
+def run_pipeline_render(render_id: str) -> None:
+    from app.modules.pipeline.render import run_render_version
+
+    _run_async(run_render_version(render_id))
+
+
 @dramatiq.actor(queue_name="content", max_retries=0, time_limit=1_800_000)
 def run_content_job(job_id: str) -> None:
     from app.modules.content.jobs import run_content_job as run

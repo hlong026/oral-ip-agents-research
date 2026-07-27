@@ -612,22 +612,7 @@ async def rewrite(
 
     # 落库
     if script_id:
-        s = await repo.get(db, script_id, user_id)
-        if s:
-            s.rewritten_text = result
-            s.similarity_score = final_score
-            s.current_version += 1
-            s.model_name = provider_name
-            s.prompt_version = PROMPT_VERSION
-            await repo.save(db, s)
-            await repo.append_version(
-                db,
-                s,
-                kind="model_rewrite",
-                text=result,
-                model_name=provider_name,
-                prompt_version=PROMPT_VERSION,
-            )
+        await _append_generated_version(db, user_id, script_id, result, provider_name, final_score)
 
     # 仿写完成：记录 INFO（§10.6.8-B #3）
     duration_ms = int((time.perf_counter() - start_time) * 1000)
@@ -807,23 +792,33 @@ async def update_script(
     title: str,
     text: str,
 ) -> ScriptOut:
-    script = await repo.get(db, script_id, user_id)
+    script = await repo.get_for_update(db, script_id, user_id)
     if not script:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "文案不存在"})
-    script.title = title.strip()
-    script.rewritten_text = text.strip()
+    clean_title = title.strip()
+    clean_text = text.strip()
+    if script.title == clean_title and (script.rewritten_text or script.original_text) == clean_text:
+        return to_out(script)
+    script.title = clean_title
+    script.rewritten_text = clean_text
     script.current_version += 1
     script.model_name = "human"
     script.prompt_version = "manual"
-    await repo.save(db, script)
-    await repo.append_version(
-        db,
-        script,
-        kind="manual_edit",
-        text=script.rewritten_text,
-        model_name="human",
-        prompt_version="manual",
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="manual_edit",
+            text=script.rewritten_text,
+            model_name="human",
+            prompt_version="manual",
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise
     return to_out(script)
 
 
@@ -877,19 +872,27 @@ def version_to_out(version: ScriptVersion) -> ScriptVersionOut:
 async def _create_script_with_source_version(db: AsyncSession, **fields) -> Script:
     script = await repo.create(
         db,
+        commit=False,
         current_version=1,
         model_name="source",
         prompt_version="source",
         **fields,
     )
-    await repo.append_version(
-        db,
-        script,
-        kind="source",
-        text=script.original_text,
-        model_name="source",
-        prompt_version="source",
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="source",
+            text=script.original_text,
+            model_name="source",
+            prompt_version="source",
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise
     return script
 
 
@@ -901,7 +904,7 @@ async def _append_generated_version(
     provider_name: str,
     similarity_score: float,
 ) -> None:
-    script = await repo.get(db, script_id, user_id)
+    script = await repo.get_for_update(db, script_id, user_id)
     if not script:
         return
     script.rewritten_text = text
@@ -909,12 +912,18 @@ async def _append_generated_version(
     script.current_version += 1
     script.model_name = provider_name
     script.prompt_version = PROMPT_VERSION
-    await repo.save(db, script)
-    await repo.append_version(
-        db,
-        script,
-        kind="model_rewrite",
-        text=text,
-        model_name=provider_name,
-        prompt_version=PROMPT_VERSION,
-    )
+    try:
+        await repo.append_version(
+            db,
+            script,
+            kind="model_rewrite",
+            text=text,
+            model_name=provider_name,
+            prompt_version=PROMPT_VERSION,
+            commit=False,
+        )
+        await db.commit()
+        await db.refresh(script)
+    except BaseException:
+        await db.rollback()
+        raise

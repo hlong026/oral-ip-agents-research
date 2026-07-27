@@ -532,15 +532,18 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
     """合成执行体：compose 首跑与 edit 步按剪辑台配置重合成共用（字幕样式/封面模板真链路）"""
     # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底
     words = ctx.get("tts_words") or ctx.get("words") or []
+    bgm_mode = str(ctx.get("bgm_mode") or "off")
+    bgm_volume = float(ctx.get("bgm_volume") or 0.0)
     inp = ComposeInput(
         video_key=ctx.get("avatar_video_key") or ctx.get("video_key") or "",
         audio_key=ctx.get("audio_key"),
         subtitle_words=[],  # 由 engine 转换
         subtitle_style=_subtitle_style_from_ctx(ctx),
-        bgm_key=None,
-        bgm_mode="auto",
+        bgm_key=str(ctx.get("bgm_key") or "") or None if bgm_mode == "custom" else None,
+        bgm_mode=bgm_mode,
         cover_text=_cover_text_from_ctx(task, ctx),
         cover_template=str(ctx.get("cover_template") or "bold-bottom"),
+        bgm_volume=max(0.0, min(bgm_volume, 1.0)),
         randomize=task.randomize,
     )
     from app.providers.base import WordTs
@@ -565,7 +568,9 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
 
 async def step_edit(task: PipelineTask, ctx: dict) -> dict:
     """剪辑步（第⑥步）：剪辑台保存过配置时按配置真实重新合成；否则 auto 跳过、manual 人工确认"""
-    has_config = bool(ctx.get("subtitle_style") or ctx.get("cover_template"))
+    has_config = bool(
+        ctx.get("subtitle_style") or ctx.get("cover_template") or ctx.get("bgm_key") or ctx.get("bgm_mode") == "off"
+    )
     if not has_config:
         if task.mode == "auto":
             return {"skipped": True, "note": "自动模式跳过剪辑步"}
@@ -825,6 +830,18 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             )
                             return
                     task.quota_cost = float(settled)
+                from app.modules.pipeline.service import ensure_active_render_version
+                from app.modules.publish import repository as publish_repo
+
+                active_render = await ensure_active_render_version(db, task)
+                await publish_repo.pin_task_render_version(
+                    db,
+                    user_id=task.user_id,
+                    task_id=task.id,
+                    video_key=active_render.video_key,
+                    render_version_id=active_render.id,
+                    render_version=active_render.version,
+                )
                 task.status = "done"
                 task.current_step = ""
                 await repo_save(db, task)

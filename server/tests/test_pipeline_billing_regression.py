@@ -1,5 +1,6 @@
 """Pipeline billing terminal-state regression matrix."""
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -13,7 +14,7 @@ from app.modules.auth.models import User
 from app.modules.billing.models import CreditLedger, CreditReservation, PriceQuote, QuotaAccount
 from app.modules.billing.service import grant_points, release_reservation, reserve_quote
 from app.modules.notify.models import Notification
-from app.modules.pipeline.models import PipelineTask
+from app.modules.pipeline.models import PipelineRenderVersion, PipelineTask
 
 
 async def _reserved_task() -> tuple[str, str, str]:
@@ -72,7 +73,17 @@ async def test_pipeline_success_settles_once(client, monkeypatch) -> None:
     from app.modules.pipeline import engine
 
     task_id, reservation_id, _ = await _reserved_task()
-    monkeypatch.setattr(engine, "STEP_RUNNERS", dict.fromkeys(engine.STEP_ORDER, _all_steps_succeed))
+    runners = dict.fromkeys(engine.STEP_ORDER, _all_steps_succeed)
+
+    async def compose_succeeds(*_args, **_kwargs) -> dict:
+        return {
+            "final_video_key": "compose/initial.mp4",
+            "cover_key": "compose/initial.jpg",
+            "quality": {"passed": True},
+        }
+
+    runners["compose"] = compose_succeeds
+    monkeypatch.setattr(engine, "STEP_RUNNERS", runners)
 
     await engine.run_task(task_id)
 
@@ -96,10 +107,24 @@ async def test_pipeline_success_settles_once(client, monkeypatch) -> None:
             .scalars()
             .first()
         )
+        render = (
+            await db.execute(
+                select(PipelineRenderVersion).where(
+                    PipelineRenderVersion.task_id == task_id,
+                    PipelineRenderVersion.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none()
     assert task is not None and task.status == "done"
     assert reservation is not None and reservation.status == "settled"
     assert settlements == 1
     assert notification is not None and "全流程完成" in notification.title
+    assert render is not None and render.version == 1 and render.status == "done"
+    assert render.reservation_id == reservation_id
+    assert task.active_render_version == 1
+    artifacts = json.loads(task.artifacts_json)
+    assert artifacts["render_version"] == 1
+    assert artifacts["render_version_id"] == render.id
 
 
 async def test_provider_failure_releases_pipeline_reservation(client, monkeypatch) -> None:

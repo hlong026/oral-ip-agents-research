@@ -72,10 +72,13 @@ async def delete_account(db: AsyncSession, account: PublishAccount) -> None:
     await db.commit()
 
 
-async def create_job(db: AsyncSession, **fields) -> PublishJob:
+async def create_job(db: AsyncSession, *, commit: bool = True, **fields) -> PublishJob:
     j = PublishJob(**fields)
     db.add(j)
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     await db.refresh(j)
     return j
 
@@ -99,6 +102,56 @@ async def get_task_platform_job(
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def get_task_render_platform_job(
+    db: AsyncSession,
+    user_id: str,
+    task_id: str,
+    render_version_id: str,
+    platform: str,
+) -> PublishJob | None:
+    if not task_id or not render_version_id:
+        return None
+    return (
+        await db.execute(
+            select(PublishJob)
+            .where(
+                PublishJob.user_id == user_id,
+                PublishJob.task_id == task_id,
+                PublishJob.render_version_id == render_version_id,
+                PublishJob.platform == platform,
+            )
+            .with_for_update()
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def pin_task_render_version(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    task_id: str,
+    video_key: str,
+    render_version_id: str,
+    render_version: int,
+) -> None:
+    """为流水线内已创建的发布任务补齐最终结算后的成片版本。"""
+    await db.execute(
+        update(PublishJob)
+        .where(
+            PublishJob.user_id == user_id,
+            PublishJob.task_id == task_id,
+            PublishJob.video_key == video_key,
+            PublishJob.render_version_id == "",
+        )
+        .values(
+            render_version_id=render_version_id,
+            render_version=render_version,
+        )
+        .execution_options(synchronize_session=False)
+    )
 
 
 async def get_job(db: AsyncSession, job_id: str, user_id: str | None = None) -> PublishJob | None:

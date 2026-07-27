@@ -2,7 +2,7 @@ import { contentApi } from "@oral/api-client";
 import type { RewriteIntensity } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   confirmMeteredOperation,
   textOperationUsage,
@@ -12,7 +12,7 @@ import {
 export default function ScriptDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
-  const { data: script } = useQuery({
+  const { data: script, refetch } = useQuery({
     queryKey: ["script", id],
     queryFn: () => contentApi.script(id),
   });
@@ -23,11 +23,15 @@ export default function ScriptDetailPage() {
     spans: { text: string; start: number; end: number }[];
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (script) {
       setText(script.rewrittenText || script.originalText);
       setSim(null);
+      setDirty(false);
     }
   }, [script]);
 
@@ -75,6 +79,31 @@ export default function ScriptDetailPage() {
     }
   };
 
+  const save = async () => {
+    if (!text.trim()) {
+      setError("终稿不能为空");
+      return null;
+    }
+    setLoading(true);
+    setError("");
+    setMessage("");
+    try {
+      const saved = await contentApi.updateScript(id, {
+        title: script.title || "未命名文案",
+        text,
+      });
+      setDirty(false);
+      setMessage(`终稿已保存为 v${saved.currentVersion}`);
+      await refetch();
+      return saved;
+    } catch {
+      setError("保存失败，请重试");
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   /** 去重高亮渲染：重复片段标红 */
   const renderHighlighted = () => {
     if (!sim || sim.spans.length === 0) return <span>{text}</span>;
@@ -115,12 +144,16 @@ export default function ScriptDetailPage() {
         <h1 className="min-w-0 flex-1 truncate text-xl font-bold">
           {script.title || "文案详情"}
         </h1>
-        <Link
-          to={`/create?step=script&scriptId=${id}`}
+        <button
+          onClick={async () => {
+            const saved = await save();
+            if (saved) navigate(`/create?step=script&scriptId=${id}`);
+          }}
+          disabled={loading || !text.trim()}
           className="btn-primary text-sm"
         >
           用它成片 →
-        </Link>
+        </button>
       </div>
 
       {/* 工具条 */}
@@ -156,6 +189,15 @@ export default function ScriptDetailPage() {
         >
           去重检测
         </button>
+        <button
+          onClick={() => void save()}
+          disabled={loading || !dirty || !text.trim()}
+          className="btn-primary px-3 py-1 text-xs"
+        >
+          保存终稿
+        </button>
+        {message && <span className="text-xs text-success">{message}</span>}
+        {error && <span className="text-xs text-danger">{error}</span>}
         {sim && (
           <span
             className={`chip border-current/40 ${sim.score < 30 ? "text-success" : sim.score < 60 ? "text-warning" : "text-danger"}`}
@@ -188,6 +230,8 @@ export default function ScriptDetailPage() {
             onChange={(e) => {
               setText(e.target.value);
               setSim(null);
+              setDirty(true);
+              setMessage("");
             }}
           />
         </div>

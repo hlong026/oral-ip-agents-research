@@ -8,7 +8,15 @@ from app.core.db import get_db
 from app.core.deps import get_current_user_id
 
 from . import service
-from .schemas import CreatePipelineIn, RetryStepIn, StatsOut, TaskOut, TaskPageOut
+from .schemas import (
+    CreatePipelineIn,
+    RecomposeIn,
+    RenderVersionOut,
+    RetryStepIn,
+    StatsOut,
+    TaskOut,
+    TaskPageOut,
+)
 
 router = APIRouter(prefix="/pipelines", tags=["pipeline"])
 
@@ -53,6 +61,35 @@ async def get_pipeline(
     db: AsyncSession = Depends(get_db),
 ) -> TaskOut:
     return await service.get_task(db, task_id, user_id)
+
+
+@router.get("/{task_id}/renders", response_model=list[RenderVersionOut])
+async def list_render_versions(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[RenderVersionOut]:
+    return await service.list_render_versions(db, task_id, user_id)
+
+
+@router.post("/{task_id}/recompose", response_model=RenderVersionOut)
+async def recompose(
+    task_id: str,
+    inp: RecomposeIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> RenderVersionOut:
+    return await service.recompose(db, task_id, user_id, inp)
+
+
+@router.post("/{task_id}/renders/{render_id}/cancel", response_model=RenderVersionOut)
+async def cancel_render(
+    task_id: str,
+    render_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> RenderVersionOut:
+    return await service.cancel_render(db, task_id, render_id, user_id)
 
 
 @router.post("/{task_id}/retry-quote")

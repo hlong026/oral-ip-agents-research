@@ -42,6 +42,8 @@ class PublishIn(BaseModel):
 class JobOut(BaseModel):
     id: str
     taskId: str
+    renderVersionId: str = ""
+    renderVersion: int = 0
     platform: str
     platformName: str
     accountId: str

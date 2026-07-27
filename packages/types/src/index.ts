@@ -332,6 +332,9 @@ export interface Script {
   originalText: string;
   rewrittenText: string;
   similarityScore: number;
+  currentVersion: number;
+  modelName: string;
+  promptVersion: string;
   status: string;
   createdAt: string;
 }
@@ -356,6 +359,8 @@ export interface StepState {
 export interface PipelineTask {
   id: string;
   ipId: string;
+  scriptId?: string;
+  scriptVersion?: number;
   title: string;
   coverUrl?: string | null;
   sourceUrl?: string;
@@ -367,7 +372,38 @@ export interface PipelineTask {
   quotaCost: number;
   error?: string;
   artifacts?: Record<string, unknown>;
+  activeRenderVersion?: number;
   batchId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SubtitleStyle {
+  fontSize: number;
+  color: string;
+  position: "bottom" | "middle" | "top";
+  stroke: number;
+}
+
+export interface EditConfig {
+  subtitleStyle: SubtitleStyle;
+  bgmMode: "off";
+  bgmVolume: 0;
+  coverTemplate: "bold-bottom" | "center-band" | "top-title" | "none";
+}
+
+export interface PipelineRenderVersion {
+  id: string;
+  taskId: string;
+  version: number;
+  baseVersion: number;
+  status: "pending" | "running" | "rendered" | "done" | "failed" | "canceled";
+  config: EditConfig;
+  videoUrl?: string | null;
+  coverUrl?: string | null;
+  quality: Record<string, unknown>;
+  error: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -408,6 +444,8 @@ export interface PublishAccount {
 export interface PublishJob {
   id: string;
   taskId: string;
+  renderVersionId?: string;
+  renderVersion?: number;
   platform: Platform;
   platformName: string;
   accountId: string;
