@@ -90,6 +90,11 @@ def _recent_probe_result(url: str) -> DouyidouParseResult | None:
     return result
 
 
+def _is_mock_provider(provider_name: str) -> bool:
+    """Mock 兜底 provider 只产占位数据，真实解析/转写场景必须拒收其结果。"""
+    return provider_name.startswith("mock-")
+
+
 def _is_public_media_url(value: str) -> bool:
     parsed = urlparse(value)
     hostname = parsed.hostname or ""
@@ -154,11 +159,16 @@ async def parse_url(
     cover = douyidou_result.cover if douyidou_result else None
 
     if not audio_url and not video_url:
-        # 降级链兜底
-        parse_result, _ = await registry.run_with_fallback("parse", registry.parse_chain, "parse_url", resolved.url)
-        video_url = parse_result.video_key
-        platform = parse_result.platform
-        title = parse_result.title
+        # 降级链兜底（Mock 产出的是占位视频，禁止流入真实转写，否则会静默落库假文案）
+        parse_result, parse_provider = await registry.run_with_fallback(
+            "parse", registry.parse_chain, "parse_url", resolved.url
+        )
+        if _is_mock_provider(parse_provider):
+            logger.warning(f"链接解析降级至 {parse_provider}，占位视频不可用于真实转写，转入文本兜底/失败提示")
+        else:
+            video_url = parse_result.video_key
+            platform = parse_result.platform
+            title = parse_result.title
 
     media_url = audio_url or video_url
     if not media_url and douyidou_result and douyidou_result.text:
@@ -197,6 +207,20 @@ async def parse_url(
     tr, provider_name = await registry.run_with_fallback(
         "asr", registry.asr_chain, "transcribe", media_url, duration_sec=duration_sec
     )
+    if _is_mock_provider(provider_name):
+        # 真实媒体被 Mock ASR 兜底 = 转写链路全挂，占位文案绝不能当真实转写结果
+        logger.warning(f"ASR 降级至 {provider_name}，拒绝将占位文案当作真实转写结果")
+        if douyidou_result and douyidou_result.text:
+            logger.warning("改用平台发布文本兜底")
+            return await _save_text_result(db, user_id, persona_id, resolved.url, douyidou_result)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "ASR_FAILED",
+                "message": "语音转写暂时不可用，请稍后重试、粘贴正文或上传本地文件",
+                "fallbacks": ["paste_text", "upload_file"],
+            },
+        )
     transcript = TranscriptOut(
         text=tr.text,
         duration=tr.duration,
@@ -229,7 +253,7 @@ async def parse_url(
 async def _save_text_result(
     db: AsyncSession, user_id: str, persona_id: str | None, source_url: str, result: DouyidouParseResult
 ) -> ParseOut:
-    """音视频不可用时，将 Douyidou 平台文本作为最后兜底。"""
+    """音视频不可用时，将 Douyidou 平台文本作为最后兜底（标记 degraded 供前端提示）。"""
     text = result.text or ""
     script = await _create_script_with_source_version(
         db,
@@ -244,7 +268,7 @@ async def _save_text_result(
     logger.info(f"平台文本兜底命中: platform={result.platform}, text_len={len(text)}")
     return ParseOut(
         transcript=TranscriptOut(text=text, words=[], duration=0, language="zh"),
-        degraded=False,
+        degraded=True,
         inputType="link",
         sourceStatus="ready",
         platform=result.platform,
@@ -364,7 +388,7 @@ async def parse_upload(
             },
         ) from exc
     try:
-        tr, _ = await registry.run_with_fallback(
+        tr, asr_provider = await registry.run_with_fallback(
             "asr", registry.asr_chain, "transcribe", media_input, duration_sec=duration_seconds
         )
     except ProviderError as exc:
@@ -381,6 +405,17 @@ async def parse_upload(
                 "fallbacks": ["paste_text", "retry_upload"],
             },
         ) from exc
+    if _is_mock_provider(asr_provider):
+        # 上传的是真实媒体文件，Mock 占位文案不能当作转写结果落库
+        logger.warning(f"上传转写降级至 {asr_provider}，拒绝占位文案")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "ASR_FAILED",
+                "message": "语音转写暂时不可用，请重试上传或直接粘贴正文",
+                "fallbacks": ["paste_text", "retry_upload"],
+            },
+        )
     script = await _create_script_with_source_version(
         db,
         user_id=user_id,

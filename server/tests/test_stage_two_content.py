@@ -410,6 +410,124 @@ async def test_upload_asr_failure_returns_actionable_fallback(monkeypatch) -> No
     assert exc_info.value.detail["fallbacks"] == ["paste_text", "retry_upload"]
 
 
+async def test_url_parse_rejects_mock_parse_placeholder(monkeypatch) -> None:
+    """上游解析全挂落到 mock-parse 时，不得用占位视频转写出假文案，必须返回可操作降级提示。"""
+    from app.modules.content import service
+    from app.providers.base import ParseResult
+
+    async def disabled(_provider_name: str) -> bool:
+        return False
+
+    async def mock_chain(*_args, **_kwargs):
+        return ParseResult(platform="douyin", title="占位", video_key="parsed/video.mp4.txt"), "mock-parse"
+
+    monkeypatch.setattr(service.registry, "provider_enabled", disabled)
+    monkeypatch.setattr(service.registry, "run_with_fallback", mock_chain)
+
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            await service.parse_url(db, "mock-guard-user", "https://www.douyin.com/video/mock-parse-guard", None)
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "LINK_SOURCE_UNAVAILABLE"
+    assert exc_info.value.detail["fallbacks"] == ["paste_text", "upload_file"]
+
+
+async def test_url_parse_mock_asr_falls_back_to_platform_text(monkeypatch) -> None:
+    """真实直链被 Mock ASR 兜底时，改用平台发布文本并标记 degraded。"""
+    from types import SimpleNamespace
+
+    from app.modules.content import service
+    from app.providers.base import TranscriptResult
+    from app.providers.douyidou import DouyidouParser, DouyidouParseResult
+
+    async def enabled(_provider_name: str) -> bool:
+        return True
+
+    async def fake_douyidou(self, _url: str, is_title: int = 0) -> DouyidouParseResult:
+        del self, is_title
+        return DouyidouParseResult(
+            platform="douyin",
+            title="真实标题",
+            text="平台发布文本兜底内容",
+            video_url="https://cdn.example.com/real-video.mp4",
+        )
+
+    async def mock_asr(_kind: str, _chain, _method: str, *_args, **_kwargs):
+        return TranscriptResult(text="MOCK 占位文案", words=[], duration=10), "mock-faster-whisper"
+
+    saved: dict[str, object] = {}
+
+    async def fake_create_script(_db, **kwargs):
+        saved.update(kwargs)
+        return SimpleNamespace(id="script-text-fallback")
+
+    monkeypatch.setattr(service.registry, "provider_enabled", enabled)
+    monkeypatch.setattr(DouyidouParser, "parse_url_full", fake_douyidou)
+    monkeypatch.setattr(service.registry, "run_with_fallback", mock_asr)
+    monkeypatch.setattr(service, "_create_script_with_source_version", fake_create_script)
+
+    parsed = await service.parse_url(
+        None,  # type: ignore[arg-type]
+        "mock-asr-user",
+        "https://www.douyin.com/video/mock-asr-guard",
+        None,
+        42,
+    )
+
+    assert parsed.degraded is True
+    assert parsed.transcript is not None
+    assert parsed.transcript.text == "平台发布文本兜底内容"
+    assert saved["original_text"] == "平台发布文本兜底内容"
+
+
+async def test_url_parse_mock_asr_without_platform_text_raises(monkeypatch) -> None:
+    """无平台文本可兜底时，Mock ASR 结果必须报错而非静默落库假文案。"""
+    from app.modules.content import service
+    from app.providers.base import ParseResult, TranscriptResult
+
+    async def disabled(_provider_name: str) -> bool:
+        return False
+
+    async def routed(kind: str, _chain, _method: str, *_args, **_kwargs):
+        if kind == "parse":
+            return (
+                ParseResult(platform="douyin", title="", video_key="https://cdn.example.com/v.mp4"),
+                "third-party-parse",
+            )
+        return TranscriptResult(text="MOCK 占位文案", words=[], duration=10), "mock-faster-whisper"
+
+    monkeypatch.setattr(service.registry, "provider_enabled", disabled)
+    monkeypatch.setattr(service.registry, "run_with_fallback", routed)
+
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            await service.parse_url(db, "mock-asr-fail-user", "https://www.douyin.com/video/mock-asr-fail", None, 42)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "ASR_FAILED"
+    assert exc_info.value.detail["fallbacks"] == ["paste_text", "upload_file"]
+
+
+async def test_upload_rejects_mock_asr_placeholder(monkeypatch) -> None:
+    """真实上传文件被 Mock ASR 兜底时，占位文案不得落库，必须报 ASR_FAILED。"""
+    from app.modules.content import service
+    from app.providers.base import TranscriptResult
+
+    async def mock_asr(*_args, **_kwargs):
+        return TranscriptResult(text="MOCK 占位文案", words=[], duration=10), "mock-faster-whisper"
+
+    monkeypatch.setattr(service.registry, "run_with_fallback", mock_asr)
+
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc_info:
+            await service.parse_upload(db, "mock-upload-user", "source.mp4", b"video", None, 3)
+
+    assert exc_info.value.status_code == 502
+    assert exc_info.value.detail["code"] == "ASR_FAILED"
+    assert exc_info.value.detail["fallbacks"] == ["paste_text", "retry_upload"]
+
+
 def test_upload_validation_rejects_unsupported_format() -> None:
     from app.modules.content.router import _validate_upload
 
