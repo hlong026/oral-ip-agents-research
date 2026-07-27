@@ -13,6 +13,7 @@ import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
   type ModulePrice,
+  type PipelineTask,
   type Platform,
   type PricePreview,
   type PricePreviewRequest,
@@ -30,7 +31,13 @@ import {
   TriangleAlert,
   Zap,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import LinkSourceInput from "../components/LinkSourceInput";
@@ -375,7 +382,8 @@ function StepScript({
   setWiz,
 }: {
   wiz: Wizard;
-  setWiz: (w: Wizard) => void;
+  // 本步需要函数式更新（自动标题候选），故用完整的 Dispatch 类型
+  setWiz: Dispatch<SetStateAction<Wizard>>;
 }) {
   const [loading, setLoading] = useState(false);
   const [operation, setOperation] = useState<
@@ -1143,6 +1151,20 @@ export default function CreatePage() {
     refetchIntervalInBackground: true,
   });
 
+  const task = wiz.taskId ? (liveTask ?? fetchedTask) : undefined;
+  const composeArtifacts = task?.steps.find(
+    (s) => s.step === "compose",
+  )?.artifacts;
+  const finalVideoKey = composeArtifacts?.final_video_key ?? "";
+  const coverKey = composeArtifacts?.cover_key ?? "";
+  const finalVideoUrl = getFinalVideoUrl(task);
+
+  // 检测任务是否已完成且拥有最终产物（用于容错显示）
+  const hasComposeResult = Boolean(
+    task?.steps.some((s) => s.step === "compose" && s.status === "done") &&
+    finalVideoKey
+  );
+
   // 当检测到任务已完成且有 compose 产物但缺少 finalVideoUrl 时，主动刷新
   useEffect(() => {
     if (
@@ -1157,19 +1179,6 @@ export default function CreatePage() {
       return () => clearTimeout(timer);
     }
   }, [hasComposeResult, finalVideoUrl, fetchedTask, refetchCreateTask]);
-  const task = wiz.taskId ? (liveTask ?? fetchedTask) : undefined;
-  const composeArtifacts = task?.steps.find(
-    (s) => s.step === "compose",
-  )?.artifacts;
-  const finalVideoKey = composeArtifacts?.final_video_key ?? "";
-  const coverKey = composeArtifacts?.cover_key ?? "";
-  const finalVideoUrl = getFinalVideoUrl(task);
-
-  // 检测任务是否已完成且拥有最终产物（用于容错显示）
-  const hasComposeResult = Boolean(
-    task?.steps.some((s) => s.step === "compose" && s.status === "done") &&
-    finalVideoKey
-  );
 
   // 合成前置产物校验：直达本步缺料时引导补齐对应步骤，绝不静默自动扣费
   const composeGap = !current
@@ -1189,7 +1198,8 @@ export default function CreatePage() {
           : null;
 
   // 获取最终视频 URL（优先从任务级 artifacts 取，降级到 compose 步骤级产物）
-  const getFinalVideoUrl = (task?: PipelineTask | null): string => {
+  // 使用函数声明以获得提升，避免上方 finalVideoUrl 计算时触发 TDZ 报错
+  function getFinalVideoUrl(task?: PipelineTask | null): string {
     if (!task) return "";
     // 优先级 1: 任务级 final_video_url（to_out() 生成带签名的 URL）
     if (typeof task.artifacts?.final_video_url === "string" && task.artifacts.final_video_url) {
@@ -1202,7 +1212,7 @@ export default function CreatePage() {
       return "";
     }
     return "";
-  };
+  }
 
   useEffect(() => {
     setQuote(null);
