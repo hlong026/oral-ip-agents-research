@@ -1,0 +1,9 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+  worker:
+    build:
+      context: .
+      dockerfile: server/Dockerfile

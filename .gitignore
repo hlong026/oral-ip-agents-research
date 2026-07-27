@@ -45,6 +45,11 @@ server/*.db
 server/_tmp_*
 tmp_*
 reports/inoreader-rss-*.md
+nohup.out
+init_sqlite.py
+
+# 前端旧副本（已迁移至 apps/）
+client/
 
 # os / ide
 .DS_Store
