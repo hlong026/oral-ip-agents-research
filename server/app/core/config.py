@@ -43,9 +43,9 @@ class Settings(BaseSettings):
 
     # 激活码
     activation_secret: str = ""  # 激活码 HMAC 签名密钥（空则回退 app_secret）
-    activation_failure_limit: int = 5
-    activation_rate_window_seconds: int = 600
-    activation_lock_seconds: int = 900
+    activation_failure_limit: int = 10  # 10 分钟窗口内失败满 10 次即锁定
+    activation_rate_window_seconds: int = 600  # 10 分钟滑动窗口
+    activation_lock_seconds: int = 900  # 锁定 15 分钟
 
     # LLM
     deepseek_api_key: str = ""
