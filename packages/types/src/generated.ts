@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T04:47:45.884Z
+ * API 版本：1.0.0 · 生成时间：2026-07-27T05:30:06.292Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -215,6 +215,7 @@ export interface JobOut {
   scheduledAt?: string | null;
   error?: string;
   postId?: string;
+  postIdSource?: string;
   videoUrl?: string | null;
   packageUrl?: string | null;
   retryCount?: number;
@@ -476,6 +477,25 @@ export interface ProviderProbeOut {
   status: "verified" | "failed" | "incomplete" | "needs_sample";
   message: string;
   details?: Record<string, unknown>;
+}
+
+export interface ProviderReadinessItem {
+  provider: string;
+  enabled: boolean;
+  configured: boolean;
+  missingFields: string[];
+  ready: boolean;
+  probeStatus?: string;
+  probeMessage?: string;
+}
+
+export interface ProviderReadinessOut {
+  env: string;
+  providerMode: string;
+  mockFallbackAllowed: boolean;
+  providerChains: Record<string, string[]>;
+  items: ProviderReadinessItem[];
+  allReady: boolean;
 }
 
 export interface ProviderStatusItem {

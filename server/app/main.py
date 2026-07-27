@@ -209,7 +209,8 @@ app.include_router(ws_router)
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
 
 
-@app.api_route("/media/{key:path}", methods=["GET", "HEAD"], name="media")
+@app.head("/media/{key:path}", include_in_schema=False)
+@app.get("/media/{key:path}", name="media")
 async def media_file(key: str, request: Request) -> Response:
     try:
         total = await storage.size(key)

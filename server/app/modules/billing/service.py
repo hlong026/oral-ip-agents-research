@@ -23,16 +23,9 @@ logger = get_logger("oral.billing")
 
 
 async def grant_initial_quota(db: AsyncSession, user_id: str) -> None:
-    from app.core.dynamic_config import get_dynamic_config
+    from app.core.dynamic_config import get_config_float
 
-    initial_grant = DEFAULT_INITIAL_GRANT
-    try:
-        cfg = await get_dynamic_config()
-        val = cfg.get("initial_grant_points")
-        if val is not None and isinstance(val, (int, float)):
-            initial_grant = val
-    except Exception:  # fallback to default
-        pass
+    initial_grant = await get_config_float("initial_grant_points", DEFAULT_INITIAL_GRANT)
     await grant_points(
         db,
         user_id,

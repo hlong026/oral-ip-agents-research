@@ -69,9 +69,7 @@ async def list_users(
     user_ids = [user.id for user, _ in users]
     code_masked: dict[str, str] = {}
     if user_ids:
-        codes = (
-            await db.execute(select(ActivationCode).where(ActivationCode.bound_user_id.in_(user_ids)))
-        ).scalars()
+        codes = (await db.execute(select(ActivationCode).where(ActivationCode.bound_user_id.in_(user_ids)))).scalars()
         for code in codes:
             masked = f"{code.code[:4].upper()}****{code.code[-4:].upper()}"
             if code.channel:

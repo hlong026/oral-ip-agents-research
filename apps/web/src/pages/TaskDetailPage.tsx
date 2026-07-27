@@ -443,8 +443,7 @@ export default function TaskDetailPage() {
           </span>
           <div className="flex-1" />
           <span className="text-xs font-medium text-text-2">{overallPct}%</span>
-          {(task.status === "running" ||
-            task.status === "waiting_confirm") && (
+          {(task.status === "running" || task.status === "waiting_confirm") && (
             <button
               className="btn-danger px-3 py-1 text-xs"
               onClick={async () => {

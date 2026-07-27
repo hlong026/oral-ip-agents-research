@@ -514,10 +514,7 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         outline = max(0, min(8, round(float(stroke))))
     except (TypeError, ValueError):
         outline = 3
-    return (
-        f"Style: Default,Arial,{font_size},{primary},&H00000000,1,"
-        f"{outline},0,{alignment},60,60,{margin_v},1"
-    )
+    return f"Style: Default,Arial,{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
 
 
 # 字幕分行：硬断句标点立即换行；软断句标点行长达标后换行；停顿间隙/行长上限兜底

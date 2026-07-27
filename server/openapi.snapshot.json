@@ -25,6 +25,27 @@
         }
       }
     },
+    "/readyz": {
+      "get": {
+        "summary": "Readyz",
+        "description": "部署验证端点：暴露运行环境、provider 模式与各链名单，切生产后用于确认零 Mock",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Readyz Readyz Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": ["auth"],
@@ -4102,6 +4123,53 @@
         ]
       }
     },
+    "/api/admin/v1/providers/readiness": {
+      "get": {
+        "tags": ["admin-providers"],
+        "summary": "Get Provider Readiness Api",
+        "description": "供应商就绪度看板（切生产前人工核对清单）：\n逐项汇总 Key 配置/开关状态，probe=true 时附带连通性探测；同时暴露运行时 provider 链名单。",
+        "operationId": "get_provider_readiness_api_api_admin_v1_providers_readiness_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "probe",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Probe"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderReadinessOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/providers/{provider}/probe": {
       "post": {
         "tags": ["admin-providers"],
@@ -5832,6 +5900,11 @@
             "title": "Postid",
             "default": ""
           },
+          "postIdSource": {
+            "type": "string",
+            "title": "Postidsource",
+            "default": ""
+          },
           "videoUrl": {
             "anyOf": [
               {
@@ -7209,6 +7282,99 @@
         "type": "object",
         "required": ["provider", "status", "message"],
         "title": "ProviderProbeOut"
+      },
+      "ProviderReadinessItem": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "missingFields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missingfields"
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready"
+          },
+          "probeStatus": {
+            "type": "string",
+            "title": "Probestatus",
+            "default": ""
+          },
+          "probeMessage": {
+            "type": "string",
+            "title": "Probemessage",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "enabled",
+          "configured",
+          "missingFields",
+          "ready"
+        ],
+        "title": "ProviderReadinessItem"
+      },
+      "ProviderReadinessOut": {
+        "properties": {
+          "env": {
+            "type": "string",
+            "title": "Env"
+          },
+          "providerMode": {
+            "type": "string",
+            "title": "Providermode"
+          },
+          "mockFallbackAllowed": {
+            "type": "boolean",
+            "title": "Mockfallbackallowed"
+          },
+          "providerChains": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Providerchains"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderReadinessItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "allReady": {
+            "type": "boolean",
+            "title": "Allready"
+          }
+        },
+        "type": "object",
+        "required": [
+          "env",
+          "providerMode",
+          "mockFallbackAllowed",
+          "providerChains",
+          "items",
+          "allReady"
+        ],
+        "title": "ProviderReadinessOut"
       },
       "ProviderStatusItem": {
         "properties": {

@@ -158,7 +158,7 @@ def render_cover(
     """在视频帧上按模板叠加标题层，输出 JPEG 字节（CPU 密集，调用方走 to_thread）"""
     image = Image.open(BytesIO(frame_bytes)).convert("RGB")
     if image.size != (width, height):
-        image = image.resize((width, height), Image.LANCZOS)
+        image = image.resize((width, height), Image.Resampling.LANCZOS)
 
     spec = COVER_TEMPLATES.get(template)
     if spec is None:

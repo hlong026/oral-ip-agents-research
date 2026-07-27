@@ -7,7 +7,6 @@ Provider 抽象层（06 文档 §10.3）：七类 Protocol，防供应商锁定�
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-
 MOCK_PROVIDER_PREFIX = "mock-"
 
 

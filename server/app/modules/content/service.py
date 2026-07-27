@@ -23,7 +23,8 @@ from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
 from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
 from app.core.white_label import public_model_name
-from app.providers.base import ProviderError, is_mock_provider as _is_mock_provider
+from app.providers.base import ProviderError
+from app.providers.base import is_mock_provider as _is_mock_provider
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
 from app.providers.registry import registry

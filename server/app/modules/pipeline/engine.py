@@ -15,9 +15,6 @@ import mimetypes
 import time
 from datetime import UTC, datetime
 
-from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
@@ -840,91 +837,3 @@ def schedule_run(task_id: str, from_step: str | None = None) -> str:
 
     message = run_pipeline_task.send(task_id, from_step)
     return message.message_id
-
-
-async def handle_compose_callback(db: AsyncSession, task_id: str, status_code: int) -> None:
-    """飞影合成视频完成回调：按 task_id 定位 pipeline 任务，根据 status_code 推进 avatar 步骤状态。
-
-    status_code==0（进行中）被轮询兜底；本处仅处理完成态（status_code!=0）。
-    幂等：若任务不处于 avatar 待确认状态则忽略。
-    """
-    from sqlalchemy import select
-
-    repo_save = get_settings().storage_driver.job_repository.save_job
-
-    stmt = select(PipelineTask).where(PipelineTask.id == task_id)
-    result = await db.execute(stmt)
-    task = result.scalar_one_or_none()
-
-    if not task:
-        logger.warning("compose callback: no pipeline task found", task_id=task_id)
-        return
-
-    if task.status != "waiting_confirm":
-        # 幂等：非等待确认态直接忽略
-        return
-
-    # 状态转换：success/fail → step_done / failed
-    ctx = json.loads(task.steps_json or "[]")
-    avatar_result = ctx.get("avatar") or {}
-
-    if status_code == 0:
-        # 继续合成中：轮询兜底，此处不干预
-        logger.info("compose callback: still synthesizing", task_id=task_id, status_code=status_code)
-        return
-
-    if status_code != 1:
-        # 失败：标记 avatar 步失败并推进任务状态为 failed
-        avatar_result.update({"degraded_mock": True, "error": f"飞影合成失败：{status_code}"})
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "飞影合成失败，请稍后重试"
-        await db.commit()
-        logger.error("compose callback: avatar failed", task_id=task_id, status_code=status_code)
-        return
-
-    # success (status_code==1): 将合成结果视频下载转存，更新 avatar 产物并推进任务状态
-    video_url: str | None = avatar_result.get("videoUrl")
-    if not video_url:
-        # 无视频 URL 视为失败
-        avatar_result.update({"degraded_mock": True, "error": "飞影返回视频链接为空"})
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "合成成功但未返回视频链接，请检查飞影配置"
-        await db.commit()
-        logger.error("compose callback: no video url in result", task_id=task_id)
-        return
-
-    try:
-        # 从远程 URL 下载并转存到本地存储（使用已有 download_file + storage driver 的 put/get）
-        from app.core.storage import download_file
-
-        video_key = f"compose/{task.user_id}/{task_id}/avatar.mp4"
-        temp_local = await download_file(video_url)  # 返回本地临时路径
-        async with get_settings().storage_driver.open(video_key, "wb") as f:
-            with open(temp_local, "rb") as src:
-                await f.write(src.read())
-        # 清理临时文件
-        import os
-
-        os.unlink(temp_local)
-        # 构造视频访问地址
-        video_public_url = f"/media/{video_key}"
-
-        # 更新产物
-        avatar_result["videoUrl"] = video_public_url
-        avatar_result["degraded_mock"] = False
-        ctx["avatar"] = avatar_result
-        task.steps_json = json.dumps(ctx)
-        task.status = "done"
-        task.current_step = ""
-        await db.commit()
-        logger.info("compose callback: avatar succeeded and video downloaded", task_id=task_id)
-        # TODO: 发送用户通知
-    except Exception:
-        # 下载失败：记录错误但不覆盖飞影的成功状态，留给人工
-        task.steps_json = json.dumps(ctx)
-        task.status = "failed"
-        task.error = "合成成功但下载视频失败，请联系运营核查"
-        await db.commit()
-        logger.exception("compose callback: failed to download video", task_id=task_id)

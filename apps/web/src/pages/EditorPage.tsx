@@ -21,8 +21,16 @@ const BGM_MODES = [
 
 // 封面模板：key 与服务端 cover.COVER_TEMPLATES 一致（帧底图 + 槽位 + 标题自动排版）
 const COVER_TEMPLATES = [
-  { key: "bold-bottom", label: "大字标题", desc: "底部压暗 + 超大粗体，爆点词黄色高亮" },
-  { key: "center-band", label: "居中色带", desc: "品牌色横带 + 居中标题，正式感" },
+  {
+    key: "bold-bottom",
+    label: "大字标题",
+    desc: "底部压暗 + 超大粗体，爆点词黄色高亮",
+  },
+  {
+    key: "center-band",
+    label: "居中色带",
+    desc: "品牌色横带 + 居中标题，正式感",
+  },
   { key: "top-title", label: "顶部标题", desc: "适配底部被平台 UI 遮挡的场景" },
   { key: "none", label: "原始帧", desc: "不叠加文字，直接用视频帧" },
 ] as const;
@@ -109,8 +117,7 @@ export default function EditorPage() {
   };
   const videoKey =
     detailArt("final_video_key") ??
-    detail?.steps.find((s) => s.step === "compose")?.artifacts
-      ?.final_video_key;
+    detail?.steps.find((s) => s.step === "compose")?.artifacts?.final_video_key;
   const script =
     detailArt("script") ??
     detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ??

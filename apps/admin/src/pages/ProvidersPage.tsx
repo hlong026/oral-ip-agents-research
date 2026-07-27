@@ -274,9 +274,11 @@ function ReadinessBoard() {
       </section>
     );
   }
-  if (!data) return null;
+  // 后端升级中或代理返回旧结构时，不让辅助看板拖垮 Provider 配置主功能。
+  if (!data || !Array.isArray(data.items)) return null;
 
   const mockLeaked = data.providerMode === "mock_fallback";
+  const providerChains = data.providerChains ?? {};
   return (
     <section className="glass space-y-4 p-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -363,7 +365,7 @@ function ReadinessBoard() {
       <details className="text-xs text-text-3">
         <summary className="cursor-pointer">运行时降级链名单</summary>
         <ul className="mt-2 space-y-1">
-          {Object.entries(data.providerChains).map(([kind, names]) => (
+          {Object.entries(providerChains).map(([kind, names]) => (
             <li key={kind}>
               <span className="font-medium">{kind}</span>：{names.join(" → ")}
             </li>
