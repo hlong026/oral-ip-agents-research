@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>视频剪辑 · 线稿图与链路分析</title>
+<style>
+  :root {
+    --ink: #2F3437;
+    --ink-soft: #787774;
+    --line: #EAEAEA;
+    --wire: #B8B4AD;
+    --wire-dark: #8A867F;
+    --bone: #F7F6F3;
+    --paper: #FFFFFF;
+    --red-bg: #FDEBEC; --red-tx: #9F2F2D;
+    --blue-bg: #E1F3FE; --blue-tx: #1F6C9F;
+    --green-bg: #EDF3EC; --green-tx: #346538;
+    --yellow-bg: #FBF3DB; --yellow-tx: #956400;
+    --serif: 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Playfair Display', serif;
+    --sans: 'PingFang SC', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    --mono: 'SF Mono', 'JetBrains Mono', monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bone);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.6;
+    padding: 72px 0 120px;
+  }
+  .page { max-width: 1080px; margin: 0 auto; padding: 0 40px; }
+
+  /* ── 编辑感标题 ── */
+  .kicker {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
+    color: var(--ink-soft); text-transform: uppercase; margin-bottom: 14px;
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600; font-size: 42px;
+    letter-spacing: -0.02em; line-height: 1.15; margin-bottom: 10px;
+  }
+  .sub { color: var(--ink-soft); font-size: 15px; max-width: 640px; }
+  section { margin-top: 88px; }
+  h2 {
+    font-family: var(--serif); font-weight: 600; font-size: 26px;
+    letter-spacing: -0.01em; padding-bottom: 14px;
+    border-bottom: 1px solid var(--line); margin-bottom: 8px;
+  }
+  .h2-note { font-size: 13px; color: var(--ink-soft); margin-bottom: 32px; }
+  .h2-note code { font-family: var(--mono); font-size: 12px; background: #EFEDE8; padding: 1px 6px; border-radius: 4px; }
+
+  .tag {
+    display: inline-block; border-radius: 9999px; font-size: 10.5px;
+    letter-spacing: .06em; padding: 2px 10px; font-weight: 500; vertical-align: 2px;
+  }
+  .tag.ok   { background: var(--green-bg); color: var(--green-tx); }
+  .tag.gap  { background: var(--red-bg);  color: var(--red-tx); }
+  .tag.info { background: var(--blue-bg); color: var(--blue-tx); }
+  .tag.warn { background: var(--yellow-bg); color: var(--yellow-tx); }
+
+  /* ── 链路泳道 ── */
+  .flow { display: grid; grid-template-columns: 1fr; gap: 0; }
+  .lane { display: grid; grid-template-columns: 96px 1fr; border-bottom: 1px solid var(--line); padding: 28px 0; }
+  .lane:last-child { border-bottom: none; }
+  .lane-name { font-family: var(--serif); font-size: 15px; color: var(--ink); padding-top: 18px; }
+  .lane-name small { display: block; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); letter-spacing: .08em; margin-top: 4px; }
+  .lane-track { display: flex; align-items: stretch; gap: 0; flex-wrap: nowrap; overflow-x: auto; padding-top: 18px; }
+  .lane-track > .node { min-width: 150px; }
+  .node {
+    border: 1px solid var(--wire); background: var(--paper); border-radius: 8px;
+    padding: 11px 12px; flex: 1 1 0; min-width: 0; position: relative;
+  }
+  .node b { display: block; font-size: 12.5px; font-weight: 600; }
+  .node span { display: block; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
+  .node.dashed { border-style: dashed; background: transparent; }
+  .arrow {
+    align-self: center; width: 46px; height: 20px; flex: 0 0 auto;
+    display: flex; align-items: center; justify-content: center; position: relative;
+  }
+  .arrow::before { content: ""; position: absolute; left: 8px; right: 14px; top: 50%; border-top: 1px solid var(--wire-dark); }
+  .arrow::after {
+    content: ""; position: absolute; right: 8px; top: 50%; margin-top: -3.5px;
+    border-left: 6px solid var(--wire-dark); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+  }
+  .arrow.broken::before { border-top-style: dashed; border-top-color: var(--red-tx); }
+  .arrow.broken::after { border-left-color: var(--red-tx); }
+  .arrow .lbl {
+    position: absolute; top: -16px; left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9.5px; color: var(--ink-soft); white-space: nowrap;
+  }
+  .arrow.broken .lbl { color: var(--red-tx); }
+
+  /* ── 断点清单 ── */
+  .gaps { list-style: none; }
+  .gaps li { display: grid; grid-template-columns: 44px 1fr 92px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .gaps li:last-child { border-bottom: none; }
+  .gap-id { font-family: var(--serif); font-size: 20px; color: var(--red-tx); }
+  .gap-id.okc { color: var(--green-tx); }
+  .gaps b { font-size: 14px; }
+  .gaps p { font-size: 13px; color: var(--ink-soft); margin-top: 3px; }
+  .gaps p code { font-family: var(--mono); font-size: 11.5px; background: #EFEDE8; padding: 1px 5px; border-radius: 4px; }
+
+  /* ── 线稿画布 ── */
+  .canvas {
+    border: 1px solid var(--line); background: var(--paper); border-radius: 12px;
+    padding: 36px; position: relative;
+    background-image: radial-gradient(circle, #EDEBE6 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  .frame { border: 1.5px solid var(--wire-dark); border-radius: 10px; background: var(--paper); overflow: hidden; }
+  .titlebar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; border: 1px solid var(--wire); }
+  .titlebar .route { margin-left: 12px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft); border: 1px solid var(--line); border-radius: 4px; padding: 1px 10px; }
+
+  .w-box { border: 1px solid var(--wire); border-radius: 6px; background: var(--paper); }
+  .w-dash { border: 1px dashed var(--wire); border-radius: 6px; }
+  .w-label { font-size: 11px; color: var(--ink-soft); }
+  .w-strong { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .w-mono { font-family: var(--mono); font-size: 9.5px; color: var(--ink-soft); letter-spacing: .04em; }
+  .xline { position: relative; overflow: hidden; }
+  .xline::before, .xline::after { content: ""; position: absolute; inset: -20%; border-top: 1px solid #D9D6D0; }
+  .xline::before { transform: rotate(16deg); transform-origin: center; top: 50%; }
+  .xline::after  { transform: rotate(-16deg); transform-origin: center; top: 50%; }
+  .btn-wire { border: 1.5px solid var(--ink); border-radius: 6px; padding: 7px 18px; font-size: 12px; font-weight: 600; background: var(--ink); color: #fff; display: inline-block; }
+  .btn-ghosty { border: 1px solid var(--wire); border-radius: 6px; padding: 7px 18px; font-size: 12px; color: var(--ink-soft); display: inline-block; background: var(--paper); }
+  .slider-wire { position: relative; height: 20px; }
+  .slider-wire::before { content: ""; position: absolute; left: 0; right: 0; top: 9px; border-top: 2px solid var(--line); }
+  .slider-wire i { position: absolute; top: 3px; width: 13px; height: 13px; border: 1.5px solid var(--ink); border-radius: 50%; background: var(--paper); }
+
+  .anno { position: absolute; font-family: var(--mono); font-size: 10px; color: var(--red-tx); }
+  .anno-line { position: absolute; border-top: 1px dashed var(--red-tx); opacity: .7; }
+  .callout { font-family: var(--mono); font-size: 10px; color: var(--ink-soft); display: flex; gap: 8px; align-items: baseline; margin-top: 6px; }
+  .callout i { font-style: normal; color: var(--red-tx); }
+
+  .legend { display: flex; gap: 28px; margin-top: 20px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .sw { width: 26px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  footer { margin-top: 96px; padding-top: 20px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="kicker">ORAL-IP AGENTS · PIPELINE AUDIT · STEP 5 → 6</div>
+    <h1>视频合成 → 视频剪辑</h1>
+    <p class="sub">后端产物契约通畅，断点集中在前端衔接层。下图为链路走查结论与「视频剪辑」两个界面的结构线稿。</p>
+  </header>
+
+  <!-- ════════ 一、链路泳道图 ════════ -->
+  <section>
+    <h2>链路走查 <span class="tag ok">后端通畅</span> <span class="tag gap">前端 3 处断点</span></h2>
+    <p class="h2-note">实线为已验证的真实调用；红色虚线为断开或语义不完整的衔接。</p>
+
+    <div class="flow">
+      <div class="lane">
+        <div class="lane-name">后端流水线<small>engine.py</small></div>
+        <div class="lane-track">
+          <div class="node"><b>step_compose</b><span>FFmpegCompose 合成</span></div>
+          <div class="arrow"><span class="lbl">artifacts_json</span></div>
+          <div class="node"><b>final_video_key<br>cover_key</b><span>任务级产物 · 契约一致</span></div>
+          <div class="arrow"><span class="lbl">同一 ctx</span></div>
+          <div class="node"><b>step_edit</b><span>有配置重合成 / auto 跳过</span></div>
+          <div class="arrow"><span class="lbl">to_out 签名</span></div>
+          <div class="node"><b>final_video_url</b><span>下发前端</span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-name">创作向导<small>CreatePage</small></div>
+        <div class="lane-track">
+          <div class="node"><b>第5步 · 视频合成</b><span>自动报价并创建任务</span></div>
+          <div class="arrow broken"><span class="lbl">断点 A</span></div>
+          <div class="node dashed"><b>跳转 /tasks/:id</b><span>wizard 状态不持久化</span></div>
+          <div class="arrow broken"><span class="lbl">回流丢失</span></div>
+          <div class="node"><b>第6步 · 视频剪辑</b><span>StepEdit 导流占位页</span></div>
+          <div class="arrow broken"><span class="lbl">断点 B</span></div>
+          <div class="node dashed"><b>navigate("/editor")</b><span>未携带 ?task=taskId</span></div>
+        </div>
+      </div>
+
+      <div class="lane">
+        <div class="lane-name">剪辑台<small>EditorPage</small></div>
+        <div class="lane-track">
+          <div class="node"><b>选任务 / 默认首个</b><span>done + final_video_key</span></div>
+          <div class="arrow"><span class="lbl">recompose API</span></div>
+          <div class="node"><b>保存并重新合成</b><span>幂等键 + 版本锁 + 计费</span></div>
+          <div class="arrow"><span class="lbl">render worker</span></div>
+          <div class="node"><b>v(n+1) 原子切换</b><span>质检通过才覆盖成片</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 二、断点清单 ════════ -->
+  <section>
+    <h2>断点清单</h2>
+    <p class="h2-note">按影响程度排序；后端 <code>compose → edit → recompose</code> 契约与实现均已核实无误。</p>
+    <ul class="gaps">
+      <li>
+        <div class="gap-id">A</div>
+        <div><b>向导状态丢失，第6步可能空态</b>
+          <p>合成任务创建后 <code>replace</code> 跳转到 <code>/tasks/:id</code>，CreatePage 卸载后 <code>wiz.taskId</code> 不持久化；用户回到 <code>?step=edit</code> 时无成片预览。</p></div>
+        <span class="tag gap">体验断裂</span>
+      </li>
+      <li>
+        <div class="gap-id">B</div>
+        <div><b>去剪辑台不带任务上下文</b>
+          <p>StepEdit 跳转 <code>/editor</code> 未携带 <code>?task=</code>，剪辑台默认选中已完成任务列表第一个，不一定是当前向导任务。</p></div>
+        <span class="tag gap">上下文断链</span>
+      </li>
+      <li>
+        <div class="gap-id">C</div>
+        <div><b>向导第6步为占位，未接剪辑接口</b>
+          <p>向导内无字幕/封面/BGM 配置，也不调用 <code>recompose</code>；真实剪辑能力全部在独立剪辑台页面。</p></div>
+        <span class="tag gap">功能占位</span>
+      </li>
+      <li>
+        <div class="gap-id">D</div>
+        <div><b>BGM 前端刻意封死</b>
+          <p>后端完整支持 <code>bgm_key / bgm_mode / bgm_volume</code>，前端类型硬编码 <code>bgmMode: "off"</code>（版权归属未就绪），构成能力断层。</p></div>
+        <span class="tag warn">能力闲置</span>
+      </li>
+      <li>
+        <div class="gap-id">E</div>
+        <div><b>三画幅未暴露</b>
+          <p>后端 <code>ratio</code> 支持 9:16 / 16:9 / 1:1，前端无画幅选择入口，始终走默认 9:16。</p></div>
+        <span class="tag warn">能力闲置</span>
+      </li>
+      <li>
+        <div class="gap-id okc">✓</div>
+        <div><b>已确认无问题项</b>
+          <p><code>edit</code> 步已注册于 STEP_RUNNERS；产物字段命名一致；剪辑台已接真实接口，含计费确认、幂等键与版本冲突处理，无 Mock 残留。</p></div>
+        <span class="tag ok">通畅</span>
+      </li>
+    </ul>
+  </section>
+
+  <!-- ════════ 三、线稿 1：向导第6步 ════════ -->
+  <section>
+    <h2>线稿 · 向导第6步（现状：导流占位页）</h2>
+    <p class="h2-note">路径 <code>/create?step=edit</code> · 组件 <code>StepEdit</code> · 该步隐藏底部操作条</p>
+
+    <div class="canvas">
+      <div class="frame" style="max-width:640px;margin:0 auto;">
+        <div class="titlebar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="route">/create?step=edit</span></div>
+        <div style="padding:22px 26px 26px;">
+          <!-- 步骤条 -->
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:20px;">
+            <span class="w-mono">①链接</span><span class="w-mono">─</span>
+            <span class="w-mono">②文案</span><span class="w-mono">─</span>
+            <span class="w-mono">③配音</span><span class="w-mono">─</span>
+            <span class="w-mono">④数字人</span><span class="w-mono">─</span>
+            <span class="w-mono">⑤合成</span><span class="w-mono">─</span>
+            <span class="w-mono" style="color:var(--ink);font-weight:700;">⑥剪辑</span><span class="w-mono">─</span>
+            <span class="w-mono">⑦发布</span>
+          </div>
+          <!-- 成片预览 -->
+          <div class="w-label" style="margin-bottom:6px;">成片预览（有 finalVideoUrl 时渲染）</div>
+          <div class="w-box xline" style="height:150px;position:relative;">
+            <span class="w-mono" style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--paper);padding:2px 8px;z-index:1;">◃ video · controls ▹</span>
+          </div>
+          <div class="callout"><i>断点A</i> 向导状态丢失时此区块为空，直接落入下方占位卡</div>
+          <!-- 占位卡 -->
+          <div class="w-box" style="margin-top:16px;padding:26px 20px;text-align:center;">
+            <div class="w-dash" style="width:38px;height:38px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;"><span class="w-mono">✂︎</span></div>
+            <div class="w-strong">可先去剪辑台精修，也可直接发布</div>
+            <div class="w-label" style="margin-top:4px;">字幕样式 / BGM 三模式 / 封面编辑</div>
+            <div style="display:flex;gap:12px;justify-content:center;margin-top:16px;">
+              <span class="btn-ghosty">先去剪辑台看看</span>
+              <span class="btn-wire">跳过，进入发布配置 →</span>
+            </div>
+            <div class="callout" style="justify-content:center;"><i>断点B</i> navigate("/editor") 未带 ?task=taskId</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════ 四、线稿 2：剪辑台 ════════ -->
+  <section>
+    <h2>线稿 · 剪辑台（真实剪辑能力所在）</h2>
+    <p class="h2-note">路径 <code>/editor</code> · 组件 <code>EditorPage</code> · 左 300px 预览 + 右侧纵向卡片组（非 Tab），底部全宽字幕校对</p>
+
+    <div class="canvas">
+      <div class="frame">
+        <div class="titlebar"><i class="dot"></i><i class="dot"></i><i class="dot"></i><span class="route">/editor?task=&lt;缺失&gt;</span></div>
+        <div style="padding:22px 26px 26px;">
+
+          <!-- 顶部条 -->
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;">
+            <div>
+              <div class="w-strong" style="font-size:15px;">视频剪辑</div>
+              <div class="w-label">对成片精修：字幕样式 / BGM / 封面</div>
+            </div>
+            <div class="w-box" style="padding:6px 14px;display:flex;gap:10px;align-items:center;">
+              <span class="w-label">任务选择</span><span class="w-mono">done + final_video_key ▾</span>
+            </div>
+          </div>
+
+          <!-- 主体两栏 -->
+          <div style="display:grid;grid-template-columns:220px 1fr;gap:18px;align-items:start;">
+
+            <!-- 左栏：预览 -->
+            <div class="w-box" style="padding:12px;">
+              <div class="w-box xline" style="aspect-ratio:9/16;max-height:300px;position:relative;">
+                <span class="w-mono" style="position:absolute;left:8px;top:8px;border:1px solid var(--wire);border-radius:9999px;padding:0 7px;background:var(--paper);z-index:1;">1080P</span>
+                <span class="w-mono" style="position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);background:var(--paper);padding:2px 8px;z-index:1;">▷ 9:16 播放器</span>
+                <span class="w-mono" style="position:absolute;left:50%;bottom:26px;transform:translateX(-50%);border:1px dashed var(--wire-dark);padding:2px 10px;background:var(--paper);z-index:1;white-space:nowrap;">字幕实时叠层</span>
+              </div>
+              <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="w-strong">任务标题…</div>
+                  <div class="w-mono">当前 v2 · 配置已同步</div>
+                </div>
+                <span class="w-mono" style="border:1px solid var(--wire);border-radius:9999px;padding:1px 8px;">成片就绪</span>
+              </div>
+            </div>
+
+            <!-- 右栏：卡片组 -->
+            <div style="display:grid;gap:14px;">
+
+              <!-- 字幕样式 -->
+              <div class="w-box" style="padding:16px;">
+                <div class="w-strong" style="margin-bottom:12px;">字幕样式 <span class="tag ok" style="margin-left:6px;">真链路</span></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 22px;">
+                  <div><div class="w-label">字号 44px</div><div class="slider-wire"><i style="left:38%;"></i></div></div>
+                  <div><div class="w-label">描边 2px</div><div class="slider-wire"><i style="left:30%;"></i></div></div>
+                  <div>
+                    <div class="w-label" style="margin-bottom:5px;">颜色</div>
+                    <div style="display:flex;gap:7px;">
+                      <span class="w-box" style="width:20px;height:20px;border-width:1.5px;border-color:var(--ink);"></span>
+                      <span class="w-box" style="width:20px;height:20px;"></span>
+                      <span class="w-box" style="width:20px;height:20px;"></span>
+                      <span class="w-box" style="width:20px;height:20px;"></span>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="w-label" style="margin-bottom:5px;">位置</div>
+                    <div style="display:flex;gap:7px;">
+                      <span class="w-dash" style="padding:2px 10px;font-size:10.5px;color:var(--ink-soft);">顶部</span>
+                      <span class="w-dash" style="padding:2px 10px;font-size:10.5px;color:var(--ink-soft);">中部</span>
+                      <span class="w-box" style="padding:2px 10px;font-size:10.5px;font-weight:600;">底部安全区</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- BGM -->
+              <div class="w-box" style="padding:16px;">
+                <div class="w-strong" style="margin-bottom:10px;">背景音乐 <span class="tag warn" style="margin-left:6px;">断点D · 封死</span></div>
+                <div class="w-dash" style="padding:12px 14px;">
+                  <div class="w-label" style="color:var(--ink);">当前使用纯人声</div>
+                  <div class="w-mono" style="margin-top:3px;">曲库待授权后开放 · 后端 bgm 链路完整但闲置</div>
+                </div>
+              </div>
+
+              <!-- 封面模板 -->
+              <div class="w-box" style="padding:16px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                  <span class="w-strong">封面模板 <span class="tag ok" style="margin-left:6px;">真链路</span></span>
+                  <span class="w-mono">保存后生效</span>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:9px;">
+                  <div class="w-box" style="padding:9px;border-width:1.5px;border-color:var(--ink);"><div class="w-strong" style="font-size:11px;">大字标题</div><div class="w-mono">bold-bottom</div></div>
+                  <div class="w-dash" style="padding:9px;"><div class="w-label">居中色带</div><div class="w-mono">center-band</div></div>
+                  <div class="w-dash" style="padding:9px;"><div class="w-label">顶部标题</div><div class="w-mono">top-title</div></div>
+                  <div class="w-dash" style="padding:9px;"><div class="w-label">原始帧</div><div class="w-mono">none</div></div>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+                  <div class="w-box xline" style="width:64px;height:44px;"></div>
+                  <span class="w-mono">当前封面 · 重新合成后按所选模板更新</span>
+                </div>
+              </div>
+
+              <!-- 操作条 -->
+              <div class="w-box" style="padding:12px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <span class="w-mono" style="flex:1;">msg / error 区</span>
+                <span class="btn-ghosty" style="opacity:.45;">导出剪映草稿</span>
+                <span class="btn-ghosty">导出 MP4</span>
+                <span class="btn-wire">保存并重新合成</span>
+                <span class="w-mono">去发布 →</span>
+              </div>
+              <div class="callout"><i>计费</i> 保存前 confirmMeteredOperation(hd_export) · 幂等键 + baseVersion 乐观锁 · pending 可取消</div>
+            </div>
+          </div>
+
+          <!-- 底部：字幕校对 -->
+          <div class="w-box" style="margin-top:18px;padding:16px;">
+            <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:10px;">
+              <span class="w-strong">字幕校对</span>
+              <span class="tag ok">ASR 对齐完成</span>
+              <span class="w-mono" style="margin-left:auto;">口播文案分行预览 · 最多 8 行 · 只读</span>
+            </div>
+            <div style="display:grid;gap:5px;">
+              <div class="w-dash" style="padding:5px 12px;"><span class="w-label">今天给大家分享三个提升出片率的小技巧……</span></div>
+              <div class="w-box" style="padding:5px 12px;border-width:1.5px;"><span class="w-strong" style="font-weight:500;">第一，口播节奏要跟着字幕走（当前行高亮）</span></div>
+              <div class="w-dash" style="padding:5px 12px;"><span class="w-label">第二，封面标题控制在十二个字以内……</span></div>
+            </div>
+            <div class="callout"><i>缺口</i> 无逐字时间轴编辑 / 无「删行即裁片」/ 无时间线轨道（升级方案 V2 规划项）</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><span class="sw" style="border:1px solid var(--wire);background:#fff;"></span>现有实体控件</span>
+        <span><span class="sw" style="border:1px dashed var(--wire);"></span>占位 / 未激活</span>
+        <span><span class="sw" style="background:var(--green-bg);"></span>真链路已验证</span>
+        <span><span class="sw" style="background:var(--yellow-bg);"></span>后端能力闲置</span>
+        <span><span class="sw" style="background:var(--red-bg);"></span>断点</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>SOURCE · engine.py / render.py / CreatePage.tsx / EditorPage.tsx</span>
+    <span>WIREFRAME v1 · 2026-07</span>
+  </footer>
+
+</div>
+</body>
+</html>
