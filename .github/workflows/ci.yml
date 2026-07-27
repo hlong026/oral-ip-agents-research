@@ -2,13 +2,27 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
   quality-gates:
     name: 第一阶段交付门禁
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: oral
+          POSTGRES_PASSWORD: oral_ci_pass
+          POSTGRES_DB: oral_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oral -d oral_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -31,17 +45,14 @@ jobs:
         working-directory: server
         env:
           APP_ENV: test
-          DATABASE_URL: sqlite+aiosqlite:///./ci_migrations.db
+          DATABASE_URL: postgresql+asyncpg://oral:oral_ci_pass@127.0.0.1:5432/oral_ci
         run: |
           uv run python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; heads=ScriptDirectory.from_config(Config("alembic.ini")).get_heads(); assert len(heads) == 1, heads'
           uv run alembic upgrade head
-          uv run python -c 'import sqlite3; db=sqlite3.connect("ci_migrations.db"); tables={r[0] for r in db.execute("select name from sqlite_master where type=\"table\"")}; indexes={r[0] for r in db.execute("select name from sqlite_master where type=\"index\"")}; assert {"activation_rate_limits","webhook_events","voices","avatars"} <= tables; assert {"uq_voices_provider_task_id","uq_avatars_provider_task_id"} <= indexes'
           uv run alembic downgrade base
           uv run alembic upgrade head
-          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade f2b3c4d5e6f7
-          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade head
-          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic downgrade f2b3c4d5e6f7
-          DATABASE_URL=sqlite+aiosqlite:///./ci_existing.db uv run alembic upgrade head
+          uv run alembic downgrade f2b3c4d5e6f7
+          uv run alembic upgrade head
       - name: 3. Ruff
         working-directory: server
         run: uv run ruff check .
