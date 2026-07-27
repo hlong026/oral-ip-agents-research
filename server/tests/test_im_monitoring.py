@@ -1,5 +1,6 @@
 """S3-14 gray-account enforcement and durable monitoring aggregates."""
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -282,6 +283,54 @@ async def test_gray_account_cap_blocks_expansion(client: AsyncClient, monkeypatc
     assert error.value.status_code == 409
     assert isinstance(error.value.detail, dict)
     assert error.value.detail["code"] == "IM_GRAY_LIMIT_REACHED"
+
+
+async def test_gray_account_cap_is_atomic_for_concurrent_admin_approvals(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del client
+    _first_user, first_account = await _create_account()
+    _second_user, second_account = await _create_account()
+    from app.core.config import get_settings
+
+    async with SessionLocal() as db:
+        current = await im_repo.gray_account_count(db)
+    monkeypatch.setattr(get_settings(), "im_gray_max_accounts", current + 1)
+
+    original_count = im_repo.gray_account_count
+    both_counted = asyncio.Event()
+    count_calls = 0
+
+    async def synchronized_count(db) -> int:
+        nonlocal count_calls
+        value = await original_count(db)
+        count_calls += 1
+        if count_calls == 2:
+            both_counted.set()
+        await asyncio.wait_for(both_counted.wait(), timeout=1)
+        return value
+
+    monkeypatch.setattr(im_repo, "gray_account_count", synchronized_count)
+
+    async def approve(account_id: str) -> str:
+        async with SessionLocal() as db:
+            try:
+                await im_service.approve_gray_account(db, account_id, "admin-test")
+                return "approved"
+            except HTTPException as error:
+                assert isinstance(error.detail, dict)
+                return str(error.detail["code"])
+
+    results = await asyncio.gather(
+        approve(first_account),
+        approve(second_account),
+        return_exceptions=True,
+    )
+
+    assert sorted(results, key=str) == ["IM_GRAY_LIMIT_REACHED", "approved"]
+    async with SessionLocal() as db:
+        assert await original_count(db) == current + 1
 
 
 async def _create_account() -> tuple[str, str]:

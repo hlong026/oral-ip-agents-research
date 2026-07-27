@@ -1,8 +1,7 @@
 # 18 - Gate 5 桌面端与 IM 收口验收记录
 
 > 验收日期：2026-07-27
-> 结论：桌面端工程构建 **Go**；桌面安装包对外分发 **No-Go**；IM 生产放量
-> **No-Go**
+> 结论：桌面端工程构建 **Go**；桌面安装包对外分发 **No-Go**；IM 生产放量 **No-Go**
 
 ## 1. 本阶段收口范围
 
@@ -15,6 +14,8 @@
 4. 后端生产 CORS 仅接受正式 HTTPS Web 来源及两个固定 Tauri 来源；
 5. macOS 分发前拒绝临时签名和不完整公证凭证；
 6. IM 七日工具支持完全离线的退出门禁评估。
+7. 灰度账号数量上限在 PostgreSQL 中使用事务级 advisory lock 原子执行，避免并发
+   管理员同时越过上限。
 
 真实签名、公证、Windows 安装、正式域名/TLS、真实 Provider 与连续七日 IM
 运行都依赖外部环境或账号，不能由本地测试替代。
@@ -53,8 +54,17 @@ CORS 只约束浏览器来源，不替代 JWT、桌面包签名或服务端权�
 - `check:distribution`：在上述检查基础上，macOS 还必须具备正式签名身份，以及
   App Store Connect API 或 Apple ID 公证凭证中的完整一组。
 
-检查脚本不打印凭证内容。Windows 分发在非 Windows 环境主动失败，防止把 macOS
-本地编译错误地记作 Windows 安装包验收。
+检查脚本不打印凭证内容。当前 `check:distribution` 只完成 macOS 直接分发预检；
+Linux 和 Windows 都会失败关闭。Windows 必须另行建立受控 CI 签名与安装验收门禁。
+
+### 2.4 IM 灰度上限
+
+管理员批准灰度账号时，数量判断与启用操作在同一临界区完成：
+
+- 生产 PostgreSQL 使用事务级 `pg_advisory_xact_lock`，覆盖多进程 API 副本；
+- 开发/测试数据库使用进程锁，保证本地并发回归可重复；
+- 重复批准已经启用的同一账号不额外占用名额；
+- 达到上限时事务回滚并返回 `IM_GRAY_LIMIT_REACHED`。
 
 ## 3. 当前验证证据
 
@@ -64,7 +74,7 @@ CORS 只约束浏览器来源，不替代 JWT、桌面包签名或服务端权�
 Web TaskSocket / API URL 定向测试：3 passed
 生产配置与 IM 灰度定向测试：50 passed
 桌面发布检查脚本：3 passed
-后端完整测试：398 passed, 1 skipped
+后端完整测试：399 passed, 1 skipped
 Web 完整测试：48 passed
 Admin 完整测试：9 passed
 Playwright 端到端：6 passed
