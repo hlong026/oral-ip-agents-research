@@ -178,9 +178,11 @@ export function buildPricePreviewRequest(
 function StepLink({
   wiz,
   setWiz,
+  initialUrl,
 }: {
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
+  initialUrl?: string;
 }) {
   const [tab, setTab] = useState<"url" | "topic" | "script">(
     wiz.topic ? "topic" : wiz.scriptText ? "script" : "url",
@@ -189,6 +191,22 @@ function StepLink({
   const [error, setError] = useState("");
   const [progress, setProgress] = useState<OperationProgress | null>(null);
   const loadQuota = useQuota((state) => state.load);
+
+  // 当有 initialUrl 且当前为 url 标签页时，自动填充到输入框
+  useEffect(() => {
+    if (initialUrl && tab === "url" && wiz.sourceUrl !== initialUrl) {
+      setWiz({
+        ...wiz,
+        sourceUrl: initialUrl,
+        topic: "",
+        originalText: "",
+        rewrittenText: "",
+        scriptText: "",
+        scriptId: "",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUrl]);
 
   const selectTab = (nextTab: "url" | "topic" | "script") => {
     setTab(nextTab);
@@ -376,6 +394,21 @@ function StepScript({
   const startedInitialGeneration = useRef(false);
   const loadQuota = useQuota((state) => state.load);
   const currentIp = useIp((state) => state.current);
+  
+  // 自动生成标题候选：在文案步，当有 scriptText 但没有 title 时，从文案首句生成候选
+  useEffect(() => {
+    if (
+      wiz.scriptText &&
+      !wiz.title &&
+      (wiz.sourceUrl || wiz.topic)
+    ) {
+      const firstSentence = wiz.scriptText.trim().split(/[。！？!?\n]/)[0]?.slice(0, 24);
+      if (firstSentence) {
+        setWiz((w) => ({ ...w, title: firstSentence }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wiz.scriptText]);
 
   // 首次进入：链接/选题 → 转写/生成文案
   useEffect(() => {
@@ -777,7 +810,21 @@ function StepVoice({
   // 只展示就绪声音：训练中/失败的声音无法用于合成
   const ready = (data ?? []).filter((v) => v.status === "ready");
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <div className="space-y-4">
+      {/* 显示标题 */}
+      <div>
+        <label className="label">视频标题（可在发布步修改）</label>
+        <input
+          className="input"
+          placeholder="留空则取文案首句"
+          value={wiz.title || "未设置"}
+          onChange={(e) => setWiz({ ...wiz, title: e.target.value })}
+        />
+        <p className="mt-1 text-xs text-text-3">
+          当前候选：{wiz.title || "未设置"} · 将在发布的视频上显示
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {ready.map((v) => (
         <button
           key={v.id}
@@ -832,7 +879,21 @@ function StepAvatar({
   // 只展示就绪数字人：合成侧要求 status=ready 才能驱动
   const ready = (data ?? []).filter((a) => a.status === "ready");
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+    <div className="space-y-4">
+      {/* 显示标题 */}
+      <div>
+        <label className="label">视频标题（可在发布步修改）</label>
+        <input
+          className="input"
+          placeholder="留空则取文案首句"
+          value={wiz.title || "未设置"}
+          onChange={(e) => setWiz({ ...wiz, title: e.target.value })}
+        />
+        <p className="mt-1 text-xs text-text-3">
+          当前候选：{wiz.title || "未设置"} · 将在发布的视频上显示
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
       {ready.map((a) => (
         <button
           key={a.id}
@@ -999,13 +1060,16 @@ function StepPublish({
         </div>
       </div>
       <div>
-        <label className="label">视频标题（F-403 自动候选，可改）</label>
+        <label className="label">视频标题（已在配音/数字人步可编辑）</label>
         <input
           className="input"
           placeholder="留空则取文案首句"
           value={wiz.title}
           onChange={(e) => setWiz({ ...wiz, title: e.target.value })}
         />
+        <p className="mt-1 text-xs text-text-3">
+          当前：{wiz.title || "未设置"} · 将在发布的视频上显示
+        </p>
       </div>
       <div>
         <label className="label">定时发布（F-503，留空立即发布）</label>
@@ -1173,6 +1237,12 @@ export default function CreatePage() {
           title: s.title,
         }));
       });
+      return;
+    }
+    // 只在首次挂载或 step 从非 link 变更为 link 时处理 url/topic 参数
+    // 避免覆盖用户已输入的链接
+    if ((url || topic) && (wiz.sourceUrl || wiz.topic)) {
+      // 已经有值了，不再覆盖
       return;
     }
     if (url || topic) {
@@ -1373,7 +1443,7 @@ export default function CreatePage() {
           第 {stepIdx + 1} 步 · {STEPS[stepIdx]?.label}
         </h1>
 
-        {step === "link" && <StepLink wiz={wiz} setWiz={setWiz} />}
+        {step === "link" && <StepLink wiz={wiz} setWiz={setWiz} initialUrl={params.get("url")?.replace(/^https?:\/\//, '') || undefined} />}
         {step === "script" && <StepScript wiz={wiz} setWiz={setWiz} />}
         {step === "voice" && <StepVoice wiz={wiz} setWiz={setWiz} />}
         {step === "avatar" && <StepAvatar wiz={wiz} setWiz={setWiz} />}
