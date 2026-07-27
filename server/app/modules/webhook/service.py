@@ -162,12 +162,10 @@ async def _dispatch_callback(db: AsyncSession, payload: dict) -> None:
             str(payload.get("avatar", "") or ""),
         )
     elif msg_type == 1:
-        logger.info(
-            "webhook_video_callback_received",
-            task_id=task_id,
-            provider_status=status_code,
-            duration=payload.get("duration", 0),
-        )
+        # 飞影数字人合成视频完成：按 task_id 定位 pipeline 任务的 avatar 步，成功则触发下载转存并推进状态；失败则标记步骤失败
+        from app.modules.pipeline import engine
+
+        await engine.handle_compose_callback(db, task_id, status_code)
     else:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
