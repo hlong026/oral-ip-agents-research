@@ -17,15 +17,26 @@ from . import repository as repo
 from .models import CreditGrant, CreditLedger, CreditReservation, PriceQuote, QuotaAccount, QuotaUsage
 from .schemas import QuotaOut, ReservationBatchOut, ReservationItemOut, ReservationStateOut, UsageItemOut
 
-INITIAL_GRANT = 12430.0  # 开户礼点数（对齐效果图额度卡）
+# 生产切换去 Mock: INITIAL_GRANT 迁到 dynamic_config 管理，admin 可配
+DEFAULT_INITIAL_GRANT = 12430.0
 logger = get_logger("oral.billing")
 
 
 async def grant_initial_quota(db: AsyncSession, user_id: str) -> None:
+    from app.core.dynamic_config import get_dynamic_config
+
+    initial_grant = DEFAULT_INITIAL_GRANT
+    try:
+        cfg = await get_dynamic_config()
+        val = cfg.get("initial_grant_points")
+        if val is not None and isinstance(val, (int, float)):
+            initial_grant = val
+    except Exception:  # fallback to default
+        pass
     await grant_points(
         db,
         user_id,
-        int(INITIAL_GRANT),
+        int(initial_grant),
         source_type="trial",
         source_id="initial-grant",
         expires_at=datetime.now(UTC) + timedelta(days=30),
