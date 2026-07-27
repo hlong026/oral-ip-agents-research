@@ -398,6 +398,8 @@ export interface PublishJob {
   scheduledAt?: string | null;
   error: string;
   postId: string;
+  /** post_id 来源：internal=内部追踪号（非平台作品 ID）| platform=平台真实作品 ID | 空=未发布 */
+  postIdSource: string;
   videoUrl?: string | null;
   packageUrl?: string | null;
   retryCount: number;

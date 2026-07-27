@@ -72,6 +72,7 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
         scheduledAt=j.scheduled_at or None,
         error="发布失败，请稍后重试" if j.error else "",
         postId=j.post_id,
+        postIdSource=j.post_id_source,
         videoUrl=f"/media/{j.video_key}" if j.video_key else None,
         packageUrl=f"/media/{j.export_key}" if j.export_key else None,
         retryCount=int(j.retry_count or "0"),
@@ -493,6 +494,8 @@ async def _run_job(job_id: str) -> None:
                 await repo.save_account(db, account)
             job.status = "success"
             job.post_id = post_id
+            # SAU 发布无法取回平台作品 ID，驱动返回的是内部追踪号；待作品回捞能力上线后回填 platform
+            job.post_id_source = "internal" if post_id else ""
             await repo.save_job(db, job)
             # 发布成功日志（§10.6.8-B #7）
             logger.info(

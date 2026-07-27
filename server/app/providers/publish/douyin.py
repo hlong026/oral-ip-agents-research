@@ -90,7 +90,7 @@ class DouyinPublishDriver(SAUPublishDriverBase):
         )
         await uploader.douyin_upload_video()
         logger.info("douyin_publish_success", title=title[:30])
-        # 抖音不直接返回 post_id，用标题哈希作为标识
+        # SAU 拿不到抖音作品 ID，用标题哈希生成内部追踪号（postIdSource=internal）
         return f"dy_{hash(title + video_path) % 10**8:08d}"
 
     async def _do_check_cookie(self, cookie_file: str) -> bool:

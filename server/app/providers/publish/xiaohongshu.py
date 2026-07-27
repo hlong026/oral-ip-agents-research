@@ -90,6 +90,7 @@ class XiaohongshuPublishDriver(SAUPublishDriverBase):
         )
         await uploader.main()
         logger.info("xiaohongshu_publish_success", title=title[:30])
+        # SAU 拿不到小红书作品 ID，用标题哈希生成内部追踪号（postIdSource=internal）
         return f"xhs_{hash(title + video_path) % 10**8:08d}"
 
     async def _do_check_cookie(self, cookie_file: str) -> bool:

@@ -71,6 +71,21 @@ function JobRow({ job, onAction }: { job: PublishJob; onAction: () => void }) {
       </td>
       <td className="py-2.5 pr-3">
         <span className={`chip text-[11px] ${meta.cls}`}>{meta.label}</span>
+        {/* post_id 语义澄清：SAU 发布拿不到平台作品 ID，内部追踪号不得展示为平台 ID */}
+        {job.status === "success" && job.postId && (
+          <div
+            className="mt-1 max-w-52 truncate text-xs text-text-3"
+            title={
+              job.postIdSource === "platform"
+                ? `平台作品 ID：${job.postId}`
+                : `内部追踪号：${job.postId}（非平台作品 ID）`
+            }
+          >
+            {job.postIdSource === "platform"
+              ? `作品 ${job.postId}`
+              : `已发布（内部追踪号 ${job.postId}）`}
+          </div>
+        )}
         {(job.status === "failed" || job.status === "export_ready") &&
           job.error && (
             <div

@@ -50,6 +50,8 @@ class JobOut(BaseModel):
     scheduledAt: str | None = None
     error: str = ""
     postId: str = ""
+    # post_id 语义澄清：internal=内部追踪号（非平台作品 ID）| platform=平台真实作品 ID | 空=未发布
+    postIdSource: str = ""
     videoUrl: str | None = None
     packageUrl: str | None = None
     retryCount: int = 0

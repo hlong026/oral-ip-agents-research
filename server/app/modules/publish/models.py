@@ -49,6 +49,8 @@ class PublishJob(Base):
     scheduled_at: Mapped[str] = mapped_column(String(32), default="")  # ISO 定时发布（F-503）
     error: Mapped[str] = mapped_column(Text, default="")
     post_id: Mapped[str] = mapped_column(String(64), default="")
+    # post_id 来源：internal=内部追踪号（SAU 发布无法拿到平台作品 ID，哈希生成）| platform=平台真实作品 ID（回捞回填）
+    post_id_source: Mapped[str] = mapped_column(String(16), default="")
     retry_count: Mapped[str] = mapped_column(String(8), default="0")
     queue_message_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     export_key: Mapped[str] = mapped_column(String(256), default="")
