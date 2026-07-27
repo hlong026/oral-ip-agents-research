@@ -58,17 +58,33 @@ async def test_pipeline_rewrite_similarity_receives_source_reference(monkeypatch
         raise AssertionError(f"unexpected provider call: {method}")
 
     monkeypatch.setattr(engine.registry, "run_with_fallback", fake_fallback)
+    # 新契约：script_text 是已确认终稿会直接跳过 rewrite，仿写源改为 ctx 转写文本
     task = PipelineTask(
         id="rewrite-reference",
         user_id="rewrite-user",
-        script_text="需要改写的原文",
+        intensity="light",
+    )
+
+    result = await engine.step_rewrite(task, {"transcript": "需要改写的原文"})
+
+    assert result["similarity"] == 12.5
+    assert ("check_similarity", ("改写后的内容", "需要改写的原文")) in calls
+
+
+async def test_pipeline_rewrite_skips_when_script_confirmed() -> None:
+    from app.modules.pipeline import engine
+    from app.modules.pipeline.models import PipelineTask
+
+    task = PipelineTask(
+        id="rewrite-skip",
+        user_id="rewrite-user",
+        script_text="已确认的二创口播稿",
         intensity="light",
     )
 
     result = await engine.step_rewrite(task, {})
 
-    assert result["similarity"] == 12.5
-    assert ("check_similarity", ("改写后的内容", "需要改写的原文")) in calls
+    assert result == {"skipped": True, "script": "已确认的二创口播稿"}
 
 
 async def test_running_pipeline_is_requeued_from_failed_step(monkeypatch) -> None:

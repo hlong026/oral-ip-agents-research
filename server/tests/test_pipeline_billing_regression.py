@@ -175,3 +175,75 @@ async def test_failed_pipeline_cannot_retry_a_released_reservation(client, monke
             await pipeline_service.retry_step(db, task_id, "parse", user_id)
     assert exc.value.status_code == 409
     assert exc.value.detail["code"] == "RETRY_REQUIRES_NEW_QUOTE"
+
+
+async def test_rewrite_step_reuses_confirmed_script(client) -> None:
+    """向导二创确认后的 script_text 即最终口播稿，rewrite 步不得重新仿写。"""
+    from app.modules.pipeline import engine
+
+    task = PipelineTask(
+        user_id=uuid.uuid4().hex,
+        ip_id="test-ip",
+        title="二创文案复用",
+        script_text="这是用户已确认的二创口播文案",
+        mode="auto",
+    )
+
+    result = await engine.step_rewrite(task, {"script": task.script_text})
+
+    assert result == {"skipped": True, "script": "这是用户已确认的二创口播文案"}
+
+
+async def test_cancel_during_step_is_not_overwritten(client, monkeypatch) -> None:
+    """步骤执行期间用户取消：步骤完成后的落库不得把 canceled 覆盖回 running。"""
+    from app.modules.pipeline import engine
+
+    task_id, reservation_id, user_id = await _reserved_task()
+
+    async def cancel_while_running(*_args, **_kwargs) -> dict:
+        # 模拟用户在步骤执行期间点击取消（cancel 接口会置 canceled + 释放预留）
+        async with SessionLocal() as db:
+            running = await db.get(PipelineTask, task_id)
+            assert running is not None
+            running.status = "canceled"
+            await db.commit()
+            await release_reservation(db, reservation_id, user_id)
+        return {}
+
+    runners = dict.fromkeys(engine.STEP_ORDER, _all_steps_succeed)
+    runners["parse"] = cancel_while_running
+    monkeypatch.setattr(engine, "STEP_RUNNERS", runners)
+
+    await engine.run_task(task_id)
+
+    async with SessionLocal() as db:
+        task = await db.get(PipelineTask, task_id)
+        reservation = await db.get(CreditReservation, reservation_id)
+        settlements = await db.scalar(
+            select(func.count(CreditLedger.id)).where(
+                CreditLedger.reference_id == reservation_id,
+                CreditLedger.event_type == "settle",
+            )
+        )
+    assert task is not None and task.status == "canceled"
+    assert reservation is not None and reservation.status == "released"
+    assert settlements == 0
+
+
+def test_pipeline_quote_quantities_skips_script_generation_for_confirmed_script() -> None:
+    """已带确认文案的任务跳过 rewrite，服务端报价合同不含 script_generation。"""
+    from app.modules.billing.service import pipeline_quote_quantities
+
+    module_units = {
+        "topic_generation": "per_action",
+        "script_generation": "per_1k_tokens",
+        "tts": "per_1k_chars",
+        "digital_human": "per_second",
+        "hd_export": "per_action",
+    }
+
+    with_script = pipeline_quote_quantities({"scriptText": "文" * 100}, module_units)
+    assert with_script and "script_generation" not in with_script
+
+    without_script = pipeline_quote_quantities({"topic": "新选题"}, module_units)
+    assert "script_generation" in without_script

@@ -453,11 +453,13 @@ def pipeline_quote_quantities(task: dict, module_units: dict[str, str]) -> dict[
     duration_seconds = max(target_duration, int(len(script_text) * 0.28 + 0.999999))
     text_length = max(len(script_text), int(duration_seconds / 0.28 + 0.999999))
     required_modules = {
-        "script_generation",
         "tts",
         "digital_human",
         "hd_export",
     }
+    # 已带确认文案（向导二创确认后）时 rewrite 步直接跳过，不计文案生成费
+    if not script_text:
+        required_modules.add("script_generation")
     if task.get("sourceUrl") and not script_text:
         required_modules.add("asr")
     if task.get("topic") and not script_text:

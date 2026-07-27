@@ -21,7 +21,7 @@ from app.core.events import CHANNEL_FEED, CHANNEL_TASKS, publish
 from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
-from app.providers.base import ComposeInput
+from app.providers.base import ComposeInput, is_mock_provider
 from app.providers.registry import registry
 
 from .models import STEP_ORDER, PipelineTask
@@ -109,6 +109,29 @@ async def _feed(user_id: str, type_: str, text: str) -> None:
 # ============ 各步骤执行（Step.run 统一接口） ============
 
 
+async def _guard_mock_result(task: PipelineTask, step: str, provider: str, result: dict) -> dict:
+    """Mock 降级结果防线（与注册表启动自检双保险）：
+    - 非 dev/test：Mock 产物视为该步失败，绝不允许演示数据以真实数据面貌交付用户
+    - dev/test：放行但在步骤产物写入 degraded_mock 标记，并推送任务中心提示
+    """
+    if not provider or not is_mock_provider(provider):
+        return result
+    if get_settings().app_env not in {"dev", "test"}:
+        raise RuntimeError(f"{step} 步降级产生了演示数据，已拒收；请检查供应商配置后重试")
+    result["degraded_mock"] = True
+    await publish(
+        CHANNEL_TASKS,
+        {
+            "kind": "degraded_mock",
+            "taskId": task.id,
+            "userId": task.user_id,
+            "step": step,
+            "message": f"{step} 步已降级为演示数据（仅开发/测试环境允许）",
+        },
+    )
+    return result
+
+
 async def step_parse(task: PipelineTask, ctx: dict) -> dict:
     if task.script_text:
         return {"skipped": True, "script": task.script_text}
@@ -116,12 +139,17 @@ async def step_parse(task: PipelineTask, ctx: dict) -> dict:
         result, provider = await registry.run_with_fallback(
             "parse", registry.parse_chain, "parse_url", task.source_url, trace_id=task.trace_id, task_id=task.id
         )
-        return {
-            "video_key": result.video_key or "",
-            "title": result.title,
-            "platform": result.platform,
-            "provider": provider,
-        }
+        return await _guard_mock_result(
+            task,
+            "parse",
+            provider,
+            {
+                "video_key": result.video_key or "",
+                "title": result.title,
+                "platform": result.platform,
+                "provider": provider,
+            },
+        )
     if task.topic:
         return {"skipped": True, "topic": task.topic}
     raise RuntimeError("缺少输入（链接/选题/文案至少一项）")
@@ -138,14 +166,22 @@ async def step_asr(task: PipelineTask, ctx: dict) -> dict:
     tr, provider = await registry.run_with_fallback(
         "asr", registry.asr_chain, "transcribe", video_key, trace_id=task.trace_id, task_id=task.id
     )
-    return {
-        "transcript": tr.text,
-        "words": [{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
-        "provider": provider,
-    }
+    return await _guard_mock_result(
+        task,
+        "asr",
+        provider,
+        {
+            "transcript": tr.text,
+            "words": [{"word": w.word, "start": w.start, "end": w.end} for w in tr.words],
+            "provider": provider,
+        },
+    )
 
 
 async def step_rewrite(task: PipelineTask, ctx: dict) -> dict:
+    # 向导第 2 步已完成文案二创并确认时，script_text 即最终口播稿，直接复用不再仿写
+    if task.script_text:
+        return {"skipped": True, "script": task.script_text}
     source = ctx.get("script") or ctx.get("transcript") or ctx.get("topic") or ""
 
     # 人设引擎注入：查询任务关联的 persona（ip_id 即 persona_id）
@@ -350,12 +386,17 @@ async def step_voice(task: PipelineTask, ctx: dict) -> dict:
     tts_words = await _align_tts_words(task, result.audio_key, script or "", result.duration)
     if not tts_words:
         tts_words = [{"word": w.word, "start": w.start, "end": w.end} for w in result.words]
-    return {
-        "audio_key": result.audio_key,
-        "tts_words": tts_words,
-        "duration": result.duration,
-        "provider": provider,
-    }
+    return await _guard_mock_result(
+        task,
+        "voice",
+        provider,
+        {
+            "audio_key": result.audio_key,
+            "tts_words": tts_words,
+            "duration": result.duration,
+            "provider": provider,
+        },
+    )
 
 
 # ASR 请求体内嵌 data URI 上限（与 content 模块 _MAX_ASR_DATA_URI_BYTES 保持一致）
@@ -453,7 +494,9 @@ async def step_avatar(task: PipelineTask, ctx: dict) -> dict:
             "avatar", registry.avatar_chain, "download_video", video_url, trace_id=task.trace_id, task_id=task.id
         )
 
-    return {"avatar_video_key": video_key, "duration": duration, "provider": provider}
+    return await _guard_mock_result(
+        task, "avatar", provider, {"avatar_video_key": video_key, "duration": duration, "provider": provider}
+    )
 
 
 async def step_compose(task: PipelineTask, ctx: dict) -> dict:
@@ -503,13 +546,18 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
     result, provider = await registry.run_with_fallback(
         "compose", registry.compose_chain, "compose", inp, trace_id=task.trace_id, task_id=task.id
     )
-    return {
-        "final_video_key": result.video_key,
-        "cover_key": result.cover_key,
-        "duration": result.duration,
-        "quality": result.quality,
-        "provider": provider,
-    }
+    return await _guard_mock_result(
+        task,
+        "compose",
+        provider,
+        {
+            "final_video_key": result.video_key,
+            "cover_key": result.cover_key,
+            "duration": result.duration,
+            "quality": result.quality,
+            "provider": provider,
+        },
+    )
 
 
 async def step_edit(task: PipelineTask, ctx: dict) -> dict:
@@ -628,6 +676,8 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                         step_start = time.perf_counter()
                         result = await STEP_RUNNERS[step_name](task, ctx)
                         step_ms = int((time.perf_counter() - step_start) * 1000)
+                        # 步骤执行期间用户可能已取消：回读最新状态，避免本步落库把 canceled 覆盖回 running
+                        await db.refresh(task)
                         skipped = bool(result.pop("skipped", False))
                         provider = result.pop("provider", "")
                         ctx.update({k: v for k, v in result.items() if not k.startswith("_")})
@@ -710,6 +760,12 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                     _dump_steps(task, steps)
                     await repo_save(db, task)
                     await _emit(task)
+
+                    # 步骤执行期间收到取消：保留 canceled 状态并立即停止推进
+                    if task.status == "canceled":
+                        logger.info("task_canceled_midstep", task_id=task_id, step=step_name)
+                        await _feed(task.user_id, "info", f"「{task.title}」已取消，流程停止")
+                        return
 
                     # manual 模式：每步完成暂停（F-405 单步干预）
                     if task.mode == "manual" and step_name != "publish":

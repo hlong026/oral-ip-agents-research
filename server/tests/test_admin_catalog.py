@@ -1163,7 +1163,8 @@ async def test_pipeline_attaches_quote_reservation_and_cancel_releases_it(client
         json={"version": f"pipeline-{uuid.uuid4().hex[:8]}"},
     )
     version_id = version.json()["id"]
-    for module in ("script_generation", "tts", "digital_human", "hd_export"):
+    # 已带确认文案的任务跳过 rewrite 步，报价不含 script_generation
+    for module in ("tts", "digital_human", "hd_export"):
         configured = await client.put(
             f"/api/admin/v1/price-versions/{version_id}/modules/{module}",
             headers=admin_headers,
@@ -1199,7 +1200,6 @@ async def test_pipeline_attaches_quote_reservation_and_cancel_releases_it(client
         headers=user_headers,
         json={
             "items": [
-                {"module": "script_generation", "quantity": 1},
                 {"module": "tts", "quantity": 1},
                 {"module": "digital_human", "quantity": 1},
                 {"module": "hd_export", "quantity": 1},
@@ -1349,14 +1349,18 @@ async def test_disabled_douyidou_is_skipped_in_direct_and_fallback_parse(client:
     user_headers = await _login(client, role="user")
     user_id = str(decode_token(user_headers["Authorization"].removeprefix("Bearer "))["sub"])
     async with SessionLocal() as db:
-        parsed = await content_service.parse_url(
-            db,
-            user_id,
-            "https://www.douyin.com/video/123",
-            None,
-        )
+        # 新契约：douyidou 被禁用时不得调用（forbidden_call 兼验）；降级链落到 Mock 占位视频时
+        # 不再产出假转写，而是返回可操作降级提示
+        with pytest.raises(HTTPException) as exc_info:
+            await content_service.parse_url(
+                db,
+                user_id,
+                "https://www.douyin.com/video/123",
+                None,
+            )
 
-    assert parsed.transcript is not None
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "LINK_SOURCE_UNAVAILABLE"
 
 
 async def test_time_priced_url_asr_rejects_missing_exact_duration(monkeypatch: pytest.MonkeyPatch):
@@ -1466,7 +1470,8 @@ async def test_plan_concurrency_is_enforced_for_parallel_creates(client: AsyncCl
         json={"version": f"concurrency-plan-{uuid.uuid4().hex[:8]}"},
     )
     price_version_id = price_version.json()["id"]
-    modules = ("script_generation", "tts", "digital_human", "hd_export")
+    # 带文案任务不含 script_generation，与服务端报价合同保持一致
+    modules = ("tts", "digital_human", "hd_export")
     for module in modules:
         await client.put(
             f"/api/admin/v1/price-versions/{price_version_id}/modules/{module}",
@@ -1521,11 +1526,11 @@ async def test_plan_concurrency_is_enforced_for_parallel_creates(client: AsyncCl
     async with SessionLocal() as db:
         task = await db.get(PipelineTask, task_id)
         assert task is not None and task.reservation_id
-        assert await settle_reservation(db, task.reservation_id, task.id) == 4
+        assert await settle_reservation(db, task.reservation_id, task.id) == 3
 
     usage = await client.get("/api/v1/billing/usage", headers=user_headers)
     assert usage.status_code == 200
-    assert usage.json()["items"][0]["points"] == 4
+    assert usage.json()["items"][0]["points"] == 3
     assert usage.json()["items"][0]["step"] == "pipeline"
 
 

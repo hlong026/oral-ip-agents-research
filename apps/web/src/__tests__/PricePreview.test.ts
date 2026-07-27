@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildPricePreviewRequest } from "../pages/CreatePage";
 
 describe("创建任务积分报价", () => {
-  it("已有文案时按文案时长和字符数生成后续模块用量", () => {
+  it("已有文案时跳过文案生成计费，按文案时长和字符数生成后续模块用量", () => {
     const request = buildPricePreviewRequest(
       {
         sourceUrl: "https://example.com/video",
@@ -25,11 +25,28 @@ describe("创建任务积分报价", () => {
     );
 
     expect(request.items).toEqual([
-      { module: "script_generation", quantity: 500 },
       { module: "tts", quantity: 1000 },
       { module: "digital_human", quantity: 280 },
       { module: "hd_export", quantity: 1 },
     ]);
+  });
+
+  it("无文案时才包含文案生成模块", () => {
+    const request = buildPricePreviewRequest(
+      { sourceUrl: "", topic: "选题", scriptText: "", count: 1 },
+      [
+        {
+          module: "script_generation",
+          billingUnit: "per_1k_tokens",
+          unitSize: 1000,
+        },
+        { module: "tts", billingUnit: "per_1k_chars", unitSize: 1000 },
+      ],
+    );
+
+    expect(request.items.map((item) => item.module)).toContain(
+      "script_generation",
+    );
   });
 
   it("不会向报价接口发送未发布价格的模块", () => {
