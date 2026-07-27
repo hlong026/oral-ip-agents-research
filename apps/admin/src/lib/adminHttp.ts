@@ -18,7 +18,14 @@ export interface PlanSku {
   description?: string;
   badge?: string;
   sortOrder?: number;
-  skuType: "trial" | "annual_bundle" | "internal_annual" | "points_pack";
+  skuType:
+    | "trial"
+    | "weekly_bundle"
+    | "monthly_bundle"
+    | "quarterly_bundle"
+    | "annual_bundle"
+    | "internal_annual"
+    | "points_pack";
   audience: "public" | "internal";
   status: "draft" | "scheduled" | "published" | "retired";
   version: number;
