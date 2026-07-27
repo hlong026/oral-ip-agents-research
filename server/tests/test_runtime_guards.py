@@ -74,6 +74,12 @@ def test_valid_production_configuration_passes_runtime_guard() -> None:
     validate_runtime_security(valid_production_settings())
 
 
+def test_production_allows_only_fixed_tauri_desktop_origins() -> None:
+    validate_runtime_security(
+        valid_production_settings(cors_origins=("https://app.oral.company,tauri://localhost,https://tauri.localhost"))
+    )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -105,13 +111,29 @@ def test_production_requires_distinct_application_secrets() -> None:
         ({"redis_url": ""}, "REDIS_URL"),
         ({"cors_origins": ""}, "CORS_ORIGINS"),
         ({"cors_origins": "http://app.example.com"}, "CORS_ORIGINS"),
+        ({"cors_origins": "electron://localhost"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://localhost"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://127.0.0.1"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://10.0.0.8"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://app.internal"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://app.example"}, "CORS_ORIGINS"),
+        ({"cors_origins": "https://oral-web"}, "CORS_ORIGINS"),
         ({"storage_driver": "local"}, "STORAGE_DRIVER"),
         ({"s3_endpoint": ""}, "S3_ENDPOINT"),
+        ({"s3_endpoint": "https://"}, "S3_ENDPOINT"),
         ({"s3_access_key": "REPLACE_S3_ACCESS_KEY"}, "S3_ACCESS_KEY"),
         ({"s3_secret_key": "short"}, "S3_SECRET_KEY"),
         ({"s3_bucket": ""}, "S3_BUCKET"),
         ({"media_public_base_url": ""}, "MEDIA_PUBLIC_BASE_URL"),
         ({"media_public_base_url": "http://api.example.com"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://localhost"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://127.0.0.1"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://192.168.1.8"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://media.internal"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://media.example"}, "MEDIA_PUBLIC_BASE_URL"),
+        ({"media_public_base_url": "https://oral-media"}, "MEDIA_PUBLIC_BASE_URL"),
         ({"publish_browser_headless": False}, "PUBLISH_BROWSER_HEADLESS"),
     ],
 )

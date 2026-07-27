@@ -36,7 +36,7 @@ import type {
   Voice,
   WordTimestamp,
 } from "@oral/types";
-import { HttpError, http } from "./http";
+import { buildApiUrl, HttpError, http } from "./http";
 import { deviceFingerprint } from "./fingerprint";
 
 // ---------- auth（激活码即账号） ----------
@@ -91,7 +91,7 @@ export const billingApi = {
     ),
   pricePreview: (input: PricePreviewRequest) =>
     http.post<PricePreview>("/billing/price-preview", input),
-  exportCsvUrl: () => `/api/v1/billing/usage?export=csv`,
+  exportCsvUrl: () => buildApiUrl("/billing/usage?export=csv"),
 };
 
 // ---------- personas / ipasset ----------

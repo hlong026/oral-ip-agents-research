@@ -52,9 +52,33 @@ FFmpeg、Chromium 和真实平台发布驱动，并以非 root 用户运行。
 生产环境必须配置五把互不相同且至少 32 字节的随机密钥：
 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY`、`ACTIVATION_SECRET`、
 `PUBLISH_SESSION_ENCRYPTION_KEY` 和 `FEIYING_WEBHOOK_SECRET`。生产启动还会
-拒绝 SQLite、本地存储、非 HTTPS 公网媒体地址、非 HTTPS CORS 域名、占位配置及
-有头浏览器。完整流程见 `docs/16-生产切换上线检查清单.md`；供应商密钥只保存在
-后端，用户端没有配置入口。
+拒绝 SQLite、本地存储、非 HTTPS 公网媒体地址、非正式 Web/Tauri CORS 来源、
+占位配置及有头浏览器。完整流程见 `docs/16-生产切换上线检查清单.md`；供应商
+密钥只保存在后端，用户端没有配置入口。
+
+## 桌面端构建与分发
+
+桌面端是 Web 用户端的 Tauri 壳，生产构建必须显式注入同一个正式 HTTPS API，
+且路径必须以 `/api/v1` 结尾。HTTP、WebSocket 和 CSV 导出都会从该地址派生：
+
+```bash
+VITE_API_BASE='https://<正式API域名>/api/v1' \
+  pnpm --filter @oral/desktop tauri:build --no-bundle
+```
+
+上述命令只证明桌面工程和生产前端可以编译，不代表安装包可对外分发。macOS 分发
+必须配置正式 `APPLE_SIGNING_IDENTITY` 及一组完整的 Apple 公证凭证后执行：
+
+```bash
+VITE_API_BASE='https://<正式API域名>/api/v1' \
+  pnpm --filter @oral/desktop check:distribution
+VITE_API_BASE='https://<正式API域名>/api/v1' \
+  pnpm --filter @oral/desktop release:mac
+```
+
+当前没有启用自动更新插件：仓库尚未引入更新依赖、更新服务器和签名公钥，客户端
+不得宣称支持自动更新。Windows 签名安装包必须在受控 Windows CI/机器完成构建、
+签名和安装验证。详细状态见 `docs/18-Gate5桌面端与IM收口验收记录.md`。
 
 价格目录首次启动会从旧流水线固定扣费生成 `legacy-v1` 已发布版本，保证迁移前后扣费口径一致。后续价格变更必须新建并发布版本，已报价或已冻结的任务继续使用原价格快照。
 
@@ -75,8 +99,9 @@ FFmpeg、Chromium 和真实平台发布驱动，并以非 root 用户运行。
 | [docs/11-第二阶段真实链路验收.md](docs/11-第二阶段真实链路验收.md)                         | 第二阶段真实 Provider、MP4、计费、发布包和真实发布的证据采集方法                                                                                                |
 | [docs/12-第三阶段S3-01-Go-No-Go决策.md](docs/12-第三阶段S3-01-Go-No-Go决策.md)             | 第三阶段当前 No-Go 结论、工程门禁和重新评审所需证据                                                                                                             |
 | [docs/13-第三阶段七天灰度验收.md](docs/13-第三阶段七天灰度验收.md)                         | S3-14 灰度准入、监控指标、每日证据采集和连续七天退出判定                                                                                                        |
-| [docs/16-生产切换上线检查清单.md](docs/16-生产切换上线检查清单.md)                       | 生产配置、迁移、容器、就绪探针、真实链路、回滚与停机检查                                                                                                        |
-| [docs/17-Gate4发布工程验收记录.md](docs/17-Gate4发布工程验收记录.md)                     | Gate 4 本地隔离环境的依赖、镜像、生产启动、备份恢复与回滚实证                                                                                                   |
+| [docs/16-生产切换上线检查清单.md](docs/16-生产切换上线检查清单.md)                         | 生产配置、迁移、容器、就绪探针、真实链路、回滚与停机检查                                                                                                        |
+| [docs/17-Gate4发布工程验收记录.md](docs/17-Gate4发布工程验收记录.md)                       | Gate 4 本地隔离环境的依赖、镜像、生产启动、备份恢复与回滚实证                                                                                                   |
+| [docs/18-Gate5桌面端与IM收口验收记录.md](docs/18-Gate5桌面端与IM收口验收记录.md)           | Gate 5 桌面端远程链路、构建/分发门禁与 IM 七日证据退出状态                                                                                                      |
 
 ## 调研覆盖产品
 

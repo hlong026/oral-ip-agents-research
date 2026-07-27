@@ -1,5 +1,6 @@
 """S3-14 seven-day gray evidence gate."""
 
+import json
 from argparse import Namespace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -124,3 +125,54 @@ def test_cli_returns_two_for_corrupt_daily_evidence(
     monkeypatch.setattr(report, "_fetch_summary", lambda *_args: _clean_day(date.today())["summary"])
 
     assert report.main() == 2
+
+
+def test_evaluate_only_fails_closed_without_seven_days_or_admin_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        report,
+        "parse_args",
+        lambda: Namespace(
+            api_base="https://gray.example/api/admin/v1",
+            admin_token="",
+            output_dir=tmp_path,
+            require_exit_ready=True,
+            evaluate_only=True,
+        ),
+    )
+
+    exit_code = report.main()
+    output = capsys.readouterr().out
+
+    assert exit_code == 3
+    assert '"exitReady": false' in output
+    assert "连续证据不足 7 天" in output
+
+
+def test_evaluate_only_accepts_existing_clean_seven_day_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    today = date.today()
+    for offset in range(6, -1, -1):
+        sample = _clean_day(today - timedelta(days=offset))
+        (tmp_path / f"{sample['date']}.json").write_text(
+            json.dumps(sample),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(
+        report,
+        "parse_args",
+        lambda: Namespace(
+            api_base="https://gray.example/api/admin/v1",
+            admin_token="",
+            output_dir=tmp_path,
+            require_exit_ready=True,
+            evaluate_only=True,
+        ),
+    )
+
+    assert report.main() == 0
