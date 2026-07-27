@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>封面设计台 · 口播IP智能体</title>
+<link rel="stylesheet" href="assets/style.css">
+<style>
+/* ===== 封面设计台页面级样式 ===== */
+.cv-shell { display: grid; grid-template-columns: 1fr 320px; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .cv-shell { grid-template-columns: 1fr; } .tpl-row { grid-template-columns: repeat(3, 1fr); } }
+
+/* 平台画幅切换条 */
+.ratio-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+.rtab { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 10px 16px; border-radius: 11px; border: 1px solid var(--stroke); background: rgba(0,0,0,.2); cursor: pointer; color: var(--text-3); font-size: 11.5px; }
+.rtab b { font-size: 12.5px; color: var(--text-2); font-weight: 600; }
+.rtab.on { border-color: rgba(34,211,238,.55); background: rgba(34,211,238,.07); }
+.rtab.on b { color: var(--brand-to); }
+.rtab .box { border: 1.5px solid currentColor; border-radius: 3px; opacity: .8; }
+
+/* 画布舞台 */
+.canvas-stage { display: flex; align-items: center; justify-content: center; padding: 26px; background: rgba(0,0,0,.25); border-radius: 12px; border: 1px solid var(--stroke); min-height: 480px; }
+.cover-canvas { position: relative; width: 240px; aspect-ratio: 9/16; border-radius: 10px; overflow: hidden; background: linear-gradient(180deg, #3B2A1E 0%, #17110C 70%); box-shadow: 0 18px 50px rgba(0,0,0,.55); }
+.cover-canvas .figure { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 150px; height: 190px; border-radius: 75px 75px 0 0; background: linear-gradient(180deg, #7C5A3C, #4A3524); }
+.cover-canvas .figure::before { content: "数字人形象帧"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 10px; color: rgba(255,255,255,.4); }
+.cover-canvas .mask { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.62) 0%, rgba(0,0,0,.15) 45%, rgba(0,0,0,.35) 100%); }
+.cover-canvas .title { position: absolute; top: 92px; left: 16px; right: 16px; font-size: 26px; font-weight: 900; line-height: 1.3; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+.cover-canvas .title .hl { color: #FDE047; }
+.cover-canvas .badge-ip { position: absolute; top: 62px; right: 12px; padding: 3px 9px; border-radius: 999px; background: rgba(248,113,113,.92); color: #fff; font-size: 10px; font-weight: 700; }
+.cover-canvas .sticker { position: absolute; bottom: 66px; left: 16px; padding: 4px 10px; background: #FDE047; color: #111; font-weight: 900; font-size: 13px; border-radius: 5px; transform: rotate(-4deg); }
+/* 抖音 3:4 裁切安全区参考线 */
+.cover-canvas .crop34 { position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%); aspect-ratio: 3/4; border-top: 1.5px dashed rgba(251,191,36,.7); border-bottom: 1.5px dashed rgba(251,191,36,.7); pointer-events: none; }
+.cover-canvas .crop34 i { position: absolute; right: 6px; top: 4px; font-style: normal; font-size: 9px; color: var(--warning); background: rgba(0,0,0,.55); padding: 1px 6px; border-radius: 4px; }
+
+/* 图层面板 */
+.layer { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--stroke); background: rgba(0,0,0,.18); font-size: 12.5px; }
+.layer.on { border-color: rgba(99,102,241,.5); background: rgba(99,102,241,.08); }
+.layer .ic { width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center; justify-content: center; background: var(--glass-strong); font-size: 12px; flex-shrink: 0; }
+.layer .meta { flex: 1; min-width: 0; }
+.layer .meta .n { font-weight: 600; }
+.layer .meta .d { font-size: 11px; color: var(--text-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer .eye { color: var(--text-3); cursor: pointer; }
+
+/* AI 标题候选 */
+.ai-title { padding: 9px 12px; border-radius: 9px; border: 1px solid var(--stroke); font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.ai-title.on { border-color: rgba(34,211,238,.5); background: rgba(34,211,238,.06); color: var(--text-1); }
+
+/* 全平台导出条 */
+.export-row { display: flex; gap: 14px; align-items: flex-end; overflow-x: auto; padding: 6px 2px; }
+.exp { display: flex; flex-direction: column; gap: 7px; align-items: center; flex-shrink: 0; }
+.exp .frame { position: relative; border-radius: 7px; overflow: hidden; background: linear-gradient(180deg, #3B2A1E, #17110C); box-shadow: 0 8px 22px rgba(0,0,0,.4); }
+.exp .frame .t { position: absolute; font-weight: 900; color: #fff; line-height: 1.25; }
+.exp .frame .t .hl { color: #FDE047; }
+.exp .frame .fg { position: absolute; bottom: 0; background: linear-gradient(180deg, #7C5A3C, #4A3524); border-radius: 50% 50% 0 0; }
+.exp .lbl { font-size: 11px; color: var(--text-3); text-align: center; line-height: 1.5; }
+.exp .lbl b { display: block; color: var(--text-2); }
+/* 竖屏：标题上 1/3，人物下 2/3 居中 */
+.exp .frame.v .t { top: 8%; left: 9%; right: 9%; font-size: 11px; }
+.exp .frame.v .fg { left: 50%; transform: translateX(-50%); width: 62%; height: 55%; }
+/* 横屏：标题居左半屏，人物居右半屏 */
+.exp .frame.h .t { top: 24%; left: 7%; width: 46%; font-size: 10px; }
+.exp .frame.h .fg { right: 7%; width: 34%; height: 72%; }
+
+/* 模板行 */
+.tpl-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.tpl { border-radius: 11px; border: 1.5px solid var(--stroke); padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
+.tpl.on { border-color: var(--brand-to); box-shadow: 0 0 12px rgba(34,211,238,.25); }
+.tpl .pv { width: 78px; aspect-ratio: 3/4; border-radius: 7px; display: flex; align-items: center; justify-content: center; text-align: center; font-weight: 900; font-size: 12px; padding: 6px; }
+.tpl .nm { font-size: 12px; color: var(--text-2); }
+.tpl .dp { font-size: 10.5px; color: var(--text-3); text-align: center; }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="logo"><div class="mark">口</div><div class="name">口播IP智能体</div></div>
+    <div class="ip-switcher">
+      <div class="avatar">李</div>
+      <div class="meta"><div class="t">李老师讲财税</div><div class="s">知识科普 · 3 平台</div></div>
+      <div class="chev">▾</div>
+    </div>
+    <a class="cta" href="create.html">＋ 一键成片</a>
+    <nav class="nav-group">
+      <div class="label">创作</div>
+      <a class="nav-item" href="index.html"><span class="icon">⌂</span>工作台</a>
+      <a class="nav-item" href="scripts.html"><span class="icon">✎</span>文案工坊</a>
+      <a class="nav-item" href="tasks.html"><span class="icon">☰</span>任务中心<span class="badge">3</span></a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">资产</div>
+      <a class="nav-item" href="profile.html"><span class="icon">◉</span>IP 档案</a>
+      <a class="nav-item" href="assets.html"><span class="icon">▦</span>素材库</a>
+    </nav>
+    <nav class="nav-group">
+      <div class="label">分发</div>
+      <a class="nav-item" href="publish.html"><span class="icon">⇪</span>发布管理<span class="badge red">1</span></a>
+      <a class="nav-item" href="analytics.html"><span class="icon">↗</span>数据看板</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="quota-card">
+      <div class="row1">☁ 云端算力 · 额度<a class="gear" href="settings.html" title="算力设置">⚙</a></div>
+      <div class="row2"><span class="num">12,430</span><a class="charge" href="settings.html">充值 →</a></div>
+      <div class="bar"><i></i></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <span class="title">封面设计台</span>
+      <span class="crumb">一次设计 · 全平台画幅导出 · 横竖屏自动重排</span>
+      <div class="search">🔍 搜索成片</div>
+      <div class="bell">🔔<span class="dot"></span></div>
+      <a class="me" href="account.html" title="我的账号">陈</a>
+    </header>
+
+    <div class="content">
+
+      <div class="flow-bar">
+        <a class="fstep" href="profile.html"><span class="fn">1</span>IP 建档</a><span class="farrow">→</span>
+        <a class="fstep" href="create.html"><span class="fn">2</span>一键成片</a><span class="farrow">→</span>
+        <a class="fstep" href="tasks.html"><span class="fn">3</span>任务中心</a><span class="farrow">→</span>
+        <a class="fstep here" href="editor-v2.html"><span class="fn">4</span>视频剪辑</a><span class="farrow">→</span>
+        <a class="fstep" href="publish.html"><span class="fn">5</span>发布管理</a><span class="farrow">→</span>
+        <a class="fstep" href="analytics.html"><span class="fn">6</span>数据看板</a>
+      </div>
+
+      <!-- 顶部：返回 + 画幅切换 + 保存 -->
+      <div class="card" style="display:flex;align-items:center;gap:16px;padding:12px 18px;flex-wrap:wrap;">
+        <a class="btn sm ghost" href="editor-v2.html">← 返回剪辑台</a>
+        <div class="ratio-tabs">
+          <span class="rtab on"><span class="box" style="width:15px;height:26px;"></span><b>抖音 / 快手</b>9:16 · 1080×1920</span>
+          <span class="rtab"><span class="box" style="width:19px;height:25px;"></span><b>小红书 竖</b>3:4 · 1080×1440</span>
+          <span class="rtab"><span class="box" style="width:25px;height:19px;"></span><b>小红书 横</b>4:3 · 1440×1080</span>
+          <span class="rtab"><span class="box" style="width:20px;height:23px;"></span><b>视频号</b>6:7 · 1080×1260</span>
+          <span class="rtab"><span class="box" style="width:28px;height:16px;"></span><b>B站 / 西瓜</b>16:9 · 1920×1080</span>
+        </div>
+        <a class="btn sm primary" style="margin-left:auto;">✓ 保存封面（导出 5 画幅）</a>
+      </div>
+
+      <div class="cv-shell">
+
+        <!-- 左：画布 -->
+        <div class="card" style="padding:14px;">
+          <div class="card-title">画布 · 抖音 9:16 <span class="more">虚线为主页九宫格 3:4 裁切安全区 · 标题已自动收进</span></div>
+          <div class="canvas-stage">
+            <div class="cover-canvas">
+              <div class="figure"></div>
+              <div class="mask"></div>
+              <div class="crop34"><i>3:4 安全区</i></div>
+              <div class="title">看完<span class="hl">省 2 万</span>！小公司请会计的 3 个真相</div>
+              <div class="badge-ip">李老师讲财税</div>
+              <div class="sticker">真实案例</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右：图层与标题 -->
+        <div style="display:flex;flex-direction:column;gap:14px;min-width:0;">
+          <div class="card">
+            <div class="card-title">图层 <span class="more">点击选中 · 拖拽排序</span></div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div class="layer"><span class="ic">🖼</span><span class="meta"><span class="n">底图 · 成片取帧</span><span class="d">00:09 钩子句 · AI 推荐最大人脸帧</span></span><span class="eye">👁</span></div>
+              <div class="layer"><span class="ic">◐</span><span class="meta"><span class="n">遮罩 · 顶部压暗 62%</span><span class="d">保障标题对比度 ≥ 4.5:1</span></span><span class="eye">👁</span></div>
+              <div class="layer on"><span class="ic">Ⓣ</span><span class="meta"><span class="n">标题 · 思源黑体 Heavy</span><span class="d">关键词「省 2 万」高亮 #FDE047</span></span><span class="eye">👁</span></div>
+              <div class="layer"><span class="ic">◉</span><span class="meta"><span class="n">IP 角标 · 李老师讲财税</span><span class="d">竖屏右上 / 横屏右下（自动）</span></span><span class="eye">👁</span></div>
+              <div class="layer"><span class="ic">✦</span><span class="meta"><span class="n">贴片 ·「真实案例」</span><span class="d">黄底黑字 · 旋转 -4°</span></span><span class="eye">👁</span></div>
+            </div>
+            <div class="field" style="margin-top:12px;">
+              <span class="lb">底图取帧点（拖动换帧）</span>
+              <input type="range" class="slider" value="16">
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">标题 <span class="more">AI 从文案钩子句生成</span></div>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div class="ai-title on">看完省 2 万！小公司请会计的 3 个真相</div>
+              <div class="ai-title">刚起步的公司，会计这笔钱该不该花？</div>
+              <div class="ai-title">财税老手 12 年经验：这 3 笔钱别乱省</div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:10px;">
+              <input class="input" style="flex:1;" placeholder="或手动输入标题…">
+              <a class="btn sm ghost">↻ 再来 3 条</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 全平台导出预览：横竖屏差异化效果 -->
+      <div class="card">
+        <div class="card-title">全平台导出预览 <span class="more">同一份设计 · 横屏自动切换为「左标题 + 右人物」构图</span></div>
+        <div class="export-row">
+          <div class="exp">
+            <div class="frame v" style="width:86px;aspect-ratio:9/16;"><span class="t">看完<span class="hl">省2万</span>！小公司请会计的3个真相</span><span class="fg"></span></div>
+            <span class="lbl"><b>抖音 / 快手</b>9:16 · 1080×1920</span>
+          </div>
+          <div class="exp">
+            <div class="frame v" style="width:100px;aspect-ratio:3/4;"><span class="t">看完<span class="hl">省2万</span>！请会计的3个真相</span><span class="fg"></span></div>
+            <span class="lbl"><b>小红书 竖</b>3:4 · 1080×1440</span>
+          </div>
+          <div class="exp">
+            <div class="frame v" style="width:96px;aspect-ratio:6/7;"><span class="t">看完<span class="hl">省2万</span>！3个真相</span><span class="fg"></span></div>
+            <span class="lbl"><b>视频号</b>6:7 · 1080×1260</span>
+          </div>
+          <div class="exp">
+            <div class="frame h" style="width:150px;aspect-ratio:4/3;"><span class="t">看完<span class="hl">省2万</span>！请会计的3个真相</span><span class="fg"></span></div>
+            <span class="lbl"><b>小红书 横</b>4:3 · 1440×1080</span>
+          </div>
+          <div class="exp">
+            <div class="frame h" style="width:180px;aspect-ratio:16/9;"><span class="t">看完<span class="hl">省2万</span>！小公司请会计的3个真相</span><span class="fg"></span></div>
+            <span class="lbl"><b>B站 / 西瓜</b>16:9 · 1920×1080</span>
+          </div>
+        </div>
+        <div class="notice green" style="margin-top:12px;">✓ 发布时按目标平台自动携带对应画幅封面；抖音、快手封面核心内容已收进 3:4 主页裁切安全区。</div>
+      </div>
+
+      <!-- 模板库 -->
+      <div class="sec"><h2>封面模板（5）</h2><span class="hint">模板 = 预填的图层组合，选择后仅需改标题</span><a class="more" href="templates.html">在模板中心管理 →</a></div>
+      <div class="card">
+        <div class="tpl-row">
+          <div class="tpl on"><span class="pv" style="background:linear-gradient(180deg,#7F1D1D,#450A0A);color:#fff;">看完<br>省2万！</span><span class="nm">大字标题</span><span class="dp">政策解读 · 干货科普</span></div>
+          <div class="tpl"><span class="pv" style="background:linear-gradient(180deg,#1E3A8A,#172554);color:#fff;">李◉<br><span style="font-size:9px;font-weight:400;">财税12年</span></span><span class="nm">人物特写</span><span class="dp">人设向 IP</span></div>
+          <div class="tpl"><span class="pv" style="background:linear-gradient(90deg,#14532D 50%,#052E16 50%);color:#86EFAC;">2万<br>→ 0</span><span class="nm">对比数字</span><span class="dp">省钱 · 收益对比</span></div>
+          <div class="tpl"><span class="pv" style="background:repeating-linear-gradient(45deg,#FDE047 0 10px,#111 10px 20px);color:#111;"><span style="background:#FDE047;padding:2px 4px;">避坑!</span></span><span class="nm">黄黑警示</span><span class="dp">避坑 · 风险提示</span></div>
+          <div class="tpl"><span class="pv" style="background:linear-gradient(180deg,#312E81,#1E1B4B);color:#C7D2FE;">第3讲<br><span style="font-size:9px;font-weight:400;">▬▬▬○▬</span></span><span class="nm">课程章节</span><span class="dp">系列课程 · 合集</span></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="mock-nav">
+  <div class="h">页面效果图</div>
+  <a href="index.html">工作台</a>
+  <a href="create.html">一键成片</a>
+  <a href="profile.html">IP 档案</a>
+  <a href="scripts.html">文案工坊</a>
+  <a href="editor.html">视频剪辑</a>
+  <a href="editor-v2.html">剪辑台 V2</a>
+  <a class="cur" href="cover-designer.html">封面设计</a>
+  <a href="tasks.html">任务中心</a>
+  <a href="avatars.html">数字人中心</a>
+  <a href="voices.html">声音中心</a>
+  <a href="assets.html">素材库</a>
+  <a href="templates.html">模板中心</a>
+  <a href="publish.html">发布管理</a>
+  <a href="accounts.html">账号管理</a>
+  <a href="analytics.html">数据看板</a>
+  <a href="settings.html">算力设置</a>
+  <a href="account.html">我的账号</a>
+</div>
+</body>
+</html>
