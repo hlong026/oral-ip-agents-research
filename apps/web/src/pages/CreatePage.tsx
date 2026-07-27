@@ -31,7 +31,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import LinkSourceInput from "../components/LinkSourceInput";
 import PlatformIcon from "../components/PlatformIcon";

@@ -7,7 +7,7 @@ on:
 
 jobs:
   quality-gates:
-    name: 第一阶段交付门禁
+    name: 系统收口质量门禁
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -34,7 +34,7 @@ jobs:
           version: 9.15.0
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.22.0
           cache: pnpm
       - name: 1. 依赖锁与安装
         run: |
@@ -90,5 +90,14 @@ jobs:
         run: pnpm test
       - name: 11. 前端构建
         run: pnpm build
-      - name: 12. 秘密扫描
+      - name: 12. 生产依赖安全审计
+        run: |
+          uv run --directory server --with pip-audit==2.10.0 pip-audit --local
+          pnpm audit --prod --audit-level high
+      - name: 13. 容器部署契约
+        run: |
+          cp server/.env.example server/.env
+          docker compose config --quiet
+          docker build -f server/Dockerfile -t oral-ip-server:ci .
+      - name: 14. 秘密扫描
         run: node scripts/scan-secrets.mjs

@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { adminApi } from "../lib/adminHttp";
 
 export default function LoginPage() {

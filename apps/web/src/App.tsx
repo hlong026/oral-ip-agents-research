@@ -1,6 +1,7 @@
 import { useSession } from "@oral/stores";
 import { useEffect } from "react";
-import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+import type { ReactElement } from "react";
+import { Navigate, Route, Routes, useLocation } from "react-router";
 import Shell from "./shell/Shell";
 import AccountPage from "./pages/AccountPage";
 import AnalyticsPage from "./pages/AnalyticsPage";
@@ -28,7 +29,7 @@ import TasksPage from "./pages/TasksPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import VoicesPage from "./pages/VoicesPage";
 
-function RequireAuth({ children }: { children: JSX.Element }) {
+function RequireAuth({ children }: { children: ReactElement }) {
   const { user, ready, bootstrap } = useSession();
   const location = useLocation();
 

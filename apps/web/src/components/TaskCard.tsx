@@ -4,7 +4,7 @@ import {
   type PipelineTask,
   type StepStatus,
 } from "@oral/types";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 
 const STATUS_TEXT: Record<string, { label: string; cls: string }> = {
   pending: { label: "排队中", cls: "text-text-3 border-stroke" },

@@ -135,7 +135,12 @@ async def parse_url(
     """链接解析 → 音频优先 ASR → 落文案资产（抖/快/红书；视频号走文件上传入口）"""
     # URL/ID 识别与标准化
     resolved = resolve_input(url)
-    logger.info(f"解析输入: platform={resolved.platform.value}, is_id={resolved.is_id}, url={resolved.url[:80]}")
+    logger.info(
+        "parse_input_resolved",
+        platform=resolved.platform.value,
+        is_id=resolved.is_id,
+        source_host=urlparse(resolved.url).hostname or "",
+    )
 
     # 尝试 Douyidou 完整解析（获取文案+视频直链）
     douyidou_result = _recent_probe_result(resolved.url)

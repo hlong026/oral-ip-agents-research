@@ -1,5 +1,5 @@
-# 口播IP智能体 — 基础设施（06 文档 §6.1 数据层）
-# 起步：PG16 + Redis7 + MinIO；GPU Worker 后续单独编排
+# 口播IP智能体 — 本地开发编排（不得直接用于生产）
+# 起步：PG16 + Redis7 + MinIO；生产部署遵循 docs/16-生产切换上线检查清单.md
 services:
   postgres:
     image: postgres:16-alpine
@@ -47,15 +47,17 @@ services:
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     container_name: oral-server
     env_file:
       - ./server/.env
     environment:
+      APP_ENV: dev
       DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      PUBLISH_BROWSER_HEADLESS: "true"
     ports:
       - "127.0.0.1:${API_PORT:-8000}:8000"
     depends_on:
@@ -65,18 +67,31 @@ services:
         condition: service_healthy
     volumes:
       - oral-storage:/app/storage
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   worker:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     command: dramatiq app.workers.tasks --processes 2 --threads 1
     env_file:
       - ./server/.env
     environment:
+      APP_ENV: dev
       DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      PUBLISH_BROWSER_HEADLESS: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,16 +101,19 @@ services:
       - oral-storage:/app/storage
 
   im-listener:
+    profiles: ["im-research"]
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     command: python -m app.workers.im_listener
     env_file:
       - ./server/.env
     environment:
+      APP_ENV: dev
       DATABASE_URL: postgresql+asyncpg://oral:oral_dev_pass@postgres:5432/oral
       REDIS_URL: redis://redis:6379/0
       S3_ENDPOINT: http://minio:9000
+      PUBLISH_BROWSER_HEADLESS: "true"
     depends_on:
       postgres:
         condition: service_healthy

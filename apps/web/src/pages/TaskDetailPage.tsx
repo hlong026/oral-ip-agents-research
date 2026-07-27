@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router";
 
 const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
   pending: { icon: Circle, cls: "text-text-3" },

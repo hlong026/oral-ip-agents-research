@@ -6,6 +6,7 @@
 """
 
 import logging
+import re
 from collections.abc import MutableMapping
 from contextvars import ContextVar
 from typing import Any
@@ -31,8 +32,56 @@ _SENSITIVE_KEYS = {
     "api_key",
     "apikey",
     "authorization",
+    "cookie",
+    "cookies",
+    "publish_session_encryption_key",
+    "s3_secret_key",
+    "secret",
+    "secret_key",
+    "signature",
+    "token",
 }
 _TRUNCATE_KEYS = {"source_url": 80, "script": 100, "text": 100, "original_text": 100}
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"(?i)(\b(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|"
+    r"signature|x-amz-credential|x-amz-security-token|cookie|sessionid(?:_ss)?|"
+    r"password|secret)\b[\"']?\s*[:=]\s*(?:bearer\s+)?[\"']?)[^&,\s;\"']+"
+)
+_BEARER_RE = re.compile(r"(?i)(\bbearer\s+)[A-Za-z0-9._~+/=-]+")
+_PHONE_RE = re.compile(r"(?<!\d)(1\d{10})(?!\d)")
+
+
+def sanitize_text(value: str) -> str:
+    """Redact credentials, signed query values and mainland phone numbers in free-form text."""
+
+    redacted = _SECRET_ASSIGNMENT_RE.sub(r"\1***", value)
+    redacted = _BEARER_RE.sub(r"\1***", redacted)
+    return _PHONE_RE.sub(lambda match: match.group(1)[:3] + "****" + match.group(1)[-4:], redacted)
+
+
+def sanitize_loguru_record(record: MutableMapping[str, Any]) -> bool:
+    """Sanitize vendor loguru records and suppress their unredacted traceback payload."""
+
+    record["message"] = sanitize_text(str(record.get("message", "")))
+    record["exception"] = None
+    return True
+
+
+class SensitiveDataFilter(logging.Filter):
+    """Apply the same redaction boundary to standard-library and vendor logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        parts = [sanitize_text(record.getMessage())]
+        if record.exc_info:
+            parts.append(sanitize_text(logging.Formatter().formatException(record.exc_info)))
+        if record.stack_info:
+            parts.append(sanitize_text(record.stack_info))
+        record.msg = "\n".join(parts)
+        record.args = ()
+        record.exc_info = None
+        record.exc_text = None
+        record.stack_info = None
+        return True
 
 
 def _inject_context(_logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
@@ -55,16 +104,17 @@ def _sanitize(_logger: Any, _method_name: str, event_dict: MutableMapping[str, A
         lower_key = key.lower().replace("-", "_")
         if lower_key in _SENSITIVE_KEYS:
             event_dict[key] = "***"
-        elif lower_key in _TRUNCATE_KEYS:
-            max_len = _TRUNCATE_KEYS[lower_key]
-            val = event_dict[key]
-            if isinstance(val, str) and len(val) > max_len:
-                event_dict[key] = val[:max_len] + "..."
         # phone 脱敏：保留前3位 + ****
         elif lower_key == "phone" and isinstance(event_dict[key], str):
             phone = event_dict[key]
             if len(phone) >= 7:
                 event_dict[key] = phone[:3] + "****" + phone[-4:]
+        elif isinstance(event_dict[key], str):
+            value = sanitize_text(event_dict[key])
+            max_len = _TRUNCATE_KEYS.get(lower_key)
+            if max_len and len(value) > max_len:
+                value = value[:max_len] + "..."
+            event_dict[key] = value
     return event_dict
 
 
@@ -104,6 +154,8 @@ def setup_logging(app_env: str = "dev") -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         force=True,
     )
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(SensitiveDataFilter())
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:

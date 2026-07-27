@@ -4,7 +4,7 @@ import type { Voice } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mic, Music, Play, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import AssetNav from "../components/AssetNav";
 import {
   confirmMeteredOperation,

@@ -73,13 +73,9 @@ class DistributedSemaphore:
         self._redis_url = settings.redis_url
         self._operation_timeout = max(
             0.05,
-            operation_timeout
-            if operation_timeout is not None
-            else settings.redis_operation_timeout_seconds,
+            operation_timeout if operation_timeout is not None else settings.redis_operation_timeout_seconds,
         )
-        self._distributed = (
-            settings.app_env not in {"dev", "test"} if distributed is None else distributed
-        )
+        self._distributed = settings.app_env not in {"dev", "test"} if distributed is None else distributed
         self._local = asyncio.Semaphore(self._limit)
 
     def _redis_client(self) -> Any:

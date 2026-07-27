@@ -2,7 +2,7 @@ import { activationApi, billingApi } from "@oral/api-client";
 import { useSession } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 
 /** 账号与额度（F-602：额度查询 / 用量明细 / CSV 导出） */
 export default function AccountPage() {

@@ -87,12 +87,8 @@ app.add_middleware(TraceMiddleware)
 _allowed_origins = (
     ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
     if settings.app_env == "dev"
-    else [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+    else [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 )
-if not _allowed_origins and settings.app_env != "dev":
-    import warnings
-
-    warnings.warn("CORS_ORIGINS 未配置，生产环境跨域请求将被拒绝", stacklevel=1)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,

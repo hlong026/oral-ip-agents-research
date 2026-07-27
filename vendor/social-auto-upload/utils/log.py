@@ -1,8 +1,21 @@
+import os
 import sys
 from pathlib import Path
+
 from loguru import logger
 
 from conf import BASE_DIR
+
+try:
+    from app.core.logging import sanitize_loguru_record
+except ImportError:
+
+    def sanitize_loguru_record(record: dict) -> bool:
+        """Fail closed when SAU is executed without the application redaction boundary."""
+
+        record["message"] = "vendor log suppressed outside application redaction boundary"
+        record["exception"] = None
+        return True
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -37,17 +50,34 @@ def create_logger(log_name: str, file_path: str):
     :returns: Configured logger
     """
     def filter_record(record):
-        return record["extra"].get("business_name") == log_name
+        return sanitize_loguru_record(record) and record["extra"].get("business_name") == log_name
 
-    Path(BASE_DIR / file_path).parent.mkdir(exist_ok=True)
-    logger.add(Path(BASE_DIR / file_path), filter=filter_record, level="INFO", rotation="10 MB", retention="10 days", backtrace=True, diagnose=True)
+    if os.getenv("APP_ENV", "dev") == "dev":
+        Path(BASE_DIR / file_path).parent.mkdir(parents=True, exist_ok=True)
+        logger.add(
+            Path(BASE_DIR / file_path),
+            filter=filter_record,
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level}: {message}\n",
+            level="INFO",
+            rotation="10 MB",
+            retention="10 days",
+            backtrace=False,
+            diagnose=False,
+        )
     return logger.bind(business_name=log_name)
 
 
 # Remove all existing handlers
 logger.remove()
 # Add a standard console handler
-logger.add(sys.stdout, colorize=True, format=log_formatter)
+logger.add(
+    sys.stdout,
+    colorize=True,
+    format=log_formatter,
+    filter=sanitize_loguru_record,
+    backtrace=False,
+    diagnose=False,
+)
 
 douyin_logger = create_logger('douyin', 'logs/douyin.log')
 tencent_logger = create_logger('tencent', 'logs/tencent.log')

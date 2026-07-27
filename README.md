@@ -14,6 +14,8 @@
 
 ## 本地启动
 
+前端工具链要求 Node.js 22.22.0 或更高版本、pnpm 9 或更高版本。
+
 ```bash
 pnpm install
 pnpm dev:web       # http://localhost:5173
@@ -38,12 +40,21 @@ Go/No-Go 门禁约束，不得仅通过设置 `IM_ENABLED=true` 绕过授权与�
 `IM_CLEANUP_INTERVAL_HOURS` 小时分批清理终态历史；待发送、发送中和失败可重试消息不会被自动清理。
 
 本地后端需要可执行的 `ffprobe`（由 FFmpeg 提供），用于在冻结按时长计费的
-ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置 FFmpeg。
+ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker 镜像已内置
+FFmpeg、Chromium 和真实平台发布驱动，并以非 root 用户运行。
+
+根目录 `docker-compose.yml` 只用于本地开发，显式固定 `APP_ENV=dev`，不得直接用于
+生产。默认不会启动合规 No-Go 的 IM 监听器；仅在授权的开发预研中使用
+`docker compose --profile im-research up im-listener`。
 
 首次部署可临时设置 `BOOTSTRAP_ADMIN_PHONE` 和至少 12 位的
 `BOOTSTRAP_ADMIN_PASSWORD`。管理员创建成功后，应从部署环境删除引导密码。
-生产环境必须分别配置 `APP_SECRET`、`CONFIG_ENCRYPTION_KEY` 和
-`ACTIVATION_SECRET`；供应商密钥只保存在后端，用户端没有配置入口。
+生产环境必须配置五把互不相同且至少 32 字节的随机密钥：
+`APP_SECRET`、`CONFIG_ENCRYPTION_KEY`、`ACTIVATION_SECRET`、
+`PUBLISH_SESSION_ENCRYPTION_KEY` 和 `FEIYING_WEBHOOK_SECRET`。生产启动还会
+拒绝 SQLite、本地存储、非 HTTPS 公网媒体地址、非 HTTPS CORS 域名、占位配置及
+有头浏览器。完整流程见 `docs/16-生产切换上线检查清单.md`；供应商密钥只保存在
+后端，用户端没有配置入口。
 
 价格目录首次启动会从旧流水线固定扣费生成 `legacy-v1` 已发布版本，保证迁移前后扣费口径一致。后续价格变更必须新建并发布版本，已报价或已冻结的任务继续使用原价格快照。
 
@@ -64,6 +75,8 @@ ASR 或数字分身积分前验证上传媒体的真实时长；服务端 Docker
 | [docs/11-第二阶段真实链路验收.md](docs/11-第二阶段真实链路验收.md)                         | 第二阶段真实 Provider、MP4、计费、发布包和真实发布的证据采集方法                                                                                                |
 | [docs/12-第三阶段S3-01-Go-No-Go决策.md](docs/12-第三阶段S3-01-Go-No-Go决策.md)             | 第三阶段当前 No-Go 结论、工程门禁和重新评审所需证据                                                                                                             |
 | [docs/13-第三阶段七天灰度验收.md](docs/13-第三阶段七天灰度验收.md)                         | S3-14 灰度准入、监控指标、每日证据采集和连续七天退出判定                                                                                                        |
+| [docs/16-生产切换上线检查清单.md](docs/16-生产切换上线检查清单.md)                       | 生产配置、迁移、容器、就绪探针、真实链路、回滚与停机检查                                                                                                        |
+| [docs/17-Gate4发布工程验收记录.md](docs/17-Gate4发布工程验收记录.md)                     | Gate 4 本地隔离环境的依赖、镜像、生产启动、备份恢复与回滚实证                                                                                                   |
 
 ## 调研覆盖产品
 

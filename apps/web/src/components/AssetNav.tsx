@@ -1,5 +1,5 @@
 import { Bot, CircleUserRound, type LucideIcon, Music } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router";
 
 // V1.1 未上架功能（模板/素材库）入口暂时隐藏，路由保留可直达；上线时恢复注释项
 const ITEMS: readonly { to: string; icon: LucideIcon; label: string }[] = [

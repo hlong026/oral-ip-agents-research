@@ -4,7 +4,7 @@ import type { EditConfig as ApiEditConfig, PipelineTask } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, Play } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router";
 import { confirmMeteredOperation } from "../lib/meteredOperation";
 
 const SUB_COLORS = [

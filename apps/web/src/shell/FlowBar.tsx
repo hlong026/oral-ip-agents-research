@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { useMemo } from "react";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router";
 
 /** flow-bar 全局七步动线（与一键成片向导七步对齐：创作流程页显示，账号/套餐页不显示） */
 const FLOW_STEPS = [

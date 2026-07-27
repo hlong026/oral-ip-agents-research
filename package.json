@@ -5,7 +5,7 @@
   "description": "口播IP智能体 — 口播视频全链路智能体（Monorepo）",
   "packageManager": "pnpm@9.15.0",
   "engines": {
-    "node": ">=20",
+    "node": ">=22.22.0",
     "pnpm": ">=9"
   },
   "scripts": {

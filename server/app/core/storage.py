@@ -256,9 +256,7 @@ async def storage_ready() -> bool:
     """检查当前存储后端是否可用，不创建探针对象。"""
     if settings.storage_driver == "local":
         path = Path(settings.local_storage_dir)
-        return await asyncio.to_thread(
-            lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK)
-        )
+        return await asyncio.to_thread(lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK))
     try:
         client = _s3_client()
         await asyncio.to_thread(client.head_bucket, Bucket=settings.s3_bucket)

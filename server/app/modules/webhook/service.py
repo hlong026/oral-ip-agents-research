@@ -172,9 +172,7 @@ async def _record_failure(
     retry_delay = _retry_delay_seconds(receipt.retry_count)
     receipt.status = "failed"
     receipt.payload_json = payload_json
-    receipt.error_context = (
-        f"type={msg_type},task={task_id[:64]},error={type(exc).__name__}:{str(exc)[:300]}"
-    )
+    receipt.error_context = f"type={msg_type},task={task_id[:64]},error={type(exc).__name__}:{str(exc)[:300]}"
     receipt.processed_at = datetime.now(UTC)
     receipt.next_retry_at = receipt.processed_at + timedelta(seconds=retry_delay)
     await db.commit()

@@ -2,7 +2,7 @@ import { contentApi } from "@oral/api-client";
 import type { RewriteIntensity } from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router";
 import {
   confirmMeteredOperation,
   textOperationUsage,

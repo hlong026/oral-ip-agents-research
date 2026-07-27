@@ -4,7 +4,7 @@ import type { Avatar, Persona } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bot, Play, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import AssetNav from "../components/AssetNav";
 import {
   confirmMeteredOperation,
