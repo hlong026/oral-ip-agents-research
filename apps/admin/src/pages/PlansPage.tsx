@@ -51,8 +51,8 @@ const SKU_TYPE_PRESETS: Record<
   },
   points_pack: {
     label: "积分加油包",
-    hint: "补充积分，一次性到账",
-    durationDays: 365,
+    hint: "补充积分，一次性到账，无服务期",
+    durationDays: 0, // 后端要求积分包服务期必须为 0
     pointsMode: "oneTime",
   },
 };
@@ -222,7 +222,13 @@ export default function PlansPage() {
       skuType,
       durationDays: preset.durationDays,
       pointsMode: preset.pointsMode,
-      audience: skuType === "internal_annual" ? "internal" : form.audience,
+      // 内部年度强制仅限内部；切离时重置回公开，避免残留 internal 造成静默错配
+      audience:
+        skuType === "internal_annual"
+          ? "internal"
+          : form.skuType === "internal_annual"
+            ? "public"
+            : form.audience,
       // 编码未被手动改过时，跟随类型自动重新生成
       code: codeEdited ? form.code : genCode(skuType),
     });
