@@ -23,7 +23,7 @@ from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
 from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
 from app.core.white_label import public_model_name
-from app.providers.base import ProviderError
+from app.providers.base import ProviderError, is_mock_provider as _is_mock_provider
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
 from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
 from app.providers.registry import registry
@@ -88,11 +88,6 @@ def _recent_probe_result(url: str) -> DouyidouParseResult | None:
         _probe_result_cache.pop(url, None)
         return None
     return result
-
-
-def _is_mock_provider(provider_name: str) -> bool:
-    """Mock 兜底 provider 只产占位数据，真实解析/转写场景必须拒收其结果。"""
-    return provider_name.startswith("mock-")
 
 
 def _is_public_media_url(value: str) -> bool:
