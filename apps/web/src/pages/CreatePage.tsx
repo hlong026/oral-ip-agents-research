@@ -862,6 +862,7 @@ function StepVoice({
         </div>
       )}
     </div>
+    </div>
   );
 }
 
@@ -932,6 +933,7 @@ function StepAvatar({
           </Link>
         </div>
       )}
+    </div>
     </div>
   );
 }
