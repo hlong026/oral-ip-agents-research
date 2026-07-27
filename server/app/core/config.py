@@ -83,7 +83,17 @@ class Settings(BaseSettings):
 
     # 流水线并发闸门（F-406）
     pipeline_max_concurrency: int = 5
-    provider_mock_fallback_enabled: bool = True
+    # Mock 降级开关：未显式配置时按环境推导（仅 dev/test 默认开）；非 dev/test 环境强制关闭
+    provider_mock_fallback_enabled: bool | None = None
+
+    @property
+    def mock_fallback_allowed(self) -> bool:
+        """Mock 降级是否允许：生产等非 dev/test 环境无条件 False，不受 .env 误配影响。"""
+        if self.app_env not in {"dev", "test"}:
+            return False
+        if self.provider_mock_fallback_enabled is None:
+            return True
+        return self.provider_mock_fallback_enabled
 
     # 发布模块（social-auto-upload 浏览器自动化）
     # 默认无头：扫码登录二维码经 API 传给前端展示，不再弹出浏览器窗口

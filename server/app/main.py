@@ -133,6 +133,21 @@ async def healthz() -> dict:
     return {"ok": True}
 
 
+@app.get("/readyz")
+async def readyz() -> dict:
+    """部署验证端点：暴露运行环境、provider 模式与各链名单，切生产后用于确认零 Mock"""
+    from app.providers.registry import registry
+
+    has_mock = registry.has_mock_providers()
+    return {
+        "ok": True,
+        "env": settings.app_env,
+        "provider_mode": "mock_fallback" if has_mock else "real_only",
+        "mock_fallback_allowed": settings.mock_fallback_allowed,
+        "provider_chains": registry.chain_snapshot(),
+    }
+
+
 # ---- 业务路由 ----
 from app.modules.activation.router import admin_router as activation_admin_router  # noqa: E402
 from app.modules.activation.router import router as activation_router  # noqa: E402

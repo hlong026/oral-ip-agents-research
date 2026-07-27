@@ -22,6 +22,7 @@ from .base import (
     ParseProvider,
     PublishDriver,
     VoiceProvider,
+    is_mock_provider,
 )
 from .douyidou import DouyidouParser
 from .hifly import HiFlyAvatar, HiFlyVoice
@@ -41,11 +42,9 @@ class ProviderRegistry:
 
     def __init__(self) -> None:
         settings = get_settings()
-        allow_mock = settings.app_env in {"dev", "test"} and getattr(
-            settings,
-            "provider_mock_fallback_enabled",
-            True,
-        )
+        # Mock 降级仅 dev/test 可用；未显式配置时按环境推导（同 Settings.mock_fallback_allowed 语义）
+        mock_pref = getattr(settings, "provider_mock_fallback_enabled", None)
+        allow_mock = settings.app_env in {"dev", "test"} and (mock_pref is None or bool(mock_pref))
         self.llm_chain: list[LLMProvider] = [DeepSeekLLM()]
         self.parse_chain: list[ParseProvider] = [DouyidouParser(), ThirdPartyParser()]
         self.asr_chain: list[ASRProvider] = [AliyunASR()]
@@ -74,6 +73,42 @@ class ProviderRegistry:
         self.im_drivers: dict[str, IMProvider] = {}
         if settings.im_enabled and settings.douyin_im_app_key:
             self.im_drivers["douyin"] = DouyinIMProvider()
+        # 生产零 Mock 启动自检：非 dev/test 环境任何链混入 mock- provider 直接拒绝启动（fail-fast）
+        if settings.app_env not in {"dev", "test"}:
+            self._assert_no_mock_providers()
+
+    def _chains(self) -> dict[str, list[Any]]:
+        return {
+            "llm": self.llm_chain,
+            "parse": self.parse_chain,
+            "asr": self.asr_chain,
+            "voice": self.voice_chain,
+            "avatar": self.avatar_chain,
+            "compose": self.compose_chain,
+        }
+
+    def _assert_no_mock_providers(self) -> None:
+        """遍历全部降级链与发布驱动，发现 Mock 立即抛异常（机制性防线，不靠人工检查配置）"""
+        leaked = [
+            f"{kind}:{provider.name}"
+            for kind, chain in self._chains().items()
+            for provider in chain
+            if is_mock_provider(provider.name)
+        ]
+        leaked += [
+            f"publish:{driver.name}" for driver in self.publish_drivers.values() if is_mock_provider(driver.name)
+        ]
+        if leaked:
+            raise RuntimeError("生产环境禁止加载 Mock Provider，启动已拒绝：" + ", ".join(leaked))
+
+    def chain_snapshot(self) -> dict[str, list[str]]:
+        """各链 provider 名单快照（/readyz 部署验证用）"""
+        snapshot = {kind: [p.name for p in chain] for kind, chain in self._chains().items()}
+        snapshot["publish"] = [d.name for d in self.publish_drivers.values()]
+        return snapshot
+
+    def has_mock_providers(self) -> bool:
+        return any(is_mock_provider(name) for names in self.chain_snapshot().values() for name in names)
 
     async def provider_enabled(self, provider_name: str) -> bool:
         """真实 Provider 必须服从管理端开关；开发环境保留 Mock 降级体验。"""
@@ -192,15 +227,7 @@ class ProviderRegistry:
 
     def get(self, kind: str):
         """按类型获取链首 Provider（供 im 等模块直接调用 LLM）"""
-        chain_map: dict[str, list[Any]] = {
-            "llm": self.llm_chain,
-            "parse": self.parse_chain,
-            "asr": self.asr_chain,
-            "voice": self.voice_chain,
-            "avatar": self.avatar_chain,
-            "compose": self.compose_chain,
-        }
-        chain = chain_map.get(kind)
+        chain = self._chains().get(kind)
         if not chain:
             raise RuntimeError(f"unknown provider kind: {kind}")
         return chain[0]
