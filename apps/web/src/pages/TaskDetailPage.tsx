@@ -196,9 +196,20 @@ export default function TaskDetailPage() {
       // 首拉失败时也持续重试，避免 WS 不可用时页面永久停在加载态
       if (!q.state.data) return 3000;
       const s = q.state.data.status;
-      return s === "pending" || s === "running" || s === "waiting_confirm"
-        ? 3000
-        : false;
+      // 任务完成或失败后仍需轮询一段时间，确保 final_video_url 能被正确拉取
+      // （WS 推送可能延迟，且 to_out() 仅在 final_video_key 存在时才生成 final_video_url）
+      if (s === "pending" || s === "running" || s === "waiting_confirm") {
+        return 3000;
+      }
+      if (s === "done" || s === "failed" || s === "reconciliation_required") {
+        // 完成后仍需在短时间内轮询，给后端签名 URL 生成留出缓冲时间
+        // 使用缓存状态判断：如果已有数据且包含 final_video_url，可提前停止轮询
+        if (q.state.data && q.state.data.artifacts?.final_video_url) {
+          return false; // ✓ 视频 URL 已就绪，立即停止轮询
+        }
+        return 5000; // 继续轮询 5 秒等待产物同步
+      }
+      return false;
     },
     // 标签页切后台时也保持轮询，切回即见最新进度
     refetchIntervalInBackground: true,
@@ -364,8 +375,21 @@ export default function TaskDetailPage() {
                     ? "合成未完成，可展开下方步骤详情从失败步续跑"
                     : task.status === "reconciliation_required"
                       ? "任务等待管理员核对外部服务结果"
-                      : "任务已取消，未生成成片"}
+                      : task.status === "canceled"
+                        ? "任务已取消，未生成成片"
+                        : task.status === "done"
+                          ? finalVideoUrl
+                            ? "成片加载中..."
+                            : "成片生成成功，正在准备播放文件（如长时间未显示，请尝试刷新）"
+                          : "任务已取消，未生成成片"}
                 </span>
+                {/* 提供手动刷新入口 */}
+                <button
+                  onClick={refresh}
+                  className="btn-ghost mt-2 text-xs hover:text-brand-to"
+                >
+                  ↻ 手动刷新
+                </button>
               </>
             ) : (
               <>

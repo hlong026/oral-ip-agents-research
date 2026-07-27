@@ -1048,7 +1048,11 @@ export default function CreatePage() {
   const liveTask = useTasks((s) =>
     wiz.taskId ? s.tasks[wiz.taskId] : undefined,
   );
-  const { data: fetchedTask } = useQuery({
+  const {
+    data: fetchedTask,
+    refetch: refetchCreateTask,
+    error: fetchCreateError,
+  } = useQuery({
     queryKey: ["task", wiz.taskId],
     queryFn: () => pipelineApi.get(wiz.taskId),
     enabled: Boolean(wiz.taskId),
@@ -1056,23 +1060,50 @@ export default function CreatePage() {
       // 首拉失败时也持续重试，避免 WS 不可用 + 首次拉取失败时面板永久卡住
       if (!q.state.data) return 3000;
       const s = q.state.data.status;
-      return s === "pending" || s === "running" || s === "waiting_confirm"
-        ? 3000
-        : false;
+      // 进行中任务保持高频轮询
+      if (s === "pending" || s === "running" || s === "waiting_confirm") {
+        return 3000;
+      }
+      // 完成后如仍未获取到 final_video_url，则继续轮询 5 秒等待同步
+      if (s === "done" || s === "failed" || s === "reconciliation_required") {
+        if (q.state.data && q.state.data.artifacts?.final_video_url) {
+          return false; // 已就绪，停止轮询
+        }
+        return 5000; // 延迟完成时的显示
+      }
+      return false;
     },
     // 标签页切后台时也保持轮询，切回即见最新进度
     refetchIntervalInBackground: true,
   });
+
+  // 当检测到任务已完成且有 compose 产物但缺少 finalVideoUrl 时，主动刷新
+  useEffect(() => {
+    if (
+      hasComposeResult &&
+      !finalVideoUrl &&
+      fetchedTask &&
+      fetchedTask.status === "done"
+    ) {
+      const timer = setTimeout(() => {
+        void refetchCreateTask();
+      }, 2000); // 延迟 2 秒后触发一次主动刷新
+      return () => clearTimeout(timer);
+    }
+  }, [hasComposeResult, finalVideoUrl, fetchedTask, refetchCreateTask]);
   const task = wiz.taskId ? (liveTask ?? fetchedTask) : undefined;
   const composeArtifacts = task?.steps.find(
     (s) => s.step === "compose",
   )?.artifacts;
   const finalVideoKey = composeArtifacts?.final_video_key ?? "";
   const coverKey = composeArtifacts?.cover_key ?? "";
-  const finalVideoUrl =
-    typeof task?.artifacts?.final_video_url === "string"
-      ? task.artifacts.final_video_url
-      : "";
+  const finalVideoUrl = getFinalVideoUrl(task);
+
+  // 检测任务是否已完成且拥有最终产物（用于容错显示）
+  const hasComposeResult = Boolean(
+    task?.steps.some((s) => s.step === "compose" && s.status === "done") &&
+    finalVideoKey
+  );
 
   // 合成前置产物校验：直达本步缺料时引导补齐对应步骤，绝不静默自动扣费
   const composeGap = !current
@@ -1090,6 +1121,22 @@ export default function CreatePage() {
               step: "avatar" as StepKey,
             }
           : null;
+
+  // 获取最终视频 URL（优先从任务级 artifacts 取，降级到 compose 步骤级产物）
+  const getFinalVideoUrl = (task?: PipelineTask | null): string => {
+    if (!task) return "";
+    // 优先级 1: 任务级 final_video_url（to_out() 生成带签名的 URL）
+    if (typeof task.artifacts?.final_video_url === "string" && task.artifacts.final_video_url) {
+      return task.artifacts.final_video_url;
+    }
+    // 优先级 2: compose 步骤的 final_video_key，需与 cover_key 一起显示
+    const composeStep = task.steps.find((s) => s.step === "compose");
+    if (composeStep?.artifacts?.final_video_key) {
+      // 步骤级产物只有 key，没有 URL，前端需要自行构造或依赖轮询更新后的任务级 data
+      return "";
+    }
+    return "";
+  };
 
   useEffect(() => {
     setQuote(null);
@@ -1155,13 +1202,18 @@ export default function CreatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, wiz.taskId, composeGap, moduleCatalog]);
 
-  // 任务已创建：合成步不再原地展示进度条，直接跳转任务详情页承接进度/取消/剪辑/发布
+  // 任务已创建：仅在未完成或无 URL 时跳转，避免跳转过早导致视频不可见
   useEffect(() => {
-    if (step === "compose" && wiz.taskId) {
+    if (
+      step === "compose" &&
+      wiz.taskId &&
+      // 如果任务已完成且有最终产物 URL，先在当前页显示预览，再决定是否跳转
+      (task?.status !== "done" || !finalVideoUrl)
+    ) {
       navigate(`/tasks/${wiz.taskId}`, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, wiz.taskId]);
+  }, [step, wiz.taskId, task?.status, finalVideoUrl]);
 
   // 模块价格目录加载失败时给出可重试的错误，避免停留在「准备中…」死局
   useEffect(() => {
@@ -1327,13 +1379,62 @@ export default function CreatePage() {
         {step === "avatar" && <StepAvatar wiz={wiz} setWiz={setWiz} />}
         {step === "compose" &&
           (wiz.taskId ? (
-            // 任务已创建：effect 会立即跳转任务详情页，这里仅作跳转前的占位
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
-              <LoaderCircle className="h-8 w-8 animate-spin text-info" />
-              <div className="text-sm text-text-3">
-                任务已创建，正在进入任务详情…
-              </div>
-            </div>
+            // 任务已创建：根据任务状态显示不同内容
+            (() => {
+              // 如果任务已完成且有最终产物 URL，直接显示预览（避免立即跳转导致信息丢失）
+              if (
+                task?.status === "done" &&
+                finalVideoUrl
+              ) {
+                return (
+                  <div className="space-y-4">
+                    <div className="glass p-5">
+                      <h3 className="mb-3 font-medium">成片预览</h3>
+                      <video
+                        src={finalVideoUrl}
+                        controls
+                        playsInline
+                        preload="metadata"
+                        className="max-h-[480px] w-full rounded-xl bg-black"
+                      />
+                      {/* 提供操作入口 */}
+                      <div className="mt-4 flex gap-2">
+                        <Link
+                          to={`/editor?task=${wiz.taskId}`}
+                          className="btn-ghost px-3 py-1.5 text-xs"
+                        >
+                          去剪辑精修
+                        </Link>
+                        <Link
+                          to={`/publish/jobs?task=${wiz.taskId}`}
+                          className="btn-primary px-3 py-1.5 text-xs"
+                        >
+                          去发布
+                        </Link>
+                      </div>
+                    </div>
+                    <p className="text-xs text-text-3 text-center">
+                      如未自动跳转，{" "}
+                      <button
+                        onClick={() => navigate(`/tasks/${wiz.taskId}`)}
+                        className="text-brand-to hover:underline"
+                      >
+                        点击进入任务详情
+                      </button>
+                    </p>
+                  </div>
+                );
+              }
+              // 正常情况：显示加载提示并自动跳转
+              return (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <LoaderCircle className="h-8 w-8 animate-spin text-info" />
+                  <div className="text-sm text-text-3">
+                    任务已创建，正在进入任务详情…
+                  </div>
+                </div>
+              );
+            })()
           ) : composeGap ? (
             // 直达合成步但缺前置产物：引导补齐，不自动扣费
             <div className="glass flex flex-col items-center gap-3 py-10 text-center">
