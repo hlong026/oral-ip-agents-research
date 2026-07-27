@@ -9,7 +9,11 @@ import AvatarsPage from "./pages/AvatarsPage";
 import CreatePage from "./pages/CreatePage";
 import DashboardPage from "./pages/DashboardPage";
 import EditorPage from "./pages/EditorPage";
-import { IM_ENABLED } from "./config/features";
+import {
+  ANALYTICS_PREVIEW,
+  ASSETS_PREVIEW,
+  IM_ENABLED,
+} from "./config/features";
 import ImCenterPage from "./pages/ImCenterPage";
 import ImRulesPage from "./pages/ImRulesPage";
 import LoginPage from "./pages/LoginPage";
@@ -64,15 +68,31 @@ export default function App() {
         <Route path="/assets/personas" element={<PersonasPage />} />
         <Route path="/assets/voices" element={<VoicesPage />} />
         <Route path="/assets/avatars" element={<AvatarsPage />} />
-        <Route path="/assets/materials" element={<AssetsPage />} />
-        <Route path="/assets/templates" element={<TemplatesPage />} />
+        {/* V1.1 占位页：特性开关未开启时直达路由重定向工作台，避免演示数据误判 */}
+        <Route
+          path="/assets/materials"
+          element={
+            ASSETS_PREVIEW ? <AssetsPage /> : <Navigate to="/" replace />
+          }
+        />
+        <Route
+          path="/assets/templates"
+          element={
+            ASSETS_PREVIEW ? <TemplatesPage /> : <Navigate to="/" replace />
+          }
+        />
         <Route path="/editor" element={<EditorPage />} />
         <Route path="/publish/jobs" element={<PublishJobsPage />} />
         <Route path="/publish/logs" element={<PublishJobsPage showLogs />} />
         <Route path="/publish/accounts" element={<PublishAccountsPage />} />
         {IM_ENABLED && <Route path="/im" element={<ImCenterPage />} />}
         {IM_ENABLED && <Route path="/im/rules" element={<ImRulesPage />} />}
-        <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route
+          path="/analytics"
+          element={
+            ANALYTICS_PREVIEW ? <AnalyticsPage /> : <Navigate to="/" replace />
+          }
+        />
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/account" element={<AccountPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />

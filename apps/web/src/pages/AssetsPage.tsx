@@ -9,6 +9,7 @@ import {
   Upload,
 } from "lucide-react";
 import AssetNav from "../components/AssetNav";
+import DemoDataOverlay from "../components/DemoDataOverlay";
 
 const FILTERS = [
   { key: "all", label: "全部", count: 110 },
@@ -34,69 +35,65 @@ export default function AssetsPage() {
     <div className="space-y-5">
       <AssetNav />
 
-      <div className="flex items-center justify-between rounded-card border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
-        <span className="flex items-center gap-1.5">
-          <Info className="h-4 w-4 shrink-0" />
-          素材库为 V1.1 能力，当前为效果预览；上传与智能混剪将在素材库版本开放
-        </span>
-        <span className="chip border-info/40 text-info">V1.1 上线</span>
-      </div>
-
-      {/* 上传 + 筛选 + 用量 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          className="btn-primary flex items-center gap-1.5"
-          disabled
-          title="V1.1 开放"
-        >
-          <Upload className="h-4 w-4" /> 上传素材
-        </button>
-        {FILTERS.map((f, i) => (
-          <span
-            key={f.key}
-            className={`chip px-3 py-1 ${i === 0 ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
-          >
-            {f.label} {f.count}
-          </span>
-        ))}
-        <div className="ml-auto flex items-center gap-2 text-xs text-text-3">
-          已用 2.1 GB / 10 GB
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full bg-brand-grad-x"
-              style={{ width: "21%" }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* 素材网格 */}
-      <div>
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="font-medium">最近使用</h2>
-          <span className="text-xs text-text-3">按使用时间排序</span>
-        </div>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {MATERIALS.map((m) => (
-            <div key={m.name} className="glass card-hover p-3">
-              <div className="flex h-28 items-center justify-center rounded-lg bg-white/5 text-text-3">
-                <m.icon className="h-7 w-7" />
-              </div>
-              <div className="mt-2.5 text-sm font-medium">{m.name}</div>
-              <div className="mt-1.5 flex gap-1.5">
-                {m.tags.map((t) => (
-                  <span key={t} className="chip text-[11px]">
-                    {t}
-                  </span>
-                ))}
+      <DemoDataOverlay note="素材库为 V1.1 能力；上传与智能混剪将在素材库版本开放，存储用量与素材列表均非真实。">
+        <div className="space-y-5">
+          {/* 上传 + 筛选 + 用量 */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn-primary flex items-center gap-1.5"
+              disabled
+              title="V1.1 开放"
+            >
+              <Upload className="h-4 w-4" /> 上传素材
+            </button>
+            {FILTERS.map((f, i) => (
+              <span
+                key={f.key}
+                className={`chip px-3 py-1 ${i === 0 ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+              >
+                {f.label} {f.count}
+              </span>
+            ))}
+            <div className="ml-auto flex items-center gap-2 text-xs text-text-3">
+              已用 2.1 GB / 10 GB
+              <div className="h-1.5 w-28 overflow-hidden rounded-full bg-white/5">
+                <div
+                  className="h-full rounded-full bg-brand-grad-x"
+                  style={{ width: "21%" }}
+                />
               </div>
             </div>
-          ))}
-          <div className="glass flex min-h-48 items-center justify-center gap-1 border-dashed p-3 text-text-3">
-            <Plus className="h-4 w-4" /> 上传新素材
+          </div>
+
+          {/* 素材网格 */}
+          <div>
+            <div className="mb-3 flex items-baseline gap-3">
+              <h2 className="font-medium">最近使用</h2>
+              <span className="text-xs text-text-3">按使用时间排序</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {MATERIALS.map((m) => (
+                <div key={m.name} className="glass card-hover p-3">
+                  <div className="flex h-28 items-center justify-center rounded-lg bg-white/5 text-text-3">
+                    <m.icon className="h-7 w-7" />
+                  </div>
+                  <div className="mt-2.5 text-sm font-medium">{m.name}</div>
+                  <div className="mt-1.5 flex gap-1.5">
+                    {m.tags.map((t) => (
+                      <span key={t} className="chip text-[11px]">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="glass flex min-h-48 items-center justify-center gap-1 border-dashed p-3 text-text-3">
+                <Plus className="h-4 w-4" /> 上传新素材
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      </DemoDataOverlay>
 
       <div className="flex items-start gap-1.5 rounded-card border border-info/30 bg-info/10 px-4 py-3 text-sm text-info">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />

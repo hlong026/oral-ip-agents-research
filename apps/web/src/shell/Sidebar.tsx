@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { IM_ENABLED } from "../config/features";
+import { ANALYTICS_PREVIEW, IM_ENABLED } from "../config/features";
 
 interface NavItem {
   to: string;
@@ -77,7 +77,10 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
           badgeTone: "danger",
         },
         ...(IM_ENABLED ? [{ to: "/im", label: "私信中心", icon: Mail }] : []),
-        { to: "/analytics", label: "数据看板", icon: ChartColumn },
+        // V1.1 未上架：数据看板为演示数据占位页，生产构建默认隐藏入口（VITE_ANALYTICS_PREVIEW 开启）
+        ...(ANALYTICS_PREVIEW
+          ? [{ to: "/analytics", label: "数据看板", icon: ChartColumn }]
+          : []),
       ],
     },
   ];
