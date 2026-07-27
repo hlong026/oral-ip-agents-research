@@ -20,7 +20,7 @@ from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes
+from app.core.storage import read_bytes, save_bytes, signed_media_path
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.registry import registry
@@ -73,8 +73,8 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
         error="发布失败，请稍后重试" if j.error else "",
         postId=j.post_id,
         postIdSource=j.post_id_source,
-        videoUrl=f"/media/{j.video_key}" if j.video_key else None,
-        packageUrl=f"/media/{j.export_key}" if j.export_key else None,
+        videoUrl=signed_media_path(j.video_key) if j.video_key else None,
+        packageUrl=signed_media_path(j.export_key) if j.export_key else None,
         retryCount=int(j.retry_count or "0"),
         createdAt=j.created_at.astimezone(UTC).isoformat(),
         updatedAt=j.updated_at.astimezone(UTC).isoformat(),
@@ -319,14 +319,41 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "PLATFORM_REQUIRED", "message": "至少选择一个平台"}
         )
+    from app.modules.pipeline import repository as pipeline_repo
+
+    task = await pipeline_repo.get(db, inp.taskId, user_id)
+    if task is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "TASK_NOT_FOUND", "message": "任务不存在或不属于当前用户"},
+        )
+    if task.status != "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能创建发布任务"},
+        )
+    artifacts = json.loads(task.artifacts_json or "{}")
+    video_key = str(artifacts.get("final_video_key") or "")
+    cover_key = str(artifacts.get("cover_key") or "")
+    quality = artifacts.get("quality")
+    if not video_key or not isinstance(quality, dict) or not quality.get("passed"):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VIDEO_NOT_READY", "message": "成片缺失或未通过质量检查"},
+        )
+    if (inp.videoKey and inp.videoKey != video_key) or (inp.coverKey and inp.coverKey != cover_key):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "PUBLISH_ASSET_MISMATCH", "message": "发布资源与任务最终产物不一致"},
+        )
     ids = await publish_task_video(
         db,
         user_id,
-        inp.taskId or "",
+        inp.taskId,
         inp.platforms,
         inp.title,
-        inp.videoKey,
-        inp.coverKey,
+        video_key,
+        cover_key or None,
         inp.publishAt,
         inp.topics,
     )
@@ -404,9 +431,9 @@ async def export_job(db: AsyncSession, user_id: str, job_id: str) -> ExportOut:
     await repo.save_job(db, j)
     return ExportOut(
         jobId=j.id,
-        videoUrl=f"/media/{j.video_key}",
+        videoUrl=signed_media_path(j.video_key),
         packageKey=j.export_key,
-        packageUrl=f"/media/{j.export_key}",
+        packageUrl=signed_media_path(j.export_key),
         metadata=metadata,
     )
 

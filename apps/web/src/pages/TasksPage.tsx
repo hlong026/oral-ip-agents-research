@@ -11,6 +11,7 @@ const FILTERS = [
   { key: "", label: "全部" },
   { key: "running", label: "执行中" },
   { key: "waiting_confirm", label: "待确认" },
+  { key: "reconciliation_required", label: "待对账" },
   { key: "done", label: "已完成" },
   { key: "failed", label: "失败" },
 ] as const;

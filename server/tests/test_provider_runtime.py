@@ -131,3 +131,110 @@ async def test_hifly_rebuilds_client_when_base_url_changes(monkeypatch) -> None:
     assert first is not second
     assert first.closed is True
     assert second.base_url == "https://hfw-api.hifly.cc/alternate"
+
+
+async def test_hifly_retries_safe_get_after_transport_timeout(monkeypatch) -> None:
+    import httpx
+
+    from app.providers.hifly import HiFlyClient
+
+    class TimeoutThenSuccessClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, *args, **kwargs):
+            del args, kwargs
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.ReadTimeout("query timed out")
+            request = httpx.Request("GET", "https://provider.test/api/v2/hifly/video/task")
+            return httpx.Response(200, json={"code": 0, "status": 3}, request=request)
+
+    client = TimeoutThenSuccessClient()
+    provider = HiFlyClient()
+
+    async def fake_ensure_client() -> TimeoutThenSuccessClient:
+        return client
+
+    monkeypatch.setattr(provider, "_ensure_client", fake_ensure_client)
+
+    async def no_wait(seconds: float) -> None:
+        del seconds
+
+    monkeypatch.setattr("app.providers.hifly.asyncio.sleep", no_wait)
+
+    result = await provider.request("GET", "/api/v2/hifly/video/task")
+
+    assert result["status"] == 3
+    assert client.calls == 2
+
+
+async def test_hifly_does_not_retry_post_when_outcome_is_unknown(monkeypatch) -> None:
+    import httpx
+    import pytest
+
+    from app.providers.base import ProviderOutcomeUnknown
+    from app.providers.hifly import HiFlyClient
+
+    class TimeoutClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request(self, *args, **kwargs):
+            del args, kwargs
+            self.calls += 1
+            raise httpx.ReadTimeout("create timed out")
+
+    client = TimeoutClient()
+    provider = HiFlyClient()
+
+    async def fake_ensure_client() -> TimeoutClient:
+        return client
+
+    monkeypatch.setattr(provider, "_ensure_client", fake_ensure_client)
+
+    with pytest.raises(ProviderOutcomeUnknown, match="结果未知"):
+        await provider.request("POST", "/api/v2/hifly/video/create_by_tts")
+
+    assert client.calls == 1
+
+
+async def test_registry_does_not_fallback_after_unknown_provider_outcome(monkeypatch) -> None:
+    import pytest
+
+    from app.providers.base import ProviderOutcomeUnknown
+    from app.providers.registry import ProviderRegistry
+
+    calls: list[str] = []
+
+    class UnknownProvider:
+        name = "primary"
+
+        async def create(self) -> str:
+            calls.append(self.name)
+            raise ProviderOutcomeUnknown("结果未知")
+
+    class FallbackProvider:
+        name = "fallback"
+
+        async def create(self) -> str:
+            calls.append(self.name)
+            return "duplicate"
+
+    registry = ProviderRegistry()
+
+    async def enabled(provider_name: str) -> bool:
+        del provider_name
+        return True
+
+    monkeypatch.setattr(registry, "provider_enabled", enabled)
+
+    with pytest.raises(ProviderOutcomeUnknown):
+        await registry.run_with_fallback(
+            "avatar",
+            [UnknownProvider(), FallbackProvider()],
+            "create",
+            task_id="task-unknown",
+        )
+
+    assert calls == ["primary"]

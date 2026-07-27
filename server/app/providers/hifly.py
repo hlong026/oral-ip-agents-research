@@ -12,14 +12,13 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config
 from app.core.storage import read_bytes, save_bytes
 from app.providers.duration_probe import probe_media_bytes
 
-from .base import ProviderError, StepRecoverableError, SynthesizeResult, WordTs
+from .base import ProviderError, ProviderOutcomeUnknown, StepRecoverableError, SynthesizeResult, WordTs
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -85,20 +84,39 @@ class HiFlyClient:
         token = await get_config("feiying_api_key")
         return bool(token)
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=8))
     async def request(self, method: str, path: str, **kwargs) -> dict[str, Any]:
-        """统一请求 + 错误码处理"""
-        client = await self._ensure_client()
-        try:
-            resp = await client.request(method, path, **kwargs)
-            resp.raise_for_status()
-            data = resp.json()
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 401:
-                raise StepRecoverableError("服务认证失败，触发降级") from e
-            raise StepRecoverableError(f"服务请求失败: {e.response.status_code}") from e
-        except httpx.HTTPError as e:
-            raise StepRecoverableError(f"服务连接失败: {e}") from e
+        """安全查询可重试一次；创建类请求结果未知时停止自动重试和降级。"""
+        method_upper = method.upper()
+        safe_to_retry = method_upper in {"GET", "HEAD", "OPTIONS"}
+        attempts = 2 if safe_to_retry else 1
+        data: dict[str, Any] | None = None
+
+        for attempt in range(attempts):
+            client = await self._ensure_client()
+            try:
+                resp = await client.request(method_upper, path, **kwargs)
+                resp.raise_for_status()
+                payload = resp.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("响应不是 JSON 对象")
+                data = payload
+                break
+            except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+                if status_code == 401:
+                    raise StepRecoverableError("服务认证失败，触发降级") from exc
+                if not safe_to_retry and (status_code == 429 or status_code >= 500):
+                    raise ProviderOutcomeUnknown(f"服务提交结果未知（HTTP {status_code}），请先对账再重试") from exc
+                raise StepRecoverableError(f"服务请求失败: {status_code}") from exc
+            except (httpx.TransportError, ValueError) as exc:
+                if not safe_to_retry:
+                    raise ProviderOutcomeUnknown("服务提交结果未知，请先对账再重试") from exc
+                if attempt + 1 >= attempts:
+                    raise StepRecoverableError(f"服务连接失败: {exc}") from exc
+                await asyncio.sleep(1)
+
+        if data is None:
+            raise StepRecoverableError("服务未返回有效响应")
 
         code = data.get("code", 0)
         if code != 0:

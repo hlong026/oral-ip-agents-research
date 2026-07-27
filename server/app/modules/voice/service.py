@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import consent_fingerprint
+from app.core.storage import signed_media_path
 from app.core.white_label import public_error_message
+from app.providers.base import ProviderOutcomeUnknown
 from app.providers.hifly import HiFlyAPIError, get_client
 from app.providers.registry import registry
 
@@ -23,6 +25,18 @@ from .models import Voice
 from .schemas import CloneStatusOut, SynthesizeOut, VoiceOut, WordTsOut
 
 logger = get_logger("oral.voice")
+
+
+async def recover_unknown_submissions(db: AsyncSession) -> int:
+    """进程若在供应商提交窗口退出，启动时把本地 submitting 记录转入人工对账。"""
+    result = await db.execute(
+        update(Voice).where(Voice.status == "submitting").values(status="reconciliation_required")
+    )
+    count = int(getattr(result, "rowcount", 0) or 0)
+    if count:
+        await db.commit()
+        logger.error("voice_submissions_require_reconciliation", count=count)
+    return count
 
 
 async def list_voices(db: AsyncSession, user_id: str) -> list[VoiceOut]:
@@ -56,32 +70,56 @@ async def clone_voice(
     # 声音克隆提交：记录 INFO（§10.6.8-B #4）
     logger.info("voice_clone_start", user_id=user_id, voice_name=name)
 
-    # 调用 provider 提交克隆（返回 task_id）
-    try:
-        task_id, provider_name = await registry.run_with_fallback(
-            "voice", registry.voice_chain, "clone", name, sample_key, consent_token, language
-        )
-    except HiFlyAPIError as e:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
-        ) from e
-
     v = await repo.create(
         db,
         user_id=user_id,
         name=name,
         source="clone",
-        provider=provider_name,
+        provider="",
         provider_voice_id="",
-        provider_task_id=task_id,
+        provider_task_id="",
         reservation_id=reservation_id,
         sample_key=sample_key,
         language=language,
         consent_hash=consent_fingerprint(user_id, "voice", consent_token),
         consented_at=datetime.now(UTC),
-        status="training",
+        status="submitting",
     )
+    if reservation_id:
+        from app.modules.billing.service import attach_reservation
+
+        try:
+            await attach_reservation(db, reservation_id, user_id, v.id)
+            await db.commit()
+        except BaseException:
+            await repo.delete(db, v)
+            raise
+
+    # 先落本地提交记录，再调用 provider；超时后才能保留可对账实体和积分冻结。
+    try:
+        task_id, provider_name = await registry.run_with_fallback(
+            "voice", registry.voice_chain, "clone", name, sample_key, consent_token, language
+        )
+    except ProviderOutcomeUnknown:
+        v.status = "reconciliation_required"
+        await db.commit()
+        await db.refresh(v)
+        logger.error("voice_clone_reconciliation_required", user_id=user_id, voice_id=v.id)
+        return to_out(v)
+    except HiFlyAPIError as e:
+        await repo.delete(db, v)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "CLONE_FAILED", "message": public_error_message(e)},
+        ) from e
+    except BaseException:
+        await repo.delete(db, v)
+        raise
+    v.provider = provider_name
+    v.provider_task_id = task_id
+    v.status = "training"
+    await db.commit()
+    await db.refresh(v)
     return to_out(v)
 
 
@@ -205,7 +243,7 @@ async def get_clone_status(db: AsyncSession, user_id: str, voice_id: str) -> Clo
     return CloneStatusOut(
         id=v.id,
         status=v.status,
-        demoUrl=f"/media/{v.demo_key}" if v.demo_key else None,
+        demoUrl=signed_media_path(v.demo_key) if v.demo_key else None,
     )
 
 
@@ -242,7 +280,12 @@ async def delete_voice(db: AsyncSession, user_id: str, voice_id: str) -> None:
     v = await repo.get(db, voice_id, user_id)
     if not v:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "声音不存在"})
-    if v.status == "training" and v.reservation_id:
+    if v.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部提交结果未知，管理员对账前不可删除"},
+        )
+    if v.status in {"submitting", "training"} and v.reservation_id:
         from app.modules.billing.service import release_reservation
 
         await release_reservation(db, v.reservation_id, user_id)
@@ -312,7 +355,7 @@ async def synthesize(db: AsyncSession, user_id: str, voice_id: str, text: str, s
         audio_duration_sec=result.duration,
     )
     return SynthesizeOut(
-        audioUrl=f"/media/{result.audio_key}",
+        audioUrl=signed_media_path(result.audio_key),
         words=[WordTsOut(word=w.word, start=w.start, end=w.end) for w in result.words],
     )
 
@@ -360,8 +403,8 @@ def to_out(v: Voice) -> VoiceOut:
         gender=v.gender,
         emotion=v.emotion,
         language=v.language,
-        sampleUrl=f"/media/{v.sample_key}" if v.sample_key else None,
-        demoUrl=f"/media/{v.demo_key}" if v.demo_key else None,
+        sampleUrl=signed_media_path(v.sample_key) if v.sample_key else None,
+        demoUrl=signed_media_path(v.demo_key) if v.demo_key else None,
         rate=v.rate,
         volume=v.volume,
         pitch=v.pitch,

@@ -240,7 +240,7 @@ export default function AvatarsPage() {
       // 训练中的分身需要显式查询 status 接口，后端在该接口内轮询供应商并推进状态
       const updates = await Promise.all(
         listed
-          .filter((a) => a.status === "training")
+          .filter((a) => a.status === "submitting" || a.status === "training")
           .map((a) => avatarApi.status(a.id)),
       );
       const byId = new Map(updates.map((a) => [a.id, a.status]));
@@ -250,7 +250,11 @@ export default function AvatarsPage() {
       }));
     },
     refetchInterval: (q) =>
-      (q.state.data ?? []).some((a) => a.status === "training") ? 8000 : false,
+      (q.state.data ?? []).some(
+        (a) => a.status === "submitting" || a.status === "training",
+      )
+        ? 8000
+        : false,
   });
 
   const refresh = async () => {
@@ -347,6 +351,16 @@ export default function AvatarsPage() {
                       {a.status === "training" && (
                         <span className="chip border-warning/40 text-[11px] text-warning">
                           训练中
+                        </span>
+                      )}
+                      {a.status === "submitting" && (
+                        <span className="chip border-warning/40 text-[11px] text-warning">
+                          提交中
+                        </span>
+                      )}
+                      {a.status === "reconciliation_required" && (
+                        <span className="chip border-warning/40 text-[11px] text-warning">
+                          待对账
                         </span>
                       )}
                       {a.status === "failed" && (

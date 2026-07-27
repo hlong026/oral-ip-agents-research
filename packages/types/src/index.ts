@@ -61,11 +61,23 @@ export const STEP_LABELS: Record<PipelineStep, string> = {
 
 /** 步骤状态 */
 export type StepStatus =
-  "pending" | "running" | "done" | "failed" | "skipped" | "waiting_confirm";
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "waiting_confirm"
+  | "reconciliation_required";
 
 /** 任务状态机：PENDING → RUNNING → DONE / FAILED / CANCELED */
 export type TaskStatus =
-  "pending" | "running" | "done" | "failed" | "canceled" | "waiting_confirm";
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "canceled"
+  | "waiting_confirm"
+  | "reconciliation_required";
 
 /** 流水线模式：auto 全自动 / manual 每步暂停可干预（F-405） */
 export type PipelineMode = "auto" | "manual";
@@ -216,7 +228,13 @@ export interface Persona {
 }
 
 export type VoiceStatus =
-  "ready" | "training" | "pending_confirm" | "rejected" | "failed";
+  | "ready"
+  | "submitting"
+  | "training"
+  | "pending_confirm"
+  | "reconciliation_required"
+  | "rejected"
+  | "failed";
 
 export interface Voice {
   id: string;
@@ -237,7 +255,8 @@ export interface Avatar {
   style?: string;
   coverUrl?: string | null;
   previewUrl?: string | null;
-  status: "ready" | "training" | "failed";
+  status:
+    "ready" | "submitting" | "training" | "reconciliation_required" | "failed";
   createdAt: string;
 }
 

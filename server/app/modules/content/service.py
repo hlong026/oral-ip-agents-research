@@ -21,12 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.dynamic_config import get_config_int
 from app.core.logging import get_logger
-from app.core.storage import StorageConfigurationError, get_accessible_url, save_bytes
+from app.core.storage import StorageConfigurationError, get_accessible_url, read_bytes, save_bytes, size
 from app.core.white_label import public_model_name
 from app.providers.base import ProviderError
 from app.providers.base import is_mock_provider as _is_mock_provider
 from app.providers.douyidou import DouyidouParser, DouyidouParseResult
-from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, probe_duration
+from app.providers.duration_probe import MediaProcessingError, extract_audio_bytes, extract_audio_key, probe_duration
 from app.providers.registry import registry
 from app.providers.url_resolver import resolve_input
 
@@ -114,6 +114,14 @@ async def _embedded_asr_input(filename: str, data: bytes) -> str:
         return media_input
     audio = await extract_audio_bytes(data, Path(filename).suffix.lower())
     return _media_data_uri("audio.mp3", audio)
+
+
+async def _embedded_asr_input_from_key(filename: str, key: str) -> str:
+    """小文件直接内嵌；大文件从存储流式提取压缩音轨。"""
+    raw_limit = _MAX_ASR_DATA_URI_BYTES * 3 // 4
+    if await size(key) <= raw_limit:
+        return await _embedded_asr_input(filename, await read_bytes(key))
+    return _media_data_uri("audio.mp3", await extract_audio_key(key))
 
 
 async def parse_url(
@@ -350,19 +358,30 @@ async def parse_upload(
     db: AsyncSession,
     user_id: str,
     filename: str,
-    data: bytes,
+    data: bytes | None,
     persona_id: str | None,
     duration_seconds: float | None = None,
     storage_key: str | None = None,
 ) -> ParseOut:
     """手动上传降级（视频号等平台，C2 兖底）"""
-    key = storage_key or await save_bytes("uploads", filename, data)
+    if storage_key:
+        key = storage_key
+    elif data is not None:
+        key = await save_bytes("uploads", filename, data)
+    else:
+        raise ValueError("parse_upload requires data or storage_key")
     try:
         threshold = await get_config_int("asr_flash_threshold_sec", 300)
         if duration_seconds is not None and duration_seconds <= threshold:
             accessible_url = await get_accessible_url(key, require_public=False)
             media_input = (
-                accessible_url if _is_public_media_url(accessible_url) else await _embedded_asr_input(filename, data)
+                accessible_url
+                if _is_public_media_url(accessible_url)
+                else (
+                    await _embedded_asr_input(filename, data)
+                    if data is not None
+                    else await _embedded_asr_input_from_key(filename, key)
+                )
             )
         else:
             media_input = await get_accessible_url(key, require_public=True)

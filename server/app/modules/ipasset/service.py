@@ -81,6 +81,34 @@ async def update_persona(db: AsyncSession, user_id: str, persona_id: str, body: 
     p = await repo.get(db, persona_id, user_id)
     if not p:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "IP 档案不存在"})
+    if body.voiceId:
+        from app.modules.voice import repository as voice_repo
+
+        voice = await voice_repo.get(db, body.voiceId, user_id)
+        if voice is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "VOICE_NOT_FOUND", "message": "声音不存在或不属于当前用户"},
+            )
+        if voice.status != "ready" or not voice.provider_voice_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "VOICE_NOT_READY", "message": "声音尚未完成克隆确认"},
+            )
+    if body.avatarId:
+        from app.modules.avatar import repository as avatar_repo
+
+        avatar = await avatar_repo.get(db, body.avatarId, user_id)
+        if avatar is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                detail={"code": "AVATAR_NOT_FOUND", "message": "数字人不存在或不属于当前用户"},
+            )
+        if avatar.status != "ready" or not avatar.provider_avatar_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "AVATAR_NOT_READY", "message": "数字人尚未完成克隆"},
+            )
     if body.name is not None:
         p.name = body.name
         p.avatar_char = body.name[0]

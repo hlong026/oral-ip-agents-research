@@ -115,9 +115,7 @@ export default function EditorPage() {
     const v = detail?.artifacts?.[key];
     return typeof v === "string" && v ? v : undefined;
   };
-  const videoKey =
-    detailArt("final_video_key") ??
-    detail?.steps.find((s) => s.step === "compose")?.artifacts?.final_video_key;
+  const videoUrl = detailArt("final_video_url");
   const script =
     detailArt("script") ??
     detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ??
@@ -205,9 +203,9 @@ export default function EditorPage() {
             {/* 预览：成片就绪后直接内嵌播放器，字幕样式叠加层实时预览 */}
             <div className="glass p-4">
               <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
-                {videoKey ? (
+                {videoUrl ? (
                   <video
-                    src={`/media/${videoKey}`}
+                    src={videoUrl}
                     poster={detail.coverUrl ?? undefined}
                     controls
                     playsInline
@@ -258,7 +256,7 @@ export default function EditorPage() {
                       <LoaderCircle className="h-3 w-3 animate-spin" />
                       重新合成中
                     </span>
-                  ) : videoKey ? (
+                  ) : videoUrl ? (
                     "成片就绪"
                   ) : (
                     "合成中"
@@ -415,12 +413,8 @@ export default function EditorPage() {
                 >
                   导出剪映草稿
                 </button>
-                {videoKey ? (
-                  <a
-                    className="btn-ghost text-xs"
-                    href={`/media/${videoKey}`}
-                    download
-                  >
+                {videoUrl ? (
+                  <a className="btn-ghost text-xs" href={videoUrl} download>
                     导出 MP4
                   </a>
                 ) : (

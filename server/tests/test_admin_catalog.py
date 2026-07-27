@@ -44,6 +44,36 @@ async def _login(client: AsyncClient, *, role: str) -> dict[str, str]:
         response = await client.post("/api/admin/v1/auth/login", json={"phone": phone, "password": password})
         assert response.status_code == 200, response.text
         return {"Authorization": f"Bearer {response.json()['accessToken']}"}
+    from app.modules.avatar.models import Avatar
+    from app.modules.ipasset.models import Persona
+    from app.modules.voice.models import Voice
+
+    async with SessionLocal() as db:
+        voice = Voice(
+            user_id=user_id,
+            name="测试声音",
+            status="ready",
+            provider_voice_id=f"provider-voice-{user_id[:12]}",
+        )
+        avatar = Avatar(
+            user_id=user_id,
+            name="测试数字人",
+            status="ready",
+            provider_avatar_id=f"provider-avatar-{user_id[:12]}",
+        )
+        db.add_all([voice, avatar])
+        await db.flush()
+        db.add(
+            Persona(
+                id=user_id,
+                user_id=user_id,
+                name="测试人设",
+                voice_id=voice.id,
+                avatar_id=avatar.id,
+                is_active=True,
+            )
+        )
+        await db.commit()
     tokens = await code_login(client, await bind_used_code(user_id))
     return {"Authorization": f"Bearer {tokens['accessToken']}"}
 
@@ -117,6 +147,71 @@ def test_operation_quote_rejects_same_module_with_underreported_quantity():
             },
         )
     assert exc.value.detail["code"] == "QUOTE_OPERATION_MISMATCH"
+
+
+async def test_admin_can_list_and_release_unknown_provider_submission(client: AsyncClient) -> None:
+    from sqlalchemy import select
+
+    from app.core.audit import AuditLog
+    from app.modules.billing.models import CreditReservation
+    from app.modules.pipeline.models import PipelineTask
+
+    headers = await _login(client, role="admin")
+    user_id, _phone_value, _password = await _create_user(role="user")
+    async with SessionLocal() as db:
+        reservation = CreditReservation(
+            user_id=user_id,
+            quote_id=f"quote-{uuid.uuid4().hex}",
+            reserved_points=0,
+            status="reserved",
+        )
+        db.add(reservation)
+        await db.flush()
+        task = PipelineTask(
+            user_id=user_id,
+            ip_id="persona-test",
+            title="等待对账的任务",
+            status="reconciliation_required",
+            current_step="voice",
+            reservation_id=reservation.id,
+            error="外部服务结果未知",
+        )
+        db.add(task)
+        await db.flush()
+        reservation.task_id = task.id
+        await db.commit()
+        task_id = task.id
+        reservation_id = reservation.id
+
+    listed = await client.get("/api/admin/v1/reconciliations", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == task_id and item["kind"] == "pipeline" for item in listed.json()["items"])
+
+    resolved = await client.post(
+        f"/api/admin/v1/reconciliations/pipeline/{task_id}",
+        headers=headers,
+        json={"action": "release", "reason": "供应商后台确认未创建任务"},
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["reservationStatus"] == "released"
+
+    async with SessionLocal() as db:
+        task = await db.get(PipelineTask, task_id)
+        reservation = await db.get(CreditReservation, reservation_id)
+        audit = (
+            (
+                await db.execute(
+                    select(AuditLog)
+                    .where(AuditLog.event == "provider_reconciliation_resolved", AuditLog.task_id == task_id)
+                    .order_by(AuditLog.created_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+    assert task is not None and task.status == "failed"
+    assert reservation is not None and reservation.status == "released"
+    assert audit is not None and "action=release" in audit.detail
 
 
 async def test_failure_recovery_rolls_back_before_releasing(monkeypatch: pytest.MonkeyPatch):
@@ -332,13 +427,16 @@ async def test_upload_transcription_only_deducts_points_after_success(
     from app.modules.content import router as content_router
     from app.modules.content.schemas import ParseOut, TranscriptOut
 
-    async def verified_duration(_data: bytes, _suffix: str) -> float:
-        return 60
+    async def verified_media(_key: str) -> dict:
+        return {
+            "format": {"duration": "60"},
+            "streams": [{"codec_type": "video", "codec_name": "h264"}],
+        }
 
     async def failing_parse(*_args, **_kwargs):
         raise HTTPException(502, detail={"code": "ASR_FAILED", "message": "语音识别失败"})
 
-    monkeypatch.setattr(content_router, "probe_media_bytes", verified_duration)
+    monkeypatch.setattr(content_router, "probe_media_key", verified_media)
     monkeypatch.setattr(content_router, "parse_upload", failing_parse)
 
     failed = await client.post(
@@ -438,6 +536,14 @@ async def test_async_voice_clone_settles_only_after_provider_success(
         return to_out(voice)
 
     monkeypatch.setattr(voice_router, "clone_voice", fake_clone)
+
+    async def verified_voice_sample(_data: bytes, _suffix: str) -> dict:
+        return {
+            "format": {"duration": "10"},
+            "streams": [{"codec_type": "audio", "codec_name": "pcm_s16le"}],
+        }
+
+    monkeypatch.setattr(voice_router, "probe_media_bytes_info", verified_voice_sample)
 
     submitted = await client.post(
         "/api/v1/voices/clone",
@@ -1210,7 +1316,7 @@ async def test_pipeline_attaches_quote_reservation_and_cancel_releases_it(client
         "/api/v1/pipelines",
         headers=user_headers,
         json={
-            "ipId": "test-ip",
+            "ipId": user_id,
             "scriptText": "这是一段足够长的测试口播文案，用于验证积分冻结和取消释放。",
             "mode": "manual",
             "count": 1,
@@ -1237,6 +1343,7 @@ async def test_pipeline_attaches_quote_reservation_and_cancel_releases_it(client
 async def test_pipeline_rejects_quote_that_does_not_cover_task_modules(client: AsyncClient):
     admin_headers = await _login(client, role="admin")
     user_headers = await _login(client, role="user")
+    user_id = str(decode_token(user_headers["Authorization"].removeprefix("Bearer "))["sub"])
     version = await client.post(
         "/api/admin/v1/price-versions",
         headers=admin_headers,
@@ -1267,7 +1374,7 @@ async def test_pipeline_rejects_quote_that_does_not_cover_task_modules(client: A
         "/api/v1/pipelines",
         headers=user_headers,
         json={
-            "ipId": "test-ip",
+            "ipId": user_id,
             "scriptText": "这是一段足够长的口播文案，不能只使用单个低价模块报价。",
             "mode": "manual",
             "quoteId": quote.json()["quoteId"],
@@ -1281,6 +1388,7 @@ async def test_pipeline_rejects_quote_that_does_not_cover_task_modules(client: A
 async def test_pipeline_rejects_one_second_quote_for_source_task(client: AsyncClient):
     admin_headers = await _login(client, role="admin")
     user_headers = await _login(client, role="user")
+    user_id = str(decode_token(user_headers["Authorization"].removeprefix("Bearer "))["sub"])
     version = await client.post(
         "/api/admin/v1/price-versions",
         headers=admin_headers,
@@ -1318,7 +1426,7 @@ async def test_pipeline_rejects_one_second_quote_for_source_task(client: AsyncCl
         "/api/v1/pipelines",
         headers=user_headers,
         json={
-            "ipId": "missing-persona-uses-60-second-default",
+            "ipId": user_id,
             "sourceUrl": "https://example.com/source-video",
             "mode": "manual",
             "quoteId": quote.json()["quoteId"],
@@ -1505,7 +1613,7 @@ async def test_plan_concurrency_is_enforced_for_parallel_creates(client: AsyncCl
             "/api/v1/pipelines",
             headers=user_headers,
             json={
-                "ipId": "test-ip",
+                "ipId": user_id,
                 "scriptText": "并发限制测试文案",
                 "mode": "manual",
                 "quoteId": quote,

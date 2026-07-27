@@ -29,11 +29,12 @@ class QrcodePollOut(BaseModel):
 
 
 class PublishIn(BaseModel):
-    taskId: str | None = None
+    taskId: str
     platforms: list[str]
     title: str
     topics: list[str] = []
-    videoKey: str
+    # 兼容旧客户端回传，但服务端只信任任务中已登记的产物 key。
+    videoKey: str | None = None
     coverKey: str | None = None
     publishAt: str | None = None
 

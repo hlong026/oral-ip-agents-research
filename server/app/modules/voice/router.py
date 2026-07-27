@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user_id
-from app.core.storage import save_bytes
+from app.core.storage import UploadTooLarge, read_limited, save_bytes
 from app.modules.billing.service import (
     metered_operation,
     recover_reservation_after_failure,
@@ -16,7 +16,7 @@ from app.modules.billing.service import (
 )
 from app.providers.duration_probe import (
     MediaProcessingError,
-    probe_media_bytes,
+    probe_media_bytes_info,
     transcode_audio_to_m4a,
 )
 
@@ -63,7 +63,13 @@ async def api_clone(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "CONSENT_REQUIRED", "message": "声音克隆须本人授权（consent_token 缺失）"},
         )
-    data = await file.read()
+    try:
+        data = await read_limited(file, VOICE_SAMPLE_MAX_BYTES)
+    except UploadTooLarge as exc:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={"code": "AUDIO_TOO_LARGE", "message": "声音样本超过 20MB，请压缩或剪短后重试"},
+        ) from exc
     suffix = Path(file.filename or "").suffix.lower()
     filename = file.filename or "sample.wav"
     # 浏览器录音（webm/ogg 等）不在供应商支持列表内，先转码为 m4a 再入库
@@ -79,11 +85,26 @@ async def api_clone(
         filename = f"{Path(filename).stem}.m4a"
     if len(data) > VOICE_SAMPLE_MAX_BYTES:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status.HTTP_413_CONTENT_TOO_LARGE,
             detail={"code": "AUDIO_TOO_LARGE", "message": "声音样本超过 20MB，请压缩或剪短后重试"},
         )
-    duration = await probe_media_bytes(data, suffix)
-    if duration is not None and not (VOICE_SAMPLE_MIN_SECONDS <= duration <= VOICE_SAMPLE_MAX_SECONDS):
+    info = await probe_media_bytes_info(data, suffix)
+    streams = (info or {}).get("streams")
+    if not isinstance(streams, list) or not any(
+        stream.get("codec_type") == "audio" for stream in streams if isinstance(stream, dict)
+    ):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "INVALID_AUDIO", "message": "声音样本不是可识别的音频"},
+        )
+    try:
+        duration = float((info or {})["format"]["duration"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "AUDIO_DURATION_INVALID", "message": "无法验证声音样本时长"},
+        ) from exc
+    if not (VOICE_SAMPLE_MIN_SECONDS <= duration <= VOICE_SAMPLE_MAX_SECONDS):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "AUDIO_DURATION_INVALID", "message": "声音样本时长需在 5 秒～3 分钟之间"},

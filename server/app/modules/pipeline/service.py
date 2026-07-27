@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.storage import signed_media_path
 from app.core.white_label import public_metadata
 
 from . import repository as repo
@@ -73,6 +74,13 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "INPUT_REQUIRED", "message": "链接/选题/文案至少填一项"},
         )
+    voice_id, avatar_id = await validate_ready_assets(
+        db,
+        user_id,
+        persona_id=inp.ipId,
+        voice_id=inp.voiceId,
+        avatar_id=inp.avatarId,
+    )
     count = max(1, min(inp.count, 20))
     from app.modules.activation import repository as activation_repo
     from app.modules.catalog import repository as catalog_repo
@@ -101,6 +109,7 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
 
         persona = await ipasset_repo.get(db, inp.ipId, user_id)
         task_for_quote = inp.model_dump()
+        task_for_quote.update(voiceId=voice_id, avatarId=avatar_id)
         task_for_quote["_targetDurationSeconds"] = max(
             1,
             persona.video_duration if persona else 60,
@@ -126,8 +135,8 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
                 source_url=inp.sourceUrl or "",
                 topic=inp.topic or "",
                 script_text=inp.scriptText or "",
-                voice_id=inp.voiceId or "",
-                avatar_id=inp.avatarId or "",
+                voice_id=voice_id,
+                avatar_id=avatar_id,
                 platforms_json=json.dumps(inp.platforms, ensure_ascii=False),
                 mode="manual" if inp.mode == "manual" else "auto",
                 intensity=inp.intensity if inp.intensity in ("light", "structure", "theme") else "structure",
@@ -160,6 +169,62 @@ async def _create_serialized(db: AsyncSession, user_id: str, inp: CreatePipeline
         source_type="url" if inp.sourceUrl else ("topic" if inp.topic else "script"),
     )
     return [to_out(t) for t in tasks]
+
+
+async def validate_ready_assets(
+    db: AsyncSession,
+    user_id: str,
+    *,
+    persona_id: str,
+    voice_id: str | None,
+    avatar_id: str | None,
+) -> tuple[str, str]:
+    """流水线只接受当前用户已就绪的本地资产 ID，禁止透传 Provider ID。"""
+    from app.modules.avatar import repository as avatar_repo
+    from app.modules.ipasset import repository as persona_repo
+    from app.modules.voice import repository as voice_repo
+
+    persona = await persona_repo.get(db, persona_id, user_id)
+    if persona is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "PERSONA_NOT_FOUND", "message": "IP 档案不存在或不属于当前用户"},
+        )
+    effective_voice_id = voice_id or persona.voice_id
+    effective_avatar_id = avatar_id or persona.avatar_id
+    if not effective_voice_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VOICE_REQUIRED", "message": "当前 IP 尚未绑定已就绪声音"},
+        )
+    if not effective_avatar_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "AVATAR_REQUIRED", "message": "当前 IP 尚未绑定已就绪数字人"},
+        )
+    voice = await voice_repo.get(db, effective_voice_id, user_id)
+    if voice is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "VOICE_NOT_FOUND", "message": "声音不存在或不属于当前用户"},
+        )
+    if voice.status != "ready" or not voice.provider_voice_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "VOICE_NOT_READY", "message": "声音尚未完成克隆确认"},
+        )
+    avatar = await avatar_repo.get(db, effective_avatar_id, user_id)
+    if avatar is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "AVATAR_NOT_FOUND", "message": "数字人不存在或不属于当前用户"},
+        )
+    if avatar.status != "ready" or not avatar.provider_avatar_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "AVATAR_NOT_READY", "message": "数字人尚未完成克隆"},
+        )
+    return effective_voice_id, effective_avatar_id
 
 
 async def list_tasks(db: AsyncSession, user_id: str, status_: str | None, page: int, page_size: int) -> TaskPageOut:
@@ -215,6 +280,11 @@ async def retry_step(
     """单步重跑：重置该步及后续步骤，从断点续跑（F-405）"""
     _check_step(step)
     t = await _must_get(db, task_id, user_id)
+    if t.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部服务结果未知，管理员对账前不可重试"},
+        )
     if t.status == "running":
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail={"code": "TASK_RUNNING", "message": "任务运行中，稍后再试"}
@@ -319,6 +389,11 @@ async def confirm(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
 
 async def cancel(db: AsyncSession, task_id: str, user_id: str) -> TaskOut:
     t = await _must_get(db, task_id, user_id)
+    if t.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部服务结果未知，管理员对账前不可取消"},
+        )
     if t.status in ("done", "failed", "canceled"):
         return to_out(t)
     t.status = "canceled"
@@ -348,13 +423,9 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
         )
         if provider_result_unknown:
             step_name = "语音" if from_step == "voice" else "数字人"
-            task.status = "failed"
+            task.status = "reconciliation_required"
             task.queue_message_id = ""
-            task.error = f"{from_step}: 外部服务结果未知，为避免重复调用已停止自动恢复，请重新报价后重试"
-            if task.reservation_id:
-                from app.modules.billing.service import release_reservation
-
-                await release_reservation(db, task.reservation_id, task.user_id)
+            task.error = f"{from_step}: 外部服务结果未知，为避免重复调用已停止自动恢复，等待管理员对账"
             logger.error(
                 "pipeline_recovery_requires_reconciliation",
                 task_id=task.id,
@@ -368,7 +439,7 @@ async def recover_incomplete_tasks(db: AsyncSession) -> int:
                 task.user_id,
                 "error",
                 f"任务需要人工确认：{task.title}",
-                f"{step_name}外部服务结果未知，为避免重复调用已停止自动恢复；请重新报价后从该步骤重试。",
+                f"{step_name}外部服务结果未知，为避免重复调用已停止自动恢复；积分冻结保留，等待管理员对账。",
             )
             continue
         task.status = "pending"
@@ -437,7 +508,13 @@ async def _must_get(db: AsyncSession, task_id: str, user_id: str) -> PipelineTas
 def to_out(t: PipelineTask) -> TaskOut:
     steps_raw = json.loads(t.steps_json or "[]") or _default_steps()
     ctx = json.loads(t.artifacts_json or "{}")
-    cover = ctx.get("cover_key")
+    cover = str(ctx.get("cover_key") or "")
+    final_video = str(ctx.get("final_video_key") or "")
+    public_ctx = public_metadata(ctx, redact_values=True)
+    if final_video:
+        public_ctx["final_video_url"] = signed_media_path(final_video)
+    if cover:
+        public_ctx["cover_url"] = signed_media_path(cover)
     public_steps: list[StepStateOut] = []
     for step in steps_raw:
         public_step = {
@@ -451,7 +528,7 @@ def to_out(t: PipelineTask) -> TaskOut:
         id=t.id,
         ipId=t.ip_id,
         title=t.title,
-        coverUrl=f"/media/{cover}" if cover else None,
+        coverUrl=signed_media_path(cover) if cover else None,
         sourceUrl=t.source_url,
         mode=t.mode,
         status=t.status,
@@ -460,7 +537,7 @@ def to_out(t: PipelineTask) -> TaskOut:
         compute=t.compute,
         quotaCost=t.quota_cost,
         error="处理失败，请稍后重试" if t.error else "",
-        artifacts=public_metadata(ctx, redact_values=True),
+        artifacts=public_ctx,
         batchId=t.batch_id,
         createdAt=t.created_at.astimezone(UTC).isoformat(),
         updatedAt=t.updated_at.astimezone(UTC).isoformat(),

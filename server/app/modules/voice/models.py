@@ -44,5 +44,5 @@ class Voice(Base):
     volume: Mapped[str] = mapped_column(String(8), default="1.0")  # 音量
     pitch: Mapped[str] = mapped_column(String(8), default="1.0")  # 语调
     # status: training → pending_confirm → ready / rejected / failed
-    status: Mapped[str] = mapped_column(String(20), default="training")
+    status: Mapped[str] = mapped_column(String(32), default="training")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

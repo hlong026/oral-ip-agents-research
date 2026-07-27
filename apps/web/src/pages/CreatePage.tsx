@@ -878,20 +878,20 @@ function StepAvatar({
 // ---------------- 第 6 步：视频剪辑（成片预览 + 可跳过） ----------------
 
 function StepEdit({
-  finalVideoKey,
+  finalVideoUrl,
   onSkip,
 }: {
-  finalVideoKey: string;
+  finalVideoUrl: string;
   onSkip: () => void;
 }) {
   const navigate = useNavigate();
   return (
     <div className="space-y-4">
-      {finalVideoKey && (
+      {finalVideoUrl && (
         <div>
           <label className="label">成片预览</label>
           <video
-            src={`/media/${finalVideoKey}`}
+            src={finalVideoUrl}
             controls
             playsInline
             preload="metadata"
@@ -928,11 +928,11 @@ function StepEdit({
 function StepPublish({
   wiz,
   setWiz,
-  finalVideoKey,
+  finalVideoUrl,
 }: {
   wiz: Wizard;
   setWiz: (w: Wizard) => void;
-  finalVideoKey: string;
+  finalVideoUrl: string;
 }) {
   const { data: capabilities } = useQuery({
     queryKey: ["publish-capabilities"],
@@ -946,7 +946,7 @@ function StepPublish({
         : [...wiz.platforms, p],
     });
 
-  if (!finalVideoKey) {
+  if (!finalVideoUrl) {
     return (
       <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
         成片尚未生成，请先回到「视频合成」步完成合成后再配置发布。
@@ -959,7 +959,7 @@ function StepPublish({
       <div>
         <label className="label">成片预览</label>
         <video
-          src={`/media/${finalVideoKey}`}
+          src={finalVideoUrl}
           controls
           playsInline
           preload="metadata"
@@ -1069,6 +1069,10 @@ export default function CreatePage() {
   )?.artifacts;
   const finalVideoKey = composeArtifacts?.final_video_key ?? "";
   const coverKey = composeArtifacts?.cover_key ?? "";
+  const finalVideoUrl =
+    typeof task?.artifacts?.final_video_url === "string"
+      ? task.artifacts.final_video_url
+      : "";
 
   // 合成前置产物校验：直达本步缺料时引导补齐对应步骤，绝不静默自动扣费
   const composeGap = !current
@@ -1253,7 +1257,7 @@ export default function CreatePage() {
 
   /** 发布步提交：对已生成的成片创建发布任务；未选平台则直接完成 */
   const publishVideo = async () => {
-    if (!finalVideoKey) {
+    if (!finalVideoKey || !wiz.taskId) {
       setError("成片尚未生成，请先完成合成步");
       return;
     }
@@ -1265,7 +1269,7 @@ export default function CreatePage() {
     setError("");
     try {
       await publishApi.createJobs({
-        taskId: wiz.taskId || undefined,
+        taskId: wiz.taskId,
         platforms: wiz.platforms,
         title: (
           wiz.title.trim() ||
@@ -1349,13 +1353,13 @@ export default function CreatePage() {
             </div>
           ))}
         {step === "edit" && (
-          <StepEdit finalVideoKey={finalVideoKey} onSkip={next} />
+          <StepEdit finalVideoUrl={finalVideoUrl} onSkip={next} />
         )}
         {step === "publish" && (
           <StepPublish
             wiz={wiz}
             setWiz={setWiz}
-            finalVideoKey={finalVideoKey}
+            finalVideoUrl={finalVideoUrl}
           />
         )}
 

@@ -1,7 +1,7 @@
 """管理员用户、成本和审计查询。"""
 
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -45,6 +45,12 @@ class CreditAdjustIn(BaseModel):
         if value == 0:
             raise ValueError("调整积分不能为 0")
         return value
+
+
+class ReconciliationIn(BaseModel):
+    action: Literal["release", "settle", "resume"]
+    reason: str = Field(min_length=3, max_length=500)
+    providerTaskId: str | None = Field(default=None, max_length=128)
 
 
 @router.get("/users")
@@ -228,3 +234,149 @@ async def list_audit(
         "page": page,
         "pageSize": pageSize,
     }
+
+
+@router.get("/reconciliations")
+async def list_reconciliations(
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """列出外部非幂等提交结果未知、仍保留积分冻结的记录。"""
+    from app.modules.avatar.models import Avatar
+    from app.modules.pipeline.models import PipelineTask
+    from app.modules.voice.models import Voice
+
+    pipeline_tasks = (
+        await db.execute(
+            select(PipelineTask)
+            .where(PipelineTask.status == "reconciliation_required")
+            .order_by(PipelineTask.updated_at.asc())
+        )
+    ).scalars()
+    voices = (
+        await db.execute(
+            select(Voice).where(Voice.status == "reconciliation_required").order_by(Voice.created_at.asc())
+        )
+    ).scalars()
+    avatars = (
+        await db.execute(
+            select(Avatar).where(Avatar.status == "reconciliation_required").order_by(Avatar.created_at.asc())
+        )
+    ).scalars()
+    items = [
+        {
+            "kind": "pipeline",
+            "id": item.id,
+            "userId": item.user_id,
+            "name": item.title,
+            "step": item.current_step,
+            "reservationId": item.reservation_id,
+            "createdAt": item.created_at.astimezone(UTC).isoformat(),
+        }
+        for item in pipeline_tasks
+    ]
+    items += [
+        {
+            "kind": "voice",
+            "id": item.id,
+            "userId": item.user_id,
+            "name": item.name,
+            "step": "voice_clone",
+            "reservationId": item.reservation_id,
+            "createdAt": item.created_at.astimezone(UTC).isoformat(),
+        }
+        for item in voices
+    ]
+    items += [
+        {
+            "kind": "avatar",
+            "id": item.id,
+            "userId": item.user_id,
+            "name": item.name,
+            "step": "avatar_clone",
+            "reservationId": item.reservation_id,
+            "createdAt": item.created_at.astimezone(UTC).isoformat(),
+        }
+        for item in avatars
+    ]
+    return {"items": sorted(items, key=lambda item: item["createdAt"]), "total": len(items)}
+
+
+@router.post("/reconciliations/{kind}/{record_id}")
+async def resolve_reconciliation(
+    kind: Literal["pipeline", "voice", "avatar"],
+    record_id: str,
+    body: ReconciliationIn,
+    admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """管理员根据供应商后台证据恢复轮询，或结算/释放冻结后关闭未知状态。"""
+    from app.modules.avatar.models import Avatar
+    from app.modules.billing.service import release_reservation, settle_reservation
+    from app.modules.pipeline.models import PipelineTask
+    from app.modules.voice.models import Voice
+
+    model = {"pipeline": PipelineTask, "voice": Voice, "avatar": Avatar}[kind]
+    record: Any = await db.get(model, record_id)
+    if record is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "RECONCILIATION_NOT_FOUND", "message": "待对账记录不存在"},
+        )
+    if record.status != "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_CLOSED", "message": "该记录已完成对账"},
+        )
+
+    reservation_id = str(record.reservation_id or "")
+    if body.action == "resume":
+        if kind == "pipeline" or not body.providerTaskId:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": "PROVIDER_TASK_ID_REQUIRED",
+                    "message": "声音或数字人恢复轮询必须填写供应商任务 ID",
+                },
+            )
+        record.provider_task_id = body.providerTaskId
+        record.provider = "hifly-voice" if kind == "voice" else "hifly-avatar"
+        record.status = "training"
+        result_status = "training"
+    elif body.action == "settle":
+        if (
+            not reservation_id
+            or await settle_reservation(
+                db,
+                reservation_id,
+                record.id,
+                step="pipeline" if kind == "pipeline" else f"{kind}_clone",
+            )
+            <= 0
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RESERVATION_UNAVAILABLE", "message": "积分冻结不可结算"},
+            )
+        record.status = "failed"
+        result_status = "settled"
+    else:
+        released = await release_reservation(db, reservation_id, record.user_id) if reservation_id else None
+        if released is None or released.status != "released":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RESERVATION_UNAVAILABLE", "message": "积分冻结不可释放"},
+            )
+        record.status = "failed"
+        result_status = "released"
+
+    if kind == "pipeline" and body.action != "resume":
+        record.error = f"人工对账已完成：{body.reason}"
+    await db.commit()
+    await write_audit(
+        "provider_reconciliation_resolved",
+        user_id=admin_id,
+        task_id=record.id,
+        detail=f"kind={kind},action={body.action},reason={body.reason[:300]}",
+    )
+    return {"kind": kind, "id": record.id, "status": record.status, "reservationStatus": result_status}

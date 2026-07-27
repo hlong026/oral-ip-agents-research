@@ -22,6 +22,7 @@ const STEP_STATUS_ICON: Record<string, { icon: LucideIcon; cls: string }> = {
   done: { icon: CircleCheck, cls: "text-success" },
   skipped: { icon: Minus, cls: "text-text-3" },
   failed: { icon: X, cls: "text-danger" },
+  reconciliation_required: { icon: Hand, cls: "text-warning" },
 };
 
 /** 单步时间线节点（重跑/人工覆盖入口） */
@@ -51,10 +52,12 @@ function StepNode({
     task.status !== "done" &&
     task.status !== "canceled" &&
     task.status !== "running" &&
+    task.status !== "reconciliation_required" &&
     (step.status === "failed" || step.status === "done");
   const canOverride =
     step.status !== "running" &&
     task.status !== "running" &&
+    task.status !== "reconciliation_required" &&
     task.status !== "done";
 
   const retry = async () => {
@@ -282,10 +285,8 @@ export default function TaskDetailPage() {
     const v = task.artifacts?.[key];
     return typeof v === "string" && v ? v : undefined;
   };
-  const composeStep = task.steps.find((s) => s.step === "compose");
-  const finalVideo =
-    art("final_video_key") ?? composeStep?.artifacts?.final_video_key;
-  const coverKey = art("cover_key") ?? composeStep?.artifacts?.cover_key;
+  const finalVideoUrl = art("final_video_url");
+  const coverUrl = art("cover_url") ?? task.coverUrl ?? undefined;
   const script =
     art("script") ??
     task.steps.find((s) => s.step === "rewrite")?.artifacts?.script;
@@ -308,7 +309,8 @@ export default function TaskDetailPage() {
   const isFinished =
     task.status === "done" ||
     task.status === "failed" ||
-    task.status === "canceled";
+    task.status === "canceled" ||
+    task.status === "reconciliation_required";
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -365,13 +367,27 @@ export default function TaskDetailPage() {
         </div>
       )}
 
+      {task.status === "reconciliation_required" && (
+        <div className="glass flex items-center gap-3 border-warning/40 p-4">
+          <span className="text-warning">
+            <Hand className="h-4 w-4" />
+          </span>
+          <span className="flex-1 text-sm text-warning">
+            外部服务提交结果未知，系统已停止自动重试并保留积分冻结；管理员对账完成前请勿重复创建。
+          </span>
+        </div>
+      )}
+
       {/* 成片预览（主体）：就绪即内嵌播放，未就绪时以进度占位 */}
       <div className="glass p-5">
         <div className="mb-3 flex items-center justify-between">
           <span className="font-medium">成片预览</span>
-          {finalVideo && (
+          {finalVideoUrl && (
             <div className="flex gap-2">
-              <Link to="/editor" className="btn-ghost px-3 py-1.5 text-xs">
+              <Link
+                to={`/editor?task=${task.id}`}
+                className="btn-ghost px-3 py-1.5 text-xs"
+              >
                 去剪辑精修
               </Link>
               <Link
@@ -383,10 +399,10 @@ export default function TaskDetailPage() {
             </div>
           )}
         </div>
-        {finalVideo ? (
+        {finalVideoUrl ? (
           <video
-            src={`/media/${finalVideo}`}
-            poster={coverKey ? `/media/${coverKey}` : undefined}
+            src={finalVideoUrl}
+            poster={coverUrl}
             controls
             playsInline
             preload="metadata"
@@ -401,7 +417,9 @@ export default function TaskDetailPage() {
                 <span className="text-sm">
                   {task.status === "failed"
                     ? "合成未完成，可展开下方步骤详情从失败步续跑"
-                    : "任务已取消，未生成成片"}
+                    : task.status === "reconciliation_required"
+                      ? "任务等待管理员核对外部服务结果"
+                      : "任务已取消，未生成成片"}
                 </span>
               </>
             ) : (
@@ -435,11 +453,13 @@ export default function TaskDetailPage() {
                 ? `${STEP_LABELS[runningStep.step]}中…`
                 : task.status === "failed"
                   ? "已失败"
-                  : task.status === "canceled"
-                    ? "已取消"
-                    : task.status === "waiting_confirm"
-                      ? "等待人工确认"
-                      : "等待中"}
+                  : task.status === "reconciliation_required"
+                    ? "等待人工对账"
+                    : task.status === "canceled"
+                      ? "已取消"
+                      : task.status === "waiting_confirm"
+                        ? "等待人工确认"
+                        : "等待中"}
           </span>
           <div className="flex-1" />
           <span className="text-xs font-medium text-text-2">{overallPct}%</span>

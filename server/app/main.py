@@ -53,11 +53,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     async with SessionLocal() as db:
         await seed_prices(db)
         await seed_initial_price_catalog(db)
+        from app.modules.avatar.service import recover_unknown_submissions as recover_unknown_avatar_submissions
         from app.modules.content.jobs import recover_pending_jobs
         from app.modules.pipeline.service import recover_incomplete_tasks
         from app.modules.publish.service import recover_publish_jobs
+        from app.modules.voice.service import recover_unknown_submissions as recover_unknown_voice_submissions
 
         await recover_pending_jobs(db)
+        await recover_unknown_voice_submissions(db)
+        await recover_unknown_avatar_submissions(db)
         await recover_incomplete_tasks(db)
         await recover_publish_jobs(db)
     # 发布模块：启动 Cookie 心跳检测后台任务
@@ -212,6 +216,12 @@ _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
 @app.head("/media/{key:path}", include_in_schema=False)
 @app.get("/media/{key:path}", name="media")
 async def media_file(key: str, request: Request) -> Response:
+    if not storage.verify_media_signature(
+        key,
+        request.query_params.get("exp"),
+        request.query_params.get("sig"),
+    ):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "媒体访问链接无效或已过期")
     try:
         total = await storage.size(key)
     except (FileNotFoundError, ValueError) as exc:

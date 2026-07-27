@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import SessionLocal
 from app.core.events import CHANNEL_TASKS, publish
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes
+from app.core.storage import save_bytes
 from app.core.white_label import public_error_message, public_metadata
 from app.modules.billing.service import (
     attach_reservation,
@@ -22,7 +22,7 @@ from app.modules.billing.service import (
     settle_reservation,
 )
 from app.providers.base import ProviderError
-from app.providers.duration_probe import probe_media_bytes
+from app.providers.duration_probe import probe_media_bytes, probe_media_key
 
 from . import repository
 from . import service as content_service
@@ -134,11 +134,22 @@ async def submit_parse_upload(
     user_id: str,
     persona_id: str | None,
     filename: str,
-    data: bytes,
+    data: bytes | None,
     quote_id: str | None,
+    storage_key: str | None = None,
+    duration_seconds: float | None = None,
 ) -> ContentJobOut:
     unit = await quote_operation_unit(db, user_id, quote_id, "asr")
-    duration = await probe_media_bytes(data, Path(filename).suffix)
+    if duration_seconds is not None:
+        duration = duration_seconds
+    elif storage_key:
+        info = await probe_media_key(storage_key)
+        try:
+            duration = float((info or {})["format"]["duration"])
+        except (KeyError, TypeError, ValueError):
+            duration = None
+    else:
+        duration = await probe_media_bytes(data or b"", Path(filename).suffix)
     if unit in {"per_minute", "per_second"} and duration is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -152,7 +163,7 @@ async def submit_parse_upload(
         "asr",
         {"seconds": seconds, "assets": 1},
     )
-    storage_key = await save_bytes("content-jobs", filename, data)
+    storage_key = storage_key or await save_bytes("content-jobs", filename, data or b"")
     return await _create_and_schedule(
         db,
         user_id=user_id,
@@ -294,13 +305,12 @@ async def _execute(db: AsyncSession, job: ContentJob) -> dict:
     if job.kind == "parse_upload":
         await progress(25, "正在读取上传媒体")
         storage_key = str(payload["storageKey"])
-        data = await read_bytes(storage_key)
         await progress(45, "正在提取音轨并转写文案")
         upload_result = await content_service.parse_upload(
             db,
             job.user_id,
             str(payload["filename"]),
-            data,
+            None,
             payload.get("personaId"),
             payload.get("durationSeconds"),
             storage_key=storage_key,

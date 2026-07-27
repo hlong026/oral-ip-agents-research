@@ -41,5 +41,5 @@ class Avatar(Base):
     consent_hash: Mapped[str] = mapped_column(String(64), default="")
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # status: training → ready / failed
-    status: Mapped[str] = mapped_column(String(20), default="training")
+    status: Mapped[str] = mapped_column(String(32), default="training")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

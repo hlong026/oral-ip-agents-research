@@ -367,7 +367,9 @@ function Playground({
 
 /** 需要继续轮询状态接口的声音：训练中，或待确认但试听样音尚未就绪（后端会自愈补存） */
 const needsStatusPoll = (v: Voice) =>
-  v.status === "training" || (v.status === "pending_confirm" && !v.demoUrl);
+  v.status === "submitting" ||
+  v.status === "training" ||
+  (v.status === "pending_confirm" && !v.demoUrl);
 
 /** 声音中心（F-201~F-204：克隆/试听/绑定 IP/状态轮询） */
 export default function VoicesPage() {
@@ -586,6 +588,16 @@ export default function VoicesPage() {
                         训练中
                       </span>
                     )}
+                    {v.status === "submitting" && (
+                      <span className="chip border-warning/40 text-[11px] text-warning">
+                        提交中
+                      </span>
+                    )}
+                    {v.status === "reconciliation_required" && (
+                      <span className="chip border-warning/40 text-[11px] text-warning">
+                        待对账
+                      </span>
+                    )}
                     {v.status === "pending_confirm" && (
                       <span className="chip border-info/40 text-[11px] text-info">
                         待试听确认
@@ -650,6 +662,11 @@ export default function VoicesPage() {
                       试听样音生成中，就绪后自动刷新…
                     </div>
                   )}
+                  {v.status === "reconciliation_required" && (
+                    <div className="mt-3 rounded-xl border border-warning/20 bg-warning/5 p-3 text-xs text-warning">
+                      外部服务提交结果未知，系统已保留积分冻结；管理员对账完成前请勿重复提交。
+                    </div>
+                  )}
                   <div className="mt-3 flex items-center justify-between">
                     <span className="text-xs text-text-3">
                       {ip ? (
@@ -687,7 +704,10 @@ export default function VoicesPage() {
                             ? "text-danger"
                             : "text-text-3 hover:text-danger"
                         }`}
-                        disabled={actionId === v.id}
+                        disabled={
+                          actionId === v.id ||
+                          v.status === "reconciliation_required"
+                        }
                         onClick={() => void removeVoice(v)}
                       >
                         {pendingDeleteId === v.id ? (

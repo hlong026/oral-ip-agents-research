@@ -135,6 +135,39 @@ async def test_provider_failure_releases_pipeline_reservation(client, monkeypatc
     assert "parse" in notification.body
 
 
+async def test_unknown_provider_outcome_holds_reservation_for_reconciliation(client, monkeypatch) -> None:
+    from app.modules.pipeline import engine
+    from app.providers.base import ProviderOutcomeUnknown
+
+    async def provider_outcome_unknown(*_args, **_kwargs) -> dict:
+        raise ProviderOutcomeUnknown("服务提交结果未知，请先对账再重试")
+
+    task_id, reservation_id, user_id = await _reserved_task()
+    runners = dict.fromkeys(engine.STEP_ORDER, _all_steps_succeed)
+    runners["voice"] = provider_outcome_unknown
+    monkeypatch.setattr(engine, "STEP_RUNNERS", runners)
+
+    await engine.run_task(task_id)
+
+    async with SessionLocal() as db:
+        task = await db.get(PipelineTask, task_id)
+        reservation = await db.get(CreditReservation, reservation_id)
+        account = (await db.execute(select(QuotaAccount).where(QuotaAccount.user_id == user_id))).scalar_one()
+        notification = (
+            (
+                await db.execute(
+                    select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc())
+                )
+            )
+            .scalars()
+            .first()
+        )
+    assert task is not None and task.status == "reconciliation_required"
+    assert reservation is not None and reservation.status == "reserved"
+    assert account.balance == 6
+    assert notification is not None and "人工对账" in notification.title
+
+
 async def test_settlement_failure_marks_task_failed_and_releases_reservation(client, monkeypatch) -> None:
     from app.modules.billing import service as billing_service
     from app.modules.pipeline import engine

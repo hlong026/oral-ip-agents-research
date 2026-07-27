@@ -4548,6 +4548,93 @@
         }
       }
     },
+    "/api/admin/v1/reconciliations": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "List Reconciliations",
+        "description": "列出外部非幂等提交结果未知、仍保留积分冻结的记录。",
+        "operationId": "list_reconciliations_api_admin_v1_reconciliations_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/admin/v1/reconciliations/{kind}/{record_id}": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Resolve Reconciliation",
+        "description": "管理员根据供应商后台证据恢复轮询，或结算/释放冻结后关闭未知状态。",
+        "operationId": "resolve_reconciliation_api_admin_v1_reconciliations__kind___record_id__post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": ["pipeline", "voice", "avatar"],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "record_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Record Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconciliationIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/v1/im/kill-switch": {
       "get": {
         "tags": ["admin-im"],
@@ -7547,6 +7634,36 @@
         "required": ["balance", "usedThisMonth", "total"],
         "title": "QuotaOut"
       },
+      "ReconciliationIn": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["release", "settle", "resume"],
+            "title": "Action"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          },
+          "providerTaskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providertaskid"
+          }
+        },
+        "type": "object",
+        "required": ["action", "reason"],
+        "title": "ReconciliationIn"
+      },
       "RedeemIn": {
         "properties": {
           "code": {
@@ -8831,14 +8948,7 @@
       "app__modules__publish__schemas__PublishIn": {
         "properties": {
           "taskId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Taskid"
           },
           "platforms": {
@@ -8861,7 +8971,14 @@
             "default": []
           },
           "videoKey": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Videokey"
           },
           "coverKey": {
@@ -8888,7 +9005,7 @@
           }
         },
         "type": "object",
-        "required": ["platforms", "title", "videoKey"],
+        "required": ["taskId", "platforms", "title"],
         "title": "PublishIn"
       }
     },

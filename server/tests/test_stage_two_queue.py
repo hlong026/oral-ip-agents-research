@@ -163,7 +163,7 @@ async def test_running_voice_is_not_replayed_after_restart(monkeypatch) -> None:
 
     assert recovered == 0
     assert scheduled == []
-    assert task.status == "failed"
+    assert task.status == "reconciliation_required"
     assert "避免重复调用" in task.error
 
 
@@ -191,8 +191,25 @@ async def test_running_avatar_without_provider_task_id_is_not_replayed(monkeypat
 
     assert recovered == 0
     assert scheduled == []
-    assert task.status == "failed"
+    assert task.status == "reconciliation_required"
     assert "避免重复调用" in task.error
+
+
+async def test_reconciliation_task_counts_as_active_and_alerting() -> None:
+    from app.modules.pipeline import repository as pipeline_repo
+
+    async with SessionLocal() as db:
+        await pipeline_repo.create(
+            db,
+            user_id="reconciliation-active-user",
+            status="reconciliation_required",
+            current_step="voice",
+        )
+
+        assert await pipeline_repo.active_count(db, "reconciliation-active-user") == 1
+        stats = await pipeline_repo.stats(db, "reconciliation-active-user")
+
+    assert stats["pendingAlerts"] == 1
 
 
 async def test_avatar_resume_reuses_persisted_provider_task(monkeypatch) -> None:

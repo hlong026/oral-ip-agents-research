@@ -98,7 +98,7 @@ async def stats(db: AsyncSession, user_id: str) -> dict:
         PipelineTask.updated_at >= today - timedelta(days=14),
         PipelineTask.updated_at < today - timedelta(days=7),
     )
-    failed = await cnt(PipelineTask.status == "failed")
+    failed = await cnt(PipelineTask.status.in_(["failed", "reconciliation_required"]))
     return {
         "todayDone": today_done,
         "todayDelta": today_done - yesterday_done,
@@ -115,7 +115,7 @@ async def active_count(db: AsyncSession, user_id: str) -> int:
             await db.scalar(
                 select(func.count(PipelineTask.id)).where(
                     PipelineTask.user_id == user_id,
-                    PipelineTask.status.in_(["pending", "running", "waiting_confirm"]),
+                    PipelineTask.status.in_(["pending", "running", "waiting_confirm", "reconciliation_required"]),
                 )
             )
         )

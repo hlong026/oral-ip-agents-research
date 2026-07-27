@@ -300,11 +300,11 @@ export const pipelineApi = {
 
 // ---------- publish（F-501~F-504） ----------
 export interface CreatePublishInput {
-  taskId?: string;
+  taskId: string;
   platforms: Platform[];
   title: string;
   topics?: string[];
-  videoKey: string;
+  videoKey?: string;
   coverKey?: string;
   publishAt?: string;
 }

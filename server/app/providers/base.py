@@ -23,6 +23,10 @@ class StepRecoverableError(ProviderError):
     """可降级重试的错误（触发降级链）"""
 
 
+class ProviderOutcomeUnknown(ProviderError):
+    """非幂等请求可能已被供应商受理，必须先对账，禁止自动重试或降级。"""
+
+
 class ConsentRequiredError(ProviderError):
     """缺少本人授权凭证（合规红线，不可降级）"""
 

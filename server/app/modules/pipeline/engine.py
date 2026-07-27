@@ -375,10 +375,13 @@ async def step_voice(task: PipelineTask, ctx: dict) -> dict:
 
     async with SessionLocal() as db:
         v = await get_voice(db, voice_id, task.user_id)
-        if v:
-            if v.status != "ready":
-                raise RuntimeError("声音尚未就绪，请先完成克隆确认")
-            voice_id = v.provider_voice_id or voice_id
+        if v is None:
+            raise RuntimeError("声音不存在或不属于当前用户")
+        if v.status != "ready":
+            raise RuntimeError("声音尚未就绪，请先完成克隆确认")
+        if not v.provider_voice_id:
+            raise RuntimeError("声音供应商资产缺失，请重新克隆")
+        voice_id = v.provider_voice_id
     result, provider = await registry.run_with_fallback(
         "voice", registry.voice_chain, "synthesize", voice_id, script, 1.0, trace_id=task.trace_id, task_id=task.id
     )
@@ -709,6 +712,9 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             skipped=skipped,
                         )
                     except Exception as e:  # noqa: BLE001
+                        from app.providers.base import ProviderOutcomeUnknown
+
+                        outcome_unknown = isinstance(e, ProviderOutcomeUnknown)
                         # 步骤失败：记录 ERROR + 结构化字段（§10.6.8-A #3）
                         logger.error(
                             "step_failed",
@@ -719,21 +725,25 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             trace_id=task.trace_id,
                             user_id=task.user_id,
                         )
-                        if task.reservation_id:
+                        if task.reservation_id and not outcome_unknown:
                             from app.modules.billing.service import release_reservation
 
                             await release_reservation(db, task.reservation_id, task.user_id)
                         step_ms = int((time.perf_counter() - step_start) * 1000)
-                        safe_error = public_error_message(e)
+                        safe_error = (
+                            "外部服务提交结果未知，已暂停自动重试并保留积分冻结，等待管理员对账"
+                            if outcome_unknown
+                            else public_error_message(e)
+                        )
                         st.update(
                             {
-                                "status": "failed",
+                                "status": "reconciliation_required" if outcome_unknown else "failed",
                                 "message": safe_error,
                                 "durationMs": step_ms,
                                 "finishedAt": _now(),
                             }
                         )
-                        task.status = "failed"
+                        task.status = "reconciliation_required" if outcome_unknown else "failed"
                         task.error = safe_error
                         _dump_steps(task, steps)
                         await repo_save(db, task)
@@ -743,8 +753,12 @@ async def run_task(task_id: str, from_step: str | None = None) -> None:
                             db,
                             task.user_id,
                             "error",
-                            f"任务失败：{task.title}",
-                            (f"步骤={step_name}；耗时={step_ms}ms；{safe_error}；可重新报价后从该步骤重试。"),
+                            (f"任务等待人工对账：{task.title}" if outcome_unknown else f"任务失败：{task.title}"),
+                            (
+                                f"步骤={step_name}；耗时={step_ms}ms；{safe_error}。"
+                                if outcome_unknown
+                                else f"步骤={step_name}；耗时={step_ms}ms；{safe_error}；可重新报价后从该步骤重试。"
+                            ),
                         )
                         # 任务最终失败：记录 ERROR
                         logger.error(
