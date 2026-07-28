@@ -286,9 +286,18 @@ class HiFlyVoice:
         )
 
     async def list_voices(self) -> list[dict[str, Any]]:
-        """查询已克隆的声音列表（仅自己的）"""
-        data = await self._c.request("GET", "/api/v2/hifly/voice/list", params={"page": 1, "size": 300, "kind": 1})
-        return data.get("data", [])
+        """查询已克隆的声音列表（仅自己的）：单页上限 300，翻页聚合避免超量声音丢失"""
+        items: list[dict[str, Any]] = []
+        size = 300
+        for page in range(1, 21):  # 安全上限 20 页，防御异常响应导致死循环
+            data = await self._c.request(
+                "GET", "/api/v2/hifly/voice/list", params={"page": page, "size": size, "kind": 1}
+            )
+            batch = data.get("data", []) or []
+            items.extend(batch)
+            if len(batch) < size:
+                break
+        return items
 
     async def _poll_video_task(self, task_id: str) -> dict[str, Any]:
         """轮询创作任务状态直到完成"""

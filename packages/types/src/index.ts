@@ -245,13 +245,21 @@ export type VoiceStatus =
 export interface Voice {
   id: string;
   name: string;
-  source: "clone" | "builtin";
+  source: "clone" | "import" | "builtin";
   gender: string;
   emotion: string;
   sampleUrl?: string | null;
   demoUrl?: string | null;
   status: VoiceStatus;
   createdAt: string;
+}
+
+/** 云端历史克隆声音（找回导入用） */
+export interface CloudVoice {
+  cloudId: string;
+  name: string;
+  imported: boolean;
+  localVoiceId?: string | null;
 }
 
 export interface Avatar {

@@ -1,8 +1,8 @@
 import { HttpError, personaApi, voiceApi } from "@oral/api-client";
 import { useIp } from "@oral/stores";
-import type { Voice } from "@oral/types";
+import type { CloudVoice, Voice } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mic, Music, Play, Square, Trash2, Upload } from "lucide-react";
+import { CloudDownload, Mic, Music, Play, Square, Trash2, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import AssetNav from "../components/AssetNav";
@@ -16,6 +16,10 @@ import {
 const SAMPLE_MAX_BYTES = 20 * 1024 * 1024;
 const SAMPLE_MIN_SECONDS = 5;
 const SAMPLE_MAX_SECONDS = 180;
+
+// 声音来源标签（import = 从云端历史克隆找回导入）
+const sourceLabel = (source: Voice["source"]) =>
+  source === "clone" ? "克隆音色" : source === "import" ? "云端找回" : "内置音色";
 
 /** 克隆新声音表单（录音优先，上传为可选；合规红线：强制 consent 授权勾选） */
 function CloneForm({
@@ -258,6 +262,136 @@ function CloneForm({
       >
         {busy ? "克隆任务创建中…" : "开始克隆"}
       </button>
+    </div>
+  );
+}
+
+/** 云端找回：拉取供应商账号下的历史克隆声音，一键导入免重新克隆 */
+function CloudRecoveryPanel({ onImported }: { onImported: () => void }) {
+  const [items, setItems] = useState<CloudVoice[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const [importingId, setImportingId] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  const fetchList = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setItems(await voiceApi.cloudList());
+    } catch (e) {
+      setError(
+        e instanceof HttpError ? e.body.message : "云端列表拉取失败，请重试",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const importOne = async (item: CloudVoice) => {
+    if (!consent) return;
+    setImportingId(item.cloudId);
+    setError("");
+    try {
+      // 授权凭证：勾选即代表确认合法授权，与克隆表单同一套存证机制
+      const imported = await voiceApi.cloudImport(
+        item.cloudId,
+        `consent-${Date.now()}`,
+      );
+      setItems(
+        (list) =>
+          list?.map((i) =>
+            i.cloudId === item.cloudId
+              ? { ...i, imported: true, localVoiceId: imported.id }
+              : i,
+          ) ?? null,
+      );
+      onImported();
+    } catch (e) {
+      setError(
+        e instanceof HttpError ? e.body.message : "导入失败，请重试",
+      );
+    } finally {
+      setImportingId(null);
+    }
+  };
+
+  return (
+    <div className="glass space-y-3 p-5">
+      <div className="flex items-center justify-between">
+        <h2 className="font-medium">云端找回</h2>
+        <span className="text-xs text-text-3">历史克隆声音免重新训练</span>
+      </div>
+      <p className="text-xs text-text-3">
+        拉取云端已训练的历史声音，导入后立即可用，不消耗算力。找回的声音无试听样音，可在试听台合成试听（消耗算力）。
+      </p>
+      {items === null ? (
+        <button
+          className="btn-ghost flex w-full items-center justify-center gap-1.5 border-dashed py-4 text-text-3"
+          disabled={loading}
+          onClick={() => void fetchList()}
+        >
+          <CloudDownload className="h-4 w-4" />
+          {loading ? "查询中…" : "查询云端历史声音"}
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            <span>我确认拥有这些声音的合法授权</span>
+          </label>
+          {items.map((item) => (
+            <div
+              key={item.cloudId}
+              className="flex items-center justify-between rounded-xl border border-stroke bg-white/[0.03] px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm" title={item.name}>
+                  {item.name}
+                </div>
+                <div className="text-[11px] text-text-3">
+                  云端编号 {item.cloudId.slice(0, 8)}…
+                </div>
+              </div>
+              {item.imported ? (
+                <span className="chip border-success/40 text-[11px] text-success">
+                  已导入
+                </span>
+              ) : (
+                <button
+                  className="btn-primary px-3 py-1 text-xs"
+                  disabled={!consent || importingId !== null}
+                  onClick={() => void importOne(item)}
+                >
+                  {importingId === item.cloudId ? "导入中…" : "导入"}
+                </button>
+              )}
+            </div>
+          ))}
+          {items.length === 0 && (
+            <div className="py-3 text-center text-xs text-text-3">
+              云端没有可找回的历史声音
+            </div>
+          )}
+          <button
+            className="btn-ghost w-full py-1.5 text-xs text-text-3"
+            disabled={loading}
+            onClick={() => void fetchList()}
+          >
+            {loading ? "刷新中…" : "刷新列表"}
+          </button>
+        </div>
+      )}
+      {error && (
+        <div className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
     </div>
   );
 }
@@ -507,7 +641,7 @@ export default function VoicesPage() {
           <div className="mt-1.5 text-sm text-text-3">
             {boundVoice
               ? [
-                  boundVoice.source === "clone" ? "克隆音色" : "内置音色",
+                  sourceLabel(boundVoice.source),
                   boundVoice.gender,
                   boundVoice.emotion,
                 ]
@@ -570,10 +704,7 @@ export default function VoicesPage() {
                         {v.name}
                       </div>
                       <div className="mt-0.5 text-xs text-text-3">
-                        {[
-                          v.source === "clone" ? "克隆音色" : "内置音色",
-                          v.gender,
-                        ]
+                        {[sourceLabel(v.source), v.gender]
                           .filter(Boolean)
                           .join(" · ")}
                       </div>
@@ -734,9 +865,10 @@ export default function VoicesPage() {
           </div>
         </div>
 
-        {/* 右列：克隆 + 试听台 */}
+        {/* 右列：克隆 + 云端找回 + 试听台 */}
         <div className="space-y-4">
           <CloneForm onDone={() => void refresh()} startSignal={recordSignal} />
+          <CloudRecoveryPanel onImported={() => void refresh()} />
           <Playground voices={voices ?? []} defaultVoiceId={boundVoice?.id} />
         </div>
       </div>

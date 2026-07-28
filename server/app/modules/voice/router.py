@@ -20,13 +20,15 @@ from app.providers.duration_probe import (
     transcode_audio_to_m4a,
 )
 
-from .schemas import CloneStatusOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, VoiceOut
+from .schemas import CloneStatusOut, CloudImportIn, CloudVoiceOut, SynthesizeIn, SynthesizeOut, VoiceEditIn, VoiceOut
 from .service import (
     clone_voice,
     confirm_voice,
     delete_voice,
     edit_voice_params,
     get_clone_status,
+    import_cloud_voice,
+    list_cloud_voices,
     list_voices,
     reject_voice,
     synthesize,
@@ -45,6 +47,22 @@ VOICE_SAMPLE_MAX_SECONDS = 180
 async def api_list(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
     """我的声音列表"""
     return await list_voices(db, user_id)
+
+
+@router.get("/cloud", response_model=list[CloudVoiceOut])
+async def api_cloud_list(user_id: str = Depends(get_current_user_id), db: AsyncSession = Depends(get_db)):
+    """云端历史克隆声音找回列表（已与本地库去重比对）"""
+    return await list_cloud_voices(db, user_id)
+
+
+@router.post("/cloud/import", response_model=VoiceOut)
+async def api_cloud_import(
+    body: CloudImportIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """一键导入云端历史声音（免重新克隆，不消耗算力）"""
+    return await import_cloud_voice(db, user_id, body.cloudId, body.name, body.consentToken)
 
 
 @router.post("/clone", response_model=VoiceOut)

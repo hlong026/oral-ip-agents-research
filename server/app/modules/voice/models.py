@@ -23,6 +23,14 @@ class Voice(Base):
             sqlite_where=text("provider_task_id <> ''"),
             postgresql_where=text("provider_task_id <> ''"),
         ),
+        # 云端找回并发导入兜底：同一供应商声音 ID 全库唯一（check-then-insert 竞态由该索引闭环）
+        Index(
+            "uq_voices_provider_voice_id",
+            "provider_voice_id",
+            unique=True,
+            sqlite_where=text("provider_voice_id <> ''"),
+            postgresql_where=text("provider_voice_id <> ''"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
