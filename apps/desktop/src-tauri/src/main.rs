@@ -1,10 +1,17 @@
 // 桌面纯壳入口：仅承载 Web 构建产物，算力全在云端（CLOUD_FIRST）
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::fs;
+use std::path::PathBuf;
+
 use sha2::{Digest, Sha256};
+use tauri::Manager;
 
 /// 机器码哈希盐（docs/19：与前端指纹协议约定，勿改）
 const MACHINE_CODE_SALT: &str = "oral-ip-device-v1";
+
+/// 持久化会话令牌文件名（存于应用数据目录，webview 清缓存/重装应用不丢）
+const SESSION_TOKEN_FILE: &str = "session.token";
 
 /// 读取各平台稳定机器码原始值（清缓存/重装应用不变）
 fn raw_machine_id() -> Result<String, String> {
@@ -68,9 +75,59 @@ fn machine_code() -> Result<String, String> {
     Ok(format!("hw-{}", &hex[..32]))
 }
 
+/// 会话令牌文件路径：应用数据目录下 session.token（目录不存在则创建）
+fn session_token_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir failed: {e}"))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create app data dir failed: {e}"))?;
+    Ok(dir.join(SESSION_TOKEN_FILE))
+}
+
+/// 读取持久化 refresh token；无文件视为无会话（返回空串，非报错）
+#[tauri::command]
+fn session_token_read(app: tauri::AppHandle) -> Result<String, String> {
+    let path = session_token_path(&app)?;
+    match fs::read_to_string(&path) {
+        Ok(token) => Ok(token.trim().to_string()),
+        Err(_) => Ok(String::new()),
+    }
+}
+
+/// 持久化 refresh token 到应用数据目录（登录/令牌轮换后调用）
+#[tauri::command]
+fn session_token_write(app: tauri::AppHandle, token: String) -> Result<(), String> {
+    let path = session_token_path(&app)?;
+    fs::write(&path, token.trim()).map_err(|e| format!("write session token failed: {e}"))?;
+    // 收紧权限为 0600：refresh token 为长效凭证，避免同机其他用户可读
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("chmod session token failed: {e}"))?;
+    }
+    Ok(())
+}
+
+/// 清除持久化 token（登出/刷新失败）
+#[tauri::command]
+fn session_token_clear(app: tauri::AppHandle) -> Result<(), String> {
+    let path = session_token_path(&app)?;
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("clear session token failed: {e}"))?;
+    }
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![machine_code])
+        .invoke_handler(tauri::generate_handler![
+            machine_code,
+            session_token_read,
+            session_token_write,
+            session_token_clear
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

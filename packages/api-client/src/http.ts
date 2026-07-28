@@ -6,6 +6,7 @@
  */
 import type { ApiError, AuthTokens } from "@oral/types";
 import { deviceFingerprint } from "./fingerprint";
+import { loadPersistedRefreshToken, persistRefreshToken } from "./session-store";
 
 type ImportMetaWithEnv = ImportMeta & { env?: { VITE_API_BASE?: string } };
 
@@ -55,6 +56,8 @@ export function setTokens(tokens: AuthTokens | null) {
   refreshToken = tokens?.refreshToken ?? null;
   if (tokens) localStorage.setItem("oral_rt", tokens.refreshToken);
   else localStorage.removeItem("oral_rt");
+  // 桌面壳：同步落盘到应用数据目录（清缓存/重装应用后仍可恢复登录）
+  void persistRefreshToken(refreshToken);
 }
 
 export function hasSession(): boolean {
@@ -76,7 +79,13 @@ async function doRefresh(): Promise<boolean> {
         deviceFingerprint: await deviceFingerprint(),
       }),
     });
-    if (!res.ok) return false;
+    if (!res.ok) {
+      // 4xx 表示 refresh token 已失效/被吊销：清理内存、localStorage 与落盘副本，
+      // 避免每次启动重复一轮必然失败的刷新并让 hasSession 回归真实状态；
+      // 5xx/网络异常则保留 token 以便后续重试
+      if (res.status >= 400 && res.status < 500) setTokens(null);
+      return false;
+    }
     const data = (await res.json()) as AuthTokens;
     setTokens(data);
     return true;
@@ -87,7 +96,13 @@ async function doRefresh(): Promise<boolean> {
 
 export async function restoreSession(): Promise<boolean> {
   if (accessToken) return true;
-  if (!refreshToken) return false;
+  if (!refreshToken) {
+    // 桌面壳：localStorage 被清（重装/清缓存）时从应用数据目录恢复 refresh token
+    const persisted = await loadPersistedRefreshToken();
+    if (!persisted) return false;
+    refreshToken = persisted;
+    localStorage.setItem("oral_rt", persisted);
+  }
   refreshing ??= doRefresh().finally(() => (refreshing = null));
   return refreshing;
 }
