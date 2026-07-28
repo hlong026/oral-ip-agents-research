@@ -17,6 +17,30 @@ export function buildApiUrl(path: string, base = API_BASE): string {
   return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
+// API_BASE 为绝对地址（桌面壳等跨源部署）时，后端返回的 /media/ 相对路径
+// 会被错误解析到页面 origin（如 tauri.localhost），需统一换算到 API 同源
+const API_ORIGIN = /^https?:\/\//.test(API_BASE) ? new URL(API_BASE).origin : "";
+
+/** 将后端下发的 /media/ 相对路径换算为 API 同源绝对地址（同源部署时原样返回） */
+export function absolutizeMediaUrl(value: string): string {
+  return API_ORIGIN && value.startsWith("/media/")
+    ? `${API_ORIGIN}${value}`
+    : value;
+}
+
+/** 递归重写响应体里所有 /media/ 路径，覆盖嵌套产物（如 artifacts.final_video_url） */
+function absolutizeMedia(data: unknown): unknown {
+  if (!API_ORIGIN) return data; // 同源部署无需重写，避免无谓深拷贝
+  if (typeof data === "string") return absolutizeMediaUrl(data);
+  if (Array.isArray(data)) return data.map(absolutizeMedia);
+  if (data && typeof data === "object") {
+    return Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, absolutizeMedia(v)]),
+    );
+  }
+  return data;
+}
+
 let accessToken: string | null = null;
 let refreshToken: string | null = localStorage.getItem("oral_rt");
 let refreshing: Promise<boolean> | null = null;
@@ -140,7 +164,7 @@ async function rawFetch<T>(
   }
 
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return absolutizeMedia(await res.json()) as T;
 }
 
 export const http = {
