@@ -26,7 +26,7 @@ from app.modules.notify.service import notify_user
 from app.providers.registry import registry
 
 from . import repository as repo
-from .models import PLATFORM_NAMES, PublishAccount, PublishJob
+from .models import PLATFORM_NAMES, TITLE_LIMITS, PublishAccount, PublishJob
 from .schemas import (
     AccountOut,
     ExportOut,
@@ -299,6 +299,9 @@ async def publish_task_video(
     notifications: list[tuple[str, str, str]] = []
     for platform in platforms:
         _check_platform(platform)
+        # 按平台限长截断后落库（抖音 30/小红书 20/视频号 30）：避免超长标题被 SAU 上传器静默腰斩，
+        # 导致用户看到的 job.title 与实际发出的不一致
+        platform_title = title.strip()[: TITLE_LIMITS[platform]]
         topics_json = json.dumps(topics or [], ensure_ascii=False)
         existing = (
             await repo.get_task_render_platform_job(
@@ -313,7 +316,7 @@ async def publish_task_video(
         ) or await repo.get_task_platform_job(db, user_id, task_id, platform)
         if existing is not None and _can_reuse_publish_job(
             existing,
-            title=title,
+            title=platform_title,
             video_key=video_key,
             cover_key=cover_key or "",
             scheduled_at=scheduled_at or "",
@@ -334,7 +337,7 @@ async def publish_task_video(
                         "message": f"{PLATFORM_NAMES[platform]}发布已开始，不能修改发布信息",
                     },
                 )
-            existing.title = title
+            existing.title = platform_title
             existing.video_key = video_key
             existing.cover_key = cover_key or ""
             existing.scheduled_at = scheduled_at or ""
@@ -354,7 +357,7 @@ async def publish_task_video(
                     render_version_id=render_version_id,
                     render_version=render_version,
                     platform=platform,
-                    title=title,
+                    title=platform_title,
                     topics_json=topics_json,
                     video_key=video_key,
                     cover_key=cover_key or "",
@@ -384,7 +387,7 @@ async def publish_task_video(
                     render_version_id=render_version_id,
                     render_version=render_version,
                     platform=platform,
-                    title=title,
+                    title=platform_title,
                     video_key=video_key,
                     cover_key=cover_key or "",
                     topics_json=topics_json,
@@ -417,7 +420,7 @@ async def publish_task_video(
                 render_version=render_version,
                 account_id=account.id,
                 platform=platform,
-                title=title,
+                title=platform_title,
                 video_key=video_key,
                 cover_key=cover_key or "",
                 topics_json=topics_json,
@@ -441,6 +444,11 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
     if not inp.platforms:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "PLATFORM_REQUIRED", "message": "至少选择一个平台"}
+        )
+    # 空标题入口拦截：SAU 上传器对空标题会在发布时才报错，提前到建任务时确定性拒绝
+    if not inp.title.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "TITLE_REQUIRED", "message": "发布标题不能为空"}
         )
     from app.modules.pipeline import repository as pipeline_repo
 

@@ -10,6 +10,10 @@ from app.core.db import Base
 
 PLATFORMS = ["douyin", "xiaohongshu", "shipinhao"]
 PLATFORM_NAMES = {"douyin": "抖音", "xiaohongshu": "小红书", "shipinhao": "视频号"}
+# 各平台标题字数上限（与 SAU 上传器兜底截断一致）：抖音作品标题 30 字、小红书笔记标题 20 字、
+# 视频号正文描述宽松按 30 字预算（短标题由 SAU format_str_for_short_title 自动生成）。
+# 建 job 时按平台截断落库，保证用户看到的 job.title 与实际发出的一致、截断点可控
+TITLE_LIMITS = {"douyin": 30, "xiaohongshu": 20, "shipinhao": 30}
 
 
 def new_id() -> str:

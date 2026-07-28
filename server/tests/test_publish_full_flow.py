@@ -72,9 +72,7 @@ def fake_driver(monkeypatch: pytest.MonkeyPatch) -> FakeDriver:
     monkeypatch.setattr(
         publish_service,
         "_capability",
-        lambda platform: SimpleNamespace(
-            automaticEnabled=True, reason="", mode="automatic", platform=platform
-        ),
+        lambda platform: SimpleNamespace(automaticEnabled=True, reason="", mode="automatic", platform=platform),
     )
     monkeypatch.setattr(publish_service, "_schedule_job", lambda job_id, scheduled_at="": "msg-test")
     return driver
@@ -372,3 +370,39 @@ async def test_unauthorized_platform_creates_failed_job_with_guidance(client, fa
         assert job is not None
         assert job.status == "failed"
         assert "扫码授权" in job.error
+
+
+@pytest.mark.asyncio
+async def test_title_truncated_per_platform_limit(client, fake_driver: FakeDriver) -> None:
+    """平台感知限长：同一标题广播多平台时，抖音按 30 字、小红书按 20 字截断落库，
+    保证 job.title 与 SAU 上传器实际发出的一致（小红书上传器兜底 [:20]）"""
+    user_id = uuid.uuid4().hex
+    long_title = "这是一条超过二十个字但不足三十个字的发布标题用于验证"
+    assert 20 < len(long_title) <= 30
+    async with SessionLocal() as db:
+        for platform in ("douyin", "xiaohongshu"):
+            await repo.create_account(
+                db,
+                user_id=user_id,
+                platform=platform,
+                nickname=f"限长测试-{platform}",
+                session_json=json.dumps({"cookies": [{"name": "sessionid", "value": "cookie-v1"}]}),
+                status="active",
+            )
+        job_ids = await publish_service.publish_task_video(
+            db,
+            user_id,
+            task_id=uuid.uuid4().hex,
+            platforms=["douyin", "xiaohongshu"],
+            title=long_title,
+            video_key="final/limit.mp4",
+            cover_key=None,
+        )
+        titles = {}
+        for jid in job_ids:
+            job = await repo.get_job(db, jid, user_id)
+            assert job is not None
+            titles[job.platform] = job.title
+    # 抖音 30 字预算内不截断；小红书按 20 字限长在建任务时可控截断，不留给上传器静默腰斩
+    assert titles["douyin"] == long_title
+    assert titles["xiaohongshu"] == long_title[:20]

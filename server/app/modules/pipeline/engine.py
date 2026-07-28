@@ -610,9 +610,9 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
             task.user_id,
             task.id,
             platforms,
-            # 发布标题与封面取值优先级对齐（LLM 标题优先、口播文案兜底），但按发布标题 30 字预算截断，
-            # 不复用封面版式的 24/18 字截断
-            title=(_preferred_title(task, ctx) or str(ctx.get("script") or "") or task.title)[:30],
+            # 发布标题与封面取值优先级对齐（LLM 标题优先、口播文案兜底），不复用封面版式的 24/18 字截断；
+            # 字数限长由 publish_task_video 按平台限长表（TITLE_LIMITS）统一截断，此处不预截
+            title=_preferred_title(task, ctx) or str(ctx.get("script") or "") or task.title,
             video_key=ctx.get("final_video_key", ""),
             cover_key=ctx.get("cover_key", ""),
             scheduled_at=task.publish_at or None,
