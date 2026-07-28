@@ -85,7 +85,14 @@ app = FastAPI(title="口播IP智能体 API", version="1.0.0", lifespan=lifespan)
 # TraceMiddleware 必须在 CORS 之前添加（确保 trace_id 注入）
 app.add_middleware(TraceMiddleware)
 _allowed_origins = (
-    ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]
+    [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        # Tauri 桌面壳（macOS: tauri://localhost / Windows: https://tauri.localhost）
+        "tauri://localhost",
+        "https://tauri.localhost",
+    ]
     if settings.app_env == "dev"
     else [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
 )
