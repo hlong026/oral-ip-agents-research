@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "口播IP智能体-本地版",
+  "identifier": "com.oralip.desktop.localapp",
+  "build": {
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "security": {
+      "csp": {
+        "connect-src": "'self' ipc: http://ipc.localhost http://localhost:8000 https: wss: ws:",
+        "img-src": "'self' asset: http://asset.localhost http://localhost:8000 https: blob: data:",
+        "media-src": "'self' asset: http://asset.localhost http://localhost:8000 https: blob:"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"]
+  }
+}
