@@ -109,7 +109,7 @@ export default function ActivationPage() {
       <section className="glass p-5">
         <h2 className="text-xl font-semibold">一次性激活码</h2>
         <p className="mt-1 text-sm text-text-3">
-          明文码固定为 ORAL 加五组四位字符；CSV 仅在生成后提供一次，请立即保存。
+          明文码为五组五位字符（如 KTNPV-98W6R-8Q3M2-Y47CG-PDKV3）；CSV 仅在生成后提供一次，请立即保存。
         </p>
         {generate.data ? (
           <div className="mt-4">

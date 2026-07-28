@@ -95,7 +95,7 @@ export default function LoginPage() {
               value={code}
               onChange={(e) => setCode(e.target.value)}
               onBlur={() => void precheck()}
-              placeholder="ORAL-XXXX-XXXX-XXXX-XXXX-XXXX"
+              placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
               autoComplete="off"
               spellCheck={false}
               required

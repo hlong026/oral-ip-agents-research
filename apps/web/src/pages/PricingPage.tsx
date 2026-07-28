@@ -157,7 +157,7 @@ function RedeemCard() {
           className="input flex-1 font-mono tracking-wider"
           value={code}
           onChange={(e) => setCode(e.target.value.toUpperCase())}
-          placeholder="ORAL-XXXX-XXXX-XXXX-XXXX-XXXX"
+          placeholder="XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
         />
         <button
           className="btn-primary px-5"
