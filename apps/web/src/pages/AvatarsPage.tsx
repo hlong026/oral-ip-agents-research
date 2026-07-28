@@ -2,7 +2,7 @@ import { HttpError, avatarApi, personaApi } from "@oral/api-client";
 import { useIp } from "@oral/stores";
 import type { Avatar, Persona } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Play, Upload, X } from "lucide-react";
+import { Bot, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router";
 import AssetNav from "../components/AssetNav";
@@ -11,12 +11,12 @@ import {
   mediaDurationSeconds,
 } from "../lib/meteredOperation";
 
-// 供应商数字人训练素材约束：mp4/mov（h264），≤500MB；产品侧收紧为 30 秒～3 分钟
+// 供应商数字人训练素材约束：mp4/mov（h264/hevc），≤500MB；产品侧收紧为 30 秒～3 分钟
 const VIDEO_MAX_BYTES = 500 * 1024 * 1024;
 const VIDEO_MIN_SECONDS = 30;
 const VIDEO_MAX_SECONDS = 180;
 
-/** 预览图 + 中央 ▶ 播放按钮：点击后卡内切换为视频播放，关闭返回封面 */
+/** 人像预览：优先封面图；无封面时用训练视频首帧作为人像，避免空白 + 播放按钮 */
 function PreviewThumb({
   avatar,
   className = "",
@@ -25,6 +25,32 @@ function PreviewThumb({
   className?: string;
 }) {
   const [playing, setPlaying] = useState(false);
+  // 无封面图时，用视频首帧（#t=0.1）作为人像海报，确保第一帧出现人物而非空白
+  const posterSrc = avatar.previewUrl
+    ? avatar.previewUrl.includes("#")
+      ? avatar.previewUrl
+      : `${avatar.previewUrl}#t=0.1`
+    : null;
+  // 静态人像：封面图优先，无封面时退回视频首帧海报，两者都缺才用占位图标
+  const poster = avatar.coverUrl ? (
+    <img
+      src={avatar.coverUrl}
+      alt={avatar.name}
+      className="h-full w-full object-cover"
+    />
+  ) : posterSrc ? (
+    <video
+      src={posterSrc}
+      className="h-full w-full object-cover"
+      muted
+      playsInline
+      preload="metadata"
+    />
+  ) : (
+    <span className="text-text-3">
+      <Bot className="h-8 w-8" />
+    </span>
+  );
   return (
     <div
       className={`relative flex aspect-[9/16] items-center justify-center overflow-hidden rounded-lg bg-gradient-to-b from-white/10 to-transparent ${className}`}
@@ -49,34 +75,21 @@ function PreviewThumb({
             <X className="h-3.5 w-3.5" />
           </button>
         </>
+      ) : avatar.previewUrl ? (
+        // 无可见播放按钮：点击人像海报即内联播放，行为对有/无封面一致
+        <button
+          type="button"
+          aria-label={`预览 ${avatar.name}`}
+          className="h-full w-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            setPlaying(true);
+          }}
+        >
+          {poster}
+        </button>
       ) : (
-        <>
-          {avatar.coverUrl ? (
-            <img
-              src={avatar.coverUrl}
-              alt={avatar.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="text-text-3">
-              <Bot className="h-8 w-8" />
-            </span>
-          )}
-          {avatar.previewUrl && (
-            <button
-              aria-label={`预览 ${avatar.name}`}
-              className="absolute inset-0 flex items-center justify-center bg-black/0 transition-colors hover:bg-black/25"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPlaying(true);
-              }}
-            >
-              <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/55 pl-0.5 text-white shadow-lg backdrop-blur-sm transition-transform hover:scale-110">
-                <Play className="h-4 w-4" />
-              </span>
-            </button>
-          )}
-        </>
+        poster
       )}
     </div>
   );
@@ -95,10 +108,15 @@ function IpBadge({ ip }: { ip: Persona }) {
   );
 }
 
+/** 预设使用场景（另允许用户自定义填写） */
+const PRESET_SCENES = ["口播", "带货", "课程"];
+
 /** 训练新分身表单（合规红线：强制 consent 授权勾选） */
 function TrainForm({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [scene, setScene] = useState("口播");
+  // 自定义场景：选中后 scene 改为用户手填内容
+  const [customScene, setCustomScene] = useState(false);
   const [consent, setConsent] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -117,6 +135,10 @@ function TrainForm({ onDone }: { onDone: () => void }) {
       setError("请先选择训练视频");
       return;
     }
+    if (!scene.trim()) {
+      setError("请填写使用场景");
+      return;
+    }
     if (!consent) {
       setError("请先勾选确认拥有该形象的合法授权");
       return;
@@ -125,7 +147,7 @@ function TrainForm({ onDone }: { onDone: () => void }) {
     try {
       // 提交前兼容校验：格式/大小/时长不达标时直接拦截，避免白扣积分
       if (!/\.(mp4|mov)$/i.test(file.name))
-        throw new Error("训练视频仅支持 MP4/MOV（H264 编码）");
+        throw new Error("训练视频仅支持 MP4/MOV（H264 / HEVC 编码）");
       if (file.size > VIDEO_MAX_BYTES)
         throw new Error("训练视频超过 500MB，请压缩后重试");
       const consentToken = `consent-${Date.now()}`;
@@ -142,7 +164,7 @@ function TrainForm({ onDone }: { onDone: () => void }) {
       );
       if (!quoteId) return;
       await avatarApi.clone(
-        `${name.trim()} · ${scene}`,
+        `${name.trim()} · ${scene.trim()}`,
         consentToken,
         file,
         quoteId,
@@ -150,6 +172,8 @@ function TrainForm({ onDone }: { onDone: () => void }) {
       setName("");
       setFile(null);
       setConsent(false);
+      setScene("口播");
+      setCustomScene(false);
       onDone();
     } catch (e) {
       setError(
@@ -179,17 +203,38 @@ function TrainForm({ onDone }: { onDone: () => void }) {
         </div>
         <div>
           <label className="label">使用场景</label>
-          <div className="flex gap-2">
-            {["口播", "带货", "课程"].map((s) => (
+          <div className="flex flex-wrap gap-2">
+            {PRESET_SCENES.map((s) => (
               <button
                 key={s}
-                onClick={() => setScene(s)}
-                className={`chip px-3 py-1.5 ${scene === s ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+                onClick={() => {
+                  setCustomScene(false);
+                  setScene(s);
+                }}
+                className={`chip px-3 py-1.5 ${!customScene && scene === s ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
               >
                 {s}
               </button>
             ))}
+            <button
+              onClick={() => {
+                setCustomScene(true);
+                setScene("");
+              }}
+              className={`chip px-3 py-1.5 ${customScene ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
+            >
+              自定义
+            </button>
           </div>
+          {customScene && (
+            <input
+              className="input mt-2"
+              placeholder="输入使用场景，例：知识科普"
+              maxLength={12}
+              value={scene}
+              onChange={(e) => setScene(e.target.value)}
+            />
+          )}
         </div>
       </div>
       <div className="flex flex-1 flex-col">
