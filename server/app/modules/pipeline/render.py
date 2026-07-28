@@ -114,7 +114,9 @@ async def _settle_and_activate(db, render_id: str) -> None:
     if render is None or task is None or render.status != "rendered":
         return
     config = EditConfigIn.model_validate(json.loads(render.config_json or "{}"))
-    artifacts = json.loads(task.artifacts_json or "{}")
+    # 同步顶层键（subtitle_enabled/subtitle_style/bgm/cover_template）：
+    # 主流水线重跑 compose 步只读顶层键，需沿用激活版剪辑配置而非仅存 edit_config
+    artifacts = _apply_config(json.loads(task.artifacts_json or "{}"), config)
     artifacts.update(
         {
             "final_video_key": render.video_key,

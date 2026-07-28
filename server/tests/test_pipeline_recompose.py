@@ -176,6 +176,59 @@ async def test_recompose_is_idempotent_and_reserves_once(client, monkeypatch) ->
     assert scheduled == [first.id]
 
 
+async def test_recompose_idempotency_tolerates_legacy_config_without_new_defaults(client, monkeypatch) -> None:
+    """跨部署重放：存量 config_json 缺新增默认字段（subtitleEnabled）时，同幂等键重试应命中幂等而非 409"""
+    from app.modules.pipeline import service
+
+    task_id, user_id, quote_id = await _done_task_with_quote()
+    monkeypatch.setattr(service, "schedule_render", lambda _render_id: "render-message")
+    request = RecomposeIn(
+        quoteId=quote_id,
+        idempotencyKey=f"editor-{uuid.uuid4().hex}",
+        baseVersion=1,
+        config=_config(),
+    )
+
+    async with SessionLocal() as db:
+        first = await service.recompose(db, task_id, user_id, request)
+        # 模拟旧部署落库产物：config_json 不含后来新增的 subtitleEnabled 字段
+        render = await db.get(PipelineRenderVersion, first.id)
+        legacy_config = json.loads(render.config_json)
+        legacy_config.pop("subtitleEnabled", None)
+        render.config_json = json.dumps(legacy_config, ensure_ascii=False)
+        await db.commit()
+    async with SessionLocal() as db:
+        replay = await service.recompose(db, task_id, user_id, request)
+
+    assert replay.id == first.id
+
+
+async def test_recompose_idempotency_treats_corrupt_legacy_config_as_conflict(client, monkeypatch) -> None:
+    """历史脏 config_json 无法通过模型校验：同幂等键重试应确定性返回 409，而非 ValidationError 冒泡 500"""
+    from app.modules.pipeline import service
+
+    task_id, user_id, quote_id = await _done_task_with_quote()
+    monkeypatch.setattr(service, "schedule_render", lambda _render_id: "render-message")
+    request = RecomposeIn(
+        quoteId=quote_id,
+        idempotencyKey=f"editor-{uuid.uuid4().hex}",
+        baseVersion=1,
+        config=_config(),
+    )
+
+    async with SessionLocal() as db:
+        first = await service.recompose(db, task_id, user_id, request)
+        render = await db.get(PipelineRenderVersion, first.id)
+        render.config_json = '{"bgmMode": 123}'  # 非法类型，模型校验必失败
+        await db.commit()
+    async with SessionLocal() as db:
+        with pytest.raises(HTTPException) as exc:
+            await service.recompose(db, task_id, user_id, request)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "IDEMPOTENCY_KEY_REUSED"
+
+
 async def test_recompose_rejects_stale_base_version_before_consuming_quote(client, monkeypatch) -> None:
     from app.modules.pipeline import service
 

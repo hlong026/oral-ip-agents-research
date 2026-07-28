@@ -527,13 +527,19 @@ def _subtitle_style_from_ctx(ctx: dict) -> dict:
     return {"fontSize": 44, "color": "#FFFFFF", "position": "bottom", "stroke": 3}
 
 
-def _cover_text_from_ctx(task: PipelineTask, ctx: dict) -> str:
-    """封面标题取值：上游 LLM 标题优先，兜底口播文案截断"""
+def _preferred_title(task: PipelineTask, ctx: dict) -> str:
+    """标题取值优先级（不截断）：上游 LLM 标题 > 解析标题 > 任务名（占位名跳过）"""
     for candidate in (ctx.get("cover_title"), ctx.get("title"), task.title):
         text = str(candidate or "").strip()
         if text and text != "未命名任务":
-            return text[:24]
-    return (ctx.get("script") or "")[:18]
+            return text
+    return ""
+
+
+def _cover_text_from_ctx(task: PipelineTask, ctx: dict) -> str:
+    """封面标题取值：LLM 标题优先并按封面版式截断，兜底口播文案截断"""
+    text = _preferred_title(task, ctx)
+    return text[:24] if text else (ctx.get("script") or "")[:18]
 
 
 async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
@@ -604,8 +610,9 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
             task.user_id,
             task.id,
             platforms,
-            # 发布标题与封面取值策略对齐：上游 LLM 标题优先，兜底口播文案截断
-            title=(_cover_text_from_ctx(task, ctx) or ctx.get("script") or task.title)[:30],
+            # 发布标题与封面取值优先级对齐（LLM 标题优先、口播文案兜底），但按发布标题 30 字预算截断，
+            # 不复用封面版式的 24/18 字截断
+            title=(_preferred_title(task, ctx) or str(ctx.get("script") or "") or task.title)[:30],
             video_key=ctx.get("final_video_key", ""),
             cover_key=ctx.get("cover_key", ""),
             scheduled_at=task.publish_at or None,

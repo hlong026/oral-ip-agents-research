@@ -147,6 +147,17 @@ def test_cover_text_priority():
     assert _cover_text_from_ctx(task_named, {}) == "真实任务标题"
 
 
+def test_publish_title_not_clipped_by_cover_budget():
+    from app.modules.pipeline.engine import _preferred_title
+
+    # 发布标题取值不截断，由调用方按 30 字预算截断，不受封面 24/18 字限制
+    task = SimpleNamespace(title="未命名任务")
+    long_title = "标" * 28
+    assert _preferred_title(task, {"cover_title": long_title}) == long_title
+    # 无任何标题候选时返回空串，由调用方兜底口播文案
+    assert _preferred_title(task, {}) == ""
+
+
 # ---------- 字幕开关（关闭时跳过 ASS 烧录） ----------
 
 

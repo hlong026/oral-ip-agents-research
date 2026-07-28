@@ -131,18 +131,18 @@ class SAUPublishDriverBase:
         注意：SAU 浏览器发布无法取回平台真实作品 ID，子类返回的是哈希生成的
         内部追踪号（postIdSource=internal），绝不可当作平台作品 ID 展示/跳转。
         """
-        # 1. Cookie → 临时文件
+        # 1. 视频/封面 → 本地绝对路径
         import json
 
-        session_json = json.dumps(account_session, ensure_ascii=False)
-        cookie_file = session_to_file(session_json, account_id or "tmp", self.platform)
-
-        # 2. 视频/封面 → 本地绝对路径
         video_path = str(local_path(video_key))
         cover_path = str(local_path(cover_key)) if cover_key else None
 
-        # 3. 定时发布时间解析
+        # 2. 定时发布时间解析
         publish_date = self._parse_schedule(scheduled_at)
+
+        # 3. Cookie → 临时文件（放在 try 前最后一步，避免上方校验抛错时 finally 未覆盖、留下孤儿文件）
+        session_json = json.dumps(account_session, ensure_ascii=False)
+        cookie_file = session_to_file(session_json, account_id or "tmp", self.platform)
 
         # 4. 在浏览器槽位内执行发布
         try:

@@ -178,9 +178,11 @@ async def qrcode_poll(db: AsyncSession, user_id: str, platform: str, ticket: str
     reauth_account_id = _reauth_binding(ticket)
     session = await driver.check_login(ticket)
     if session is None:
-        # 驱动不认识该票据：服务重启丢失登录会话或票据已被并发轮询消费，终止本次轮询即可，
-        # 绑定留待 TTL 过期清理
-        return QrcodePollOut(status="expired", message="登录会话不存在或已失效，请重新发起扫码")
+        # 驱动不认识该票据：服务重启丢失登录会话，或票据已被并发轮询的胜者消费（此时授权实际已成功）。
+        # 两种情况后端无法区分，用中性文案避免多窗口场景误导用户重复扫码建号；终止轮询即可，绑定留待 TTL 过期清理
+        return QrcodePollOut(
+            status="expired", message="该二维码已失效或已在其他窗口完成授权，请刷新账号列表确认后再重新扫码"
+        )
     # 等待扫码中：透传最新二维码（平台二维码过期刷新后前端同步换图）
     if session.get("_waiting"):
         return QrcodePollOut(status="waiting", qrcodeUrl=session.get("qrcode_url") or None)
@@ -513,12 +515,19 @@ async def retry_job(db: AsyncSession, user_id: str, job_id: str) -> JobOut:
         raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "NOT_FAILED", "message": "仅失败任务可重试"})
     account = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
     if account is None or account.status != "active":
-        # 原账号失效/被解绑：重绑该平台最新 active 账号（重新授权后重试可直接恢复）
-        account = await repo.active_account_for(db, user_id, j.platform)
-        if account is None:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT, detail={"code": "ACCOUNT_EXPIRED", "message": "账号登录态失效，请重新授权"}
+        # 原账号失效/被解绑：仅当该平台恰好一个 active 账号时才自动重绑（重新授权后重试可直接恢复）；
+        # 多账号时不猜测用户意图，避免内容误发到未选择的账号
+        candidates = [
+            a for a in await repo.list_accounts(db, user_id) if a.platform == j.platform and a.status == "active"
+        ]
+        if len(candidates) != 1:
+            message = (
+                "原账号已失效且该平台存在多个可用账号，请先重新授权原账号再重试"
+                if candidates
+                else "账号登录态失效，请重新授权"
             )
+            raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "ACCOUNT_EXPIRED", "message": message})
+        account = candidates[0]
         j.account_id = account.id
     j.status = "queued"
     j.error = ""

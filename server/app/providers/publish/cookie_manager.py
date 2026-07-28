@@ -8,6 +8,7 @@ Cookie 管理器
 import json
 import os
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -18,10 +19,32 @@ logger = get_logger("oral.publish.cookie")
 # 临时 Cookie 文件目录（进程生命周期内复用）
 _COOKIE_DIR = Path(tempfile.gettempdir()) / "oral_publish_cookies"
 
+# 孤儿文件回收：随机后缀文件不会被后续调用覆盖，进程被强杀时 finally 清理不执行，
+# 需按 mtime 惰性清扫陈旧明文 Cookie（节流，避免高频心跳反复扫目录）
+_STALE_MAX_AGE_SEC = 3600
+_SWEEP_INTERVAL_SEC = 600
+_last_sweep_at = 0.0
+
+
+def _sweep_stale_files() -> None:
+    global _last_sweep_at
+    now = time.time()
+    if now - _last_sweep_at < _SWEEP_INTERVAL_SEC:
+        return
+    _last_sweep_at = now
+    for stale in _COOKIE_DIR.glob("*.json"):
+        try:
+            if now - stale.stat().st_mtime > _STALE_MAX_AGE_SEC:
+                stale.unlink(missing_ok=True)
+                logger.warning("cookie_temp_stale_swept", path=stale.name)
+        except OSError:
+            continue
+
 
 def _ensure_cookie_dir() -> None:
     _COOKIE_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
     _COOKIE_DIR.chmod(0o700)
+    _sweep_stale_files()
 
 
 def _write_private(filepath: Path, content: str) -> None:
