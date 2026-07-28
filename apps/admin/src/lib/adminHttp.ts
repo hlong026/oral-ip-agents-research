@@ -123,9 +123,33 @@ export interface AdminUser {
   planSkuCode: string;
   planExpiresAt?: string | null;
   deviceBound: boolean;
+  deviceCount: number;
+  deviceLimit: number;
   activationCodeMasked?: string | null;
   balance: number;
   createdAt: string;
+}
+
+export interface UserDevice {
+  id: string;
+  deviceKey: string;
+  deviceName: string;
+  source: string;
+  createdAt: string;
+  lastSeenAt: string;
+}
+
+export interface DeviceBindRequest {
+  id: string;
+  userId: string;
+  nickname: string;
+  activationCodeMasked: string | null;
+  deviceKey: string;
+  deviceName: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  resolvedAt: string | null;
+  boundDevices: UserDevice[];
 }
 
 export interface CostAnalysisItem {
@@ -424,6 +448,47 @@ export const adminApi = {
   unbindDevice: (id: string) =>
     adminFetch<{ ok: boolean }>(`/users/${id}/unbind-device`, {
       method: "POST",
+    }),
+  listUserDevices: (id: string) =>
+    adminFetch<{ items: UserDevice[]; limit: number }>(`/users/${id}/devices`),
+  unbindSingleDevice: (userId: string, deviceId: string) =>
+    adminFetch<{ ok: boolean }>(`/users/${userId}/devices/${deviceId}/unbind`, {
+      method: "POST",
+    }),
+  listDeviceRequests: (status = "pending", page = 1, pageSize = 20) =>
+    adminFetch<{
+      items: DeviceBindRequest[];
+      total: number;
+      page: number;
+      pageSize: number;
+      limit: number;
+    }>(`/device-requests?status=${status}&page=${page}&pageSize=${pageSize}`),
+  approveDeviceRequest: (id: string, unbindDeviceId?: string) =>
+    adminFetch<{ ok: boolean; status: string }>(
+      `/device-requests/${id}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify({ unbindDeviceId: unbindDeviceId || null }),
+      },
+    ),
+  rejectDeviceRequest: (id: string) =>
+    adminFetch<{ ok: boolean; status: string }>(
+      `/device-requests/${id}/reject`,
+      { method: "POST" },
+    ),
+  async getDeviceBindLimit(): Promise<number> {
+    const response =
+      await adminFetch<ProviderSettingsResponse>("/providers");
+    const raw = response.settings.device_bind_limit || "";
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
+  },
+  saveDeviceBindLimit: (limit: number) =>
+    adminFetch<ProviderSettingsResponse>("/providers", {
+      method: "PUT",
+      body: JSON.stringify({
+        settings: { device_bind_limit: String(limit) },
+      }),
     }),
   costAnalysis: () =>
     adminFetch<{ priceVersion: string | null; items: CostAnalysisItem[] }>(

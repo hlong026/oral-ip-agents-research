@@ -77,6 +77,7 @@ async def test_repeat_login_with_same_code_and_device_succeeds(client: AsyncClie
 
 
 async def test_login_rejected_when_device_fingerprint_mismatches(client: AsyncClient):
+    """新设备登录且超出绑定上限（默认 1）：403 DEVICE_LIMIT_REACHED，并自动落库 pending 申请。"""
     code = await create_unused_code()
     await code_login(client, code, fingerprint=_fp())
 
@@ -85,7 +86,7 @@ async def test_login_rejected_when_device_fingerprint_mismatches(client: AsyncCl
         json={"code": code, "deviceFingerprint": _fp()},
     )
     assert r.status_code == 403, r.text
-    assert r.json()["detail"]["code"] == "DEVICE_MISMATCH"
+    assert r.json()["detail"]["code"] == "DEVICE_LIMIT_REACHED"
     await reset_rate_limits()
 
 

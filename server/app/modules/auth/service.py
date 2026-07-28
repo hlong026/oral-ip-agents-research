@@ -27,8 +27,9 @@ logger = get_logger("oral.auth")
 
 
 def fingerprint_matches(stored: str, provided: str) -> bool:
-    """设备指纹比对：uuid 段严格一致，featureHash 段允许漂移
-    （浏览器升级/换显示器等会改变特征哈希，不应锁死合法用户）。"""
+    """设备指纹比对：设备段严格一致，featureHash 段允许漂移
+    （浏览器升级/换显示器等会改变特征哈希，不应锁死合法用户）。
+    多设备绑定后登录/刷新已改走 devices.py 列表校验，本函数保留供单条指纹比对复用。"""
     if stored == provided:
         return True
     stored_uuid = stored.partition(".")[0]
@@ -94,34 +95,25 @@ async def refresh(db: AsyncSession, refresh_token: str, device_fingerprint: str 
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
     audience = str(payload.get("aud") or "user")
-    # 防拷贝：用户端刷新必须来自绑定设备（拷贝 refresh token 到其他机器无法续期）
-    if (
-        audience == "user"
-        and user.device_fingerprint
-        and not fingerprint_matches(user.device_fingerprint, device_fingerprint)
-    ):
-        logger.warning("refresh_failed", user_id=user_id, reason="DEVICE_MISMATCH")
-        await write_audit("refresh_failed", user_id=user_id, detail="reason=DEVICE_MISMATCH")
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail={"code": "DEVICE_MISMATCH", "message": "设备校验失败，请在绑定设备上使用"},
-        )
-    # featureHash 漂移：告警并重绑最新指纹（随后 rotate 同一事务提交）
-    if (
-        audience == "user"
-        and user.device_fingerprint
-        and device_fingerprint
-        and user.device_fingerprint != device_fingerprint
-    ):
-        logger.warning("fingerprint_drift", user_id=user_id, source="refresh")
-        user.device_fingerprint = device_fingerprint
+    # 防拷贝：用户端刷新必须来自绑定设备列表（拷贝 refresh token 到其他机器无法续期；
+    # 设备被解绑后 refresh 立即失效）
+    if audience == "user":
+        from .devices import device_matches_bound
+
+        if not await device_matches_bound(db, user_id, device_fingerprint):
+            logger.warning("refresh_failed", user_id=user_id, reason="DEVICE_MISMATCH")
+            await write_audit("refresh_failed", user_id=user_id, detail="reason=DEVICE_MISMATCH")
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                detail={"code": "DEVICE_MISMATCH", "message": "设备已被解绑或校验失败，请重新登录"},
+            )
     device = payload.get("dev", "web")
     tokens = _tokens(user_id, device, audience)
     await repo.rotate_refresh_session(db, str(payload["jti"]), user_id, device, _refresh_jti(tokens))
     return tokens
 
 
-def to_out(user: User) -> UserOut:
+def to_out(user: User, *, device_bound: bool = False) -> UserOut:
     plan_expires_at = user.plan_expires_at
     activated_at = user.activated_at
     return UserOut(
@@ -132,5 +124,5 @@ def to_out(user: User) -> UserOut:
         planType=getattr(user, "plan_type", "none") or "none",
         planExpiresAt=plan_expires_at.astimezone(UTC).isoformat() if plan_expires_at else None,
         activatedAt=activated_at.astimezone(UTC).isoformat() if activated_at else None,
-        deviceBound=bool(user.device_fingerprint),
+        deviceBound=device_bound,
     )

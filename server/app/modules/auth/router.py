@@ -56,8 +56,11 @@ async def api_refresh(body: RefreshIn, db: AsyncSession = Depends(get_db)):
 
 @router.get("/me", response_model=UserOut)
 async def api_me(user_id: str = Depends(get_current_user_id_ignore_plan), db: AsyncSession = Depends(get_db)):
+    from .devices import list_user_devices
+
     user = await repo.get_by_id(db, user_id)
-    return to_out(user)  # type: ignore[arg-type]
+    devices = await list_user_devices(db, user_id)
+    return to_out(user, device_bound=bool(devices))  # type: ignore[arg-type]
 
 
 @admin_router.post("/login", response_model=TokensOut)

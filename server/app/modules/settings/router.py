@@ -40,6 +40,7 @@ ALLOWED_KEYS = {
     "feiying_enabled",
     "dashscope_enabled",
     "douyidou_enabled",
+    "device_bind_limit",
 }
 
 # 敏感 key（GET 时脱敏返回）
@@ -182,6 +183,19 @@ def _validate_provider_setting(key: str, value: str) -> None:
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
                 detail={"code": "PROVIDER_SETTING_INVALID", "message": "ASR 分流阈值必须在 1 到 3600 秒之间"},
+            )
+    if key == "device_bind_limit" and value:
+        try:
+            limit = int(value)
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={"code": "PROVIDER_SETTING_INVALID", "message": "设备绑定上限必须是整数"},
+            ) from exc
+        if not 1 <= limit <= 10:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={"code": "PROVIDER_SETTING_INVALID", "message": "设备绑定上限必须在 1 到 10 之间"},
             )
     if not key.endswith("_base_url") or not value:
         return

@@ -51,6 +51,13 @@ export default function LoginPage() {
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof HttpError) {
+        if (err.body.code === "DEVICE_LIMIT_REACHED") {
+          // 后端 message 带当前绑定数，直接展示；申请已自动提交
+          setError(
+            `${err.body.message}。审批通过后在本设备重新登录即可。`,
+          );
+          return;
+        }
         const messages: Record<string, string> = {
           DEVICE_MISMATCH:
             "该激活码已绑定其他设备，请在原设备使用或联系管理员解绑",

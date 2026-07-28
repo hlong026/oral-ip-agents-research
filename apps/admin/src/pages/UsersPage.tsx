@@ -2,6 +2,158 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { adminApi } from "../lib/adminHttp";
 
+const SOURCE_LABEL: Record<string, string> = {
+  "desktop-hw": "桌面端（硬件码）",
+  web: "网页端",
+};
+
+function DeviceDrawer({
+  userId,
+  nickname,
+  onClose,
+}: {
+  userId: string;
+  nickname: string;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["admin-user-devices", userId],
+    queryFn: () => adminApi.listUserDevices(userId),
+  });
+  const unbindOne = useMutation({
+    mutationFn: (deviceId: string) =>
+      adminApi.unbindSingleDevice(userId, deviceId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["admin-user-devices", userId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/40"
+      onClick={onClose}
+    >
+      <aside
+        className="glass h-full w-full max-w-md space-y-4 overflow-y-auto p-6"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold">{nickname} 的设备</h2>
+            <p className="text-xs text-text-3">
+              已绑定 {data?.items.length ?? 0} / 上限 {data?.limit ?? "-"}
+            </p>
+          </div>
+          <button className="btn-ghost" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        {isLoading && <p className="text-sm text-text-3">加载中...</p>}
+        {error instanceof Error && (
+          <p className="text-sm text-danger">{error.message}</p>
+        )}
+        {unbindOne.error instanceof Error && (
+          <p className="text-sm text-danger">{unbindOne.error.message}</p>
+        )}
+        {(data?.items ?? []).map((device) => (
+          <div
+            key={device.id}
+            className="flex items-center justify-between rounded-lg border border-stroke/60 p-3"
+          >
+            <div>
+              <div className="text-sm font-medium">
+                {device.deviceName || "未命名设备"}
+                <span className="ml-2 text-xs text-text-3">
+                  {SOURCE_LABEL[device.source] ?? device.source}
+                </span>
+              </div>
+              <div className="mt-1 font-mono text-xs text-text-3">
+                {device.deviceKey.slice(0, 12)}…
+              </div>
+              <div className="mt-1 text-xs text-text-3">
+                最近活跃 {new Date(device.lastSeenAt).toLocaleString()}
+              </div>
+            </div>
+            <button
+              className="btn-ghost"
+              disabled={unbindOne.isPending}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `确认解绑该设备？解绑后该设备登录态立即失效。`,
+                  )
+                ) {
+                  unbindOne.mutate(device.id);
+                }
+              }}
+            >
+              解绑
+            </button>
+          </div>
+        ))}
+        {!isLoading && (data?.items ?? []).length === 0 && (
+          <p className="text-sm text-text-3">暂无绑定设备</p>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function SecurityPolicyCard() {
+  const queryClient = useQueryClient();
+  const { data: limit, isLoading } = useQuery({
+    queryKey: ["device-bind-limit"],
+    queryFn: adminApi.getDeviceBindLimit,
+  });
+  const [draft, setDraft] = useState<number | null>(null);
+  const save = useMutation({
+    mutationFn: (value: number) => adminApi.saveDeviceBindLimit(value),
+    onSuccess: async () => {
+      setDraft(null);
+      await queryClient.invalidateQueries({ queryKey: ["device-bind-limit"] });
+      await queryClient.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+  });
+  const value = draft ?? limit ?? 1;
+  return (
+    <section className="glass flex flex-wrap items-end gap-3 p-5">
+      <div className="mr-auto">
+        <h2 className="text-base font-semibold">安全策略</h2>
+        <p className="mt-1 text-xs text-text-3">
+          每个激活码可同时绑定的设备数（1~10），超出后新设备登录需管理员审批。
+        </p>
+      </div>
+      <label>
+        <span className="label">设备绑定上限</span>
+        <input
+          className="input w-28"
+          type="number"
+          min={1}
+          max={10}
+          value={value}
+          disabled={isLoading}
+          onChange={(event) => setDraft(Number(event.target.value))}
+        />
+      </label>
+      <button
+        className="btn-primary"
+        disabled={
+          save.isPending || draft === null || !Number.isInteger(draft) || draft < 1 || draft > 10
+        }
+        onClick={() => draft !== null && save.mutate(draft)}
+      >
+        保存
+      </button>
+      {save.error instanceof Error && (
+        <p className="w-full text-sm text-danger">{save.error.message}</p>
+      )}
+    </section>
+  );
+}
+
 export default function UsersPage() {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -40,6 +192,10 @@ export default function UsersPage() {
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["admin-users"] }),
   });
+  const [deviceDrawer, setDeviceDrawer] = useState<{
+    userId: string;
+    nickname: string;
+  } | null>(null);
 
   return (
     <div className="space-y-5">
@@ -49,6 +205,7 @@ export default function UsersPage() {
           员工和第三方客户共用 user 权限，通过套餐 SKU 与激活渠道区分来源。
         </p>
       </div>
+      <SecurityPolicyCard />
       <section className="glass grid gap-3 p-5 md:grid-cols-[1fr_160px_1fr_auto] md:items-end">
         <label>
           <span className="label">调整用户</span>
@@ -164,25 +321,38 @@ export default function UsersPage() {
                     </select>
                   </td>
                   <td className="px-4 py-3">
-                    {user.deviceBound ? (
+                    <div className="flex items-center gap-2">
                       <button
-                        className="btn-ghost"
-                        disabled={unbind.isPending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `确认解绑 ${user.nickname} 的设备？解绑后其登录态将失效，下次登录自动绑定新设备。`,
-                            )
-                          ) {
-                            unbind.mutate(user.id);
-                          }
-                        }}
+                        className="btn-ghost font-mono"
+                        title="查看设备列表"
+                        onClick={() =>
+                          setDeviceDrawer({
+                            userId: user.id,
+                            nickname: user.nickname,
+                          })
+                        }
                       >
-                        解绑设备
+                        {user.deviceCount ?? (user.deviceBound ? 1 : 0)}/
+                        {user.deviceLimit ?? 1}
                       </button>
-                    ) : (
-                      <span className="text-xs text-text-3">未绑定</span>
-                    )}
+                      {(user.deviceCount ?? 0) > 0 && (
+                        <button
+                          className="btn-ghost"
+                          disabled={unbind.isPending}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `确认解绑 ${user.nickname} 的全部设备？解绑后其登录态将失效，下次登录自动绑定新设备。`,
+                              )
+                            ) {
+                              unbind.mutate(user.id);
+                            }
+                          }}
+                        >
+                          全部解绑
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3">
                     <button
@@ -204,6 +374,13 @@ export default function UsersPage() {
           </table>
         </div>
       </section>
+      {deviceDrawer && (
+        <DeviceDrawer
+          userId={deviceDrawer.userId}
+          nickname={deviceDrawer.nickname}
+          onClose={() => setDeviceDrawer(null)}
+        />
+      )}
     </div>
   );
 }

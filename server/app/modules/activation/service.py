@@ -177,10 +177,14 @@ async def login_with_code(
         plan_type=plan_type,
         plan_sku_code=plan_sku_code,
         plan_expires_at=plan_expires,
-        device_fingerprint=device_fingerprint,
     )
     db.add(user)
     await db.flush()  # 获取 user.id
+
+    # 首绑：写入第一条设备记录（不再写 users.device_fingerprint，已废弃）
+    from app.modules.auth.devices import bind_first_device
+
+    await bind_first_device(db, user.id, device_fingerprint)
 
     # 5. 更新码绑定到真实 user_id
     from sqlalchemy import update as sa_update
@@ -260,21 +264,15 @@ async def _login_bound_user(db: AsyncSession, code: ActivationCode, device_finge
         )
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail={"code": "DISABLED", "message": "账号已停用"})
-    # 设备绑定：空 = 未绑定（解绑后首次登录），自动重新绑定；featureHash 段容忍漂移
-    from app.modules.auth.service import fingerprint_matches
+    # 设备校验状态机：在列表内通过；上限内自动绑定；超限落库申请并 403 DEVICE_LIMIT_REACHED
+    from app.modules.auth.devices import ensure_device_allowed
 
-    if user.device_fingerprint and not fingerprint_matches(user.device_fingerprint, device_fingerprint):
-        logger.warning("code_login_failed", user_id=user.id, reason="DEVICE_MISMATCH")
-        await write_audit("code_login_failed", user_id=user.id, detail="reason=DEVICE_MISMATCH")
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN,
-            detail={"code": "DEVICE_MISMATCH", "message": "该激活码已绑定其他设备，请在原设备使用或联系管理员解绑"},
-        )
-    if user.device_fingerprint != device_fingerprint:
-        if user.device_fingerprint:
-            # featureHash 漂移：告警并重绑最新指纹
-            logger.warning("fingerprint_drift", user_id=user.id, source="code_login")
-        user.device_fingerprint = device_fingerprint
+    try:
+        await ensure_device_allowed(db, user.id, device_fingerprint)
+    except HTTPException:
+        logger.warning("code_login_failed", user_id=user.id, reason="DEVICE_LIMIT_REACHED")
+        await write_audit("code_login_failed", user_id=user.id, detail="reason=DEVICE_LIMIT_REACHED")
+        raise
 
     # 单端互踢 + 签发新会话
     from app.modules.auth.models import RefreshSession
