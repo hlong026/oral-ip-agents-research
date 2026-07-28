@@ -5,7 +5,6 @@ import type {
   AuthTokens,
   Avatar,
   BatchRewriteResult,
-  CloudVoice,
   ContentJob,
   DashboardOverview,
   FeedEvent,
@@ -253,10 +252,6 @@ export const voiceApi = {
   confirm: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/confirm`),
   reject: (voiceId: string) => http.post<Voice>(`/voices/${voiceId}/reject`),
   remove: (voiceId: string) => http.delete<void>(`/voices/${voiceId}`),
-  // 云端历史克隆声音找回：列表已与本地去重，导入免重新克隆不消耗算力
-  cloudList: () => http.get<CloudVoice[]>("/voices/cloud"),
-  cloudImport: (cloudId: string, consentToken: string, name?: string) =>
-    http.post<Voice>("/voices/cloud/import", { cloudId, consentToken, name }),
   synthesize: (voiceId: string, text: string, speed = 1.0, quoteId?: string) =>
     http.post<{ audioUrl: string; words: WordTimestamp[] }>(
       "/voices/synthesize",

@@ -254,14 +254,6 @@ export interface Voice {
   createdAt: string;
 }
 
-/** 云端历史克隆声音（找回导入用） */
-export interface CloudVoice {
-  cloudId: string;
-  name: string;
-  imported: boolean;
-  localVoiceId?: string | null;
-}
-
 export interface Avatar {
   id: string;
   name: string;
