@@ -325,7 +325,7 @@ class HiFlyAvatar:
     async def clone_by_video(self, name: str, video_key: str, consent_token: str) -> str:
         """
         视频数字人克隆：上传视频 → 创建克隆任务 → 返回 task_id
-        视频要求：mp4/mov, h264, 360p~4K, 5s~30min, ≤500MB
+        视频要求：mp4/mov, h264/hevc, 360p~4K, 5s~30min, ≤500MB
         """
         ext = Path(video_key).suffix.lstrip(".") or "mp4"
         file_id = await self._c.upload_file(video_key, ext)

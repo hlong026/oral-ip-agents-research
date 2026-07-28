@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import get_current_user_id
+from app.core.logging import get_logger
 from app.core.storage import UploadTooLarge, delete, read_limited, save_bytes, save_stream
 from app.modules.billing.service import (
     quote_operation_unit,
@@ -25,8 +26,12 @@ from .service import clone_avatar_by_image, clone_avatar_by_video, delete_avatar
 
 router = APIRouter(prefix="/avatars", tags=["avatar"])
 
-# 飞影数字人训练素材硬约束：mp4/mov（h264），≤500MB，官方 5s～30min；产品侧收紧为 30s～3min
+logger = get_logger("oral.avatar")
+
+# 飞影数字人训练素材硬约束：mp4/mov（h264/hevc），≤500MB，官方 5s～30min；产品侧收紧为 30s～3min
 AVATAR_VIDEO_FORMATS = {"mp4", "mov"}
+# 供应商接受的视频编码：h264 与 hevc/h265（iPhone MOV 默认 hevc，飞影可训练）
+AVATAR_VIDEO_CODECS = {"h264", "hevc", "h265"}
 AVATAR_VIDEO_MAX_BYTES = 500 * 1024 * 1024
 AVATAR_VIDEO_MIN_SECONDS = 30
 AVATAR_VIDEO_MAX_SECONDS = 180
@@ -96,7 +101,7 @@ async def api_clone_video(
     if suffix.lstrip(".") not in AVATAR_VIDEO_FORMATS:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "VIDEO_FORMAT_UNSUPPORTED", "message": "训练视频仅支持 MP4/MOV（H264 编码）"},
+            detail={"code": "VIDEO_FORMAT_UNSUPPORTED", "message": "训练视频仅支持 MP4/MOV（H264 / HEVC 编码）"},
         )
     key = ""
     cover_key = None
@@ -114,10 +119,12 @@ async def api_clone_video(
             (stream for stream in streams or [] if isinstance(stream, dict) and stream.get("codec_type") == "video"),
             None,
         )
-        if video_stream is None or video_stream.get("codec_name") != "h264":
+        if video_stream is None or video_stream.get("codec_name") not in AVATAR_VIDEO_CODECS:
+            detected = (video_stream or {}).get("codec_name") if video_stream else None
+            logger.warning("avatar_clone_rejected", user_id=user_id, reason="UNSUPPORTED_CODEC", codec=detected or "missing")
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "INVALID_VIDEO", "message": "训练视频必须是可识别的 H264 视频"},
+                detail={"code": "INVALID_VIDEO", "message": "训练视频必须是可识别的 H264 / HEVC 视频"},
             )
         try:
             duration = float((info or {})["format"]["duration"])
