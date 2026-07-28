@@ -106,9 +106,22 @@ function TrainForm({ onDone }: { onDone: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const submit = async () => {
-    if (!file || !consent || !name.trim()) return;
-    setBusy(true);
+    if (busy) return;
     setError("");
+    // 前置校验逐项提示：避免按钮静默禁用让用户误以为“选好文件却点不动开始训练”
+    if (!name.trim()) {
+      setError("请先填写分身名称");
+      return;
+    }
+    if (!file) {
+      setError("请先选择训练视频");
+      return;
+    }
+    if (!consent) {
+      setError("请先勾选确认拥有该形象的合法授权");
+      return;
+    }
+    setBusy(true);
     try {
       // 提交前兼容校验：格式/大小/时长不达标时直接拦截，避免白扣积分
       if (!/\.(mp4|mov)$/i.test(file.name))
@@ -152,7 +165,7 @@ function TrainForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="glass-strong space-y-3 p-5">
+    <div className="glass-strong flex h-full flex-col gap-3 p-5">
       <h2 className="font-medium">训练一个新的数字分身</h2>
       <div className="grid gap-3 md:grid-cols-2">
         <div>
@@ -179,12 +192,12 @@ function TrainForm({ onDone }: { onDone: () => void }) {
           </div>
         </div>
       </div>
-      <div>
+      <div className="flex flex-1 flex-col">
         <label className="label">
           训练素材（30s–3min 正面口播视频，1080P，MP4/MOV）
         </label>
         <button
-          className="btn-ghost flex w-full items-center justify-center gap-1.5 border-dashed py-6 text-text-3"
+          className="btn-ghost flex min-h-[7rem] w-full flex-1 items-center justify-center gap-1.5 border-dashed py-6 text-text-3"
           onClick={() => fileRef.current?.click()}
         >
           {file ? (
@@ -217,11 +230,7 @@ function TrainForm({ onDone }: { onDone: () => void }) {
           {error}
         </div>
       )}
-      <button
-        className="btn-primary w-full"
-        disabled={busy || !file || !consent || !name.trim()}
-        onClick={submit}
-      >
+      <button className="btn-primary w-full" disabled={busy} onClick={submit}>
         {busy ? "训练任务创建中…" : "开始训练"}
       </button>
     </div>
@@ -277,7 +286,7 @@ export default function AvatarsPage() {
     <div className="space-y-5">
       <AssetNav />
 
-      <div className="grid items-start gap-4 lg:grid-cols-[280px_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
         {/* 左列：当前默认分身预览 */}
         <div className="glass p-4">
           <div className="relative max-h-[420px] overflow-hidden rounded-xl border border-stroke">
@@ -309,8 +318,8 @@ export default function AvatarsPage() {
           </div>
         </div>
 
-        {/* 右列：训练表单 */}
-        <div className="space-y-4">
+        {/* 右列：训练表单（撑满高度与左列预览对齐） */}
+        <div className="flex flex-col gap-4">
           <TrainForm onDone={() => void refresh()} />
         </div>
       </div>

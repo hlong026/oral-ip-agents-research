@@ -569,9 +569,9 @@ export default function VoicesPage() {
         </button>
       </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[1.2fr_1fr]">
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
         {/* 左列：声音列表 */}
-        <div className="glass p-5">
+        <div className="glass flex flex-col p-5">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="font-medium">我的声音（{voices?.length ?? 0}）</h2>
             <span className="text-xs text-text-3">训练中每 5s 自动刷新</span>
@@ -704,18 +704,23 @@ export default function VoicesPage() {
                       外部服务提交结果未知，系统已保留积分冻结；管理员对账完成前请勿重复提交。
                     </div>
                   )}
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-xs text-text-3">
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                    <span className="min-w-0 text-xs text-text-3">
                       {ip ? (
-                        <span className="chip text-[11px]">{ip.name}</span>
+                        <span
+                          className="chip max-w-[9rem] truncate text-[11px]"
+                          title={ip.name}
+                        >
+                          {ip.name}
+                        </span>
                       ) : (
                         "暂未绑定 IP"
                       )}
                     </span>
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
                       {v.status === "ready" && (
                         <Link
-                          className="btn-ghost px-2.5 py-0.5 text-xs text-brand-to"
+                          className="btn-ghost whitespace-nowrap px-2.5 py-0.5 text-xs text-brand-to"
                           to={`/create?voiceId=${v.id}`}
                         >
                           去成片
@@ -725,18 +730,20 @@ export default function VoicesPage() {
                         current &&
                         current.voiceId !== v.id && (
                           <button
-                            className="btn-ghost px-2.5 py-0.5 text-xs"
+                            className="btn-ghost whitespace-nowrap px-2.5 py-0.5 text-xs"
                             onClick={() => void bindToCurrent(v)}
                           >
                             设为默认
                           </button>
                         )}
                       {current?.voiceId === v.id && (
-                        <span className="text-xs text-success">当前默认</span>
+                        <span className="whitespace-nowrap text-xs text-success">
+                          当前默认
+                        </span>
                       )}
                       <button
                         aria-label={`删除 ${v.name}`}
-                        className={`btn-ghost px-2 py-0.5 text-xs ${
+                        className={`btn-ghost whitespace-nowrap px-2 py-0.5 text-xs ${
                           pendingDeleteId === v.id
                             ? "text-danger"
                             : "text-text-3 hover:text-danger"
