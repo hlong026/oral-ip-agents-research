@@ -10,20 +10,19 @@ from datetime import UTC, datetime
 
 from fastapi import HTTPException, status
 from sqlalchemy import update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.core.security import consent_fingerprint
 from app.core.storage import signed_media_path
 from app.core.white_label import public_error_message
-from app.providers.base import ProviderOutcomeUnknown, StepRecoverableError
+from app.providers.base import ProviderOutcomeUnknown
 from app.providers.hifly import HiFlyAPIError, get_client
 from app.providers.registry import registry
 
 from . import repository as repo
 from .models import Voice
-from .schemas import CloneStatusOut, CloudVoiceOut, SynthesizeOut, VoiceOut, WordTsOut
+from .schemas import CloneStatusOut, SynthesizeOut, VoiceOut, WordTsOut
 
 logger = get_logger("oral.voice")
 
@@ -44,122 +43,6 @@ async def list_voices(db: AsyncSession, user_id: str) -> list[VoiceOut]:
     """我的声音列表（仅用户自己的，无公共/预置）"""
     items = await repo.list_by_user(db, user_id)
     return [to_out(v) for v in items]
-
-
-async def _fetch_cloud_voices() -> tuple[list[dict], str]:
-    """拉取供应商云端已克隆声音列表（含命中的 provider 名），失败统一转白标错误"""
-    try:
-        result, provider_name = await registry.run_with_fallback("voice", registry.voice_chain, "list_voices")
-    except (HiFlyAPIError, StepRecoverableError) as e:
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY,
-            detail={"code": "CLOUD_LIST_FAILED", "message": public_error_message(e)},
-        ) from e
-    return [item for item in result if isinstance(item, dict) and item.get("voice")], provider_name
-
-
-# 导入后又被用户否定的本地记录：不占用认领名额，允许重新导入复活
-REVIVABLE_STATUSES = {"rejected", "failed"}
-
-
-async def list_cloud_voices(db: AsyncSession, user_id: str) -> list[CloudVoiceOut]:
-    """
-    云端历史克隆声音找回列表：
-    - 拉取供应商账号下全部已克隆声音，与本地库按 provider_voice_id 去重比对
-    - 部署共用一个供应商账号：已被其他用户认领的不展示（隐私隔离），本人已导入的标记 imported
-    - 克隆竞态窗口：供应商已训完但本地尚未回填 provider_voice_id 的记录，按名称匹配隐藏，防抢先导入
-    """
-    cloud_items, _ = await _fetch_cloud_voices()
-    claimed = await repo.list_by_provider_voice_ids(db, [str(item["voice"]) for item in cloud_items])
-    claimed_by_id = {v.provider_voice_id: v for v in claimed}
-    in_flight_names = {v.name for v in await repo.list_in_flight_clones(db)}
-    out: list[CloudVoiceOut] = []
-    for item in cloud_items:
-        cloud_id = str(item["voice"])
-        local = claimed_by_id.get(cloud_id)
-        if local and local.user_id != user_id:
-            continue  # 已被其他账号认领，不对当前用户暴露
-        if local is None and str(item.get("title") or "") in in_flight_names:
-            continue  # 克隆中的声音尚未回填本地 ID，不进入找回池
-        out.append(
-            CloudVoiceOut(
-                cloudId=cloud_id,
-                name=str(item.get("title") or "未命名声音"),
-                imported=local is not None and local.status not in REVIVABLE_STATUSES,
-                localVoiceId=local.id if local else None,
-            )
-        )
-    return out
-
-
-async def import_cloud_voice(
-    db: AsyncSession, user_id: str, cloud_id: str, name: str | None, consent_token: str
-) -> VoiceOut:
-    """
-    一键导入云端历史声音：免重新克隆，直接绑定云端声音 ID 落库 status=ready。
-    与克隆同样强制 consent 授权；导入前回查云端列表验证 cloud_id 真实存在（防任意 ID 注入）。
-    """
-    if not consent_token or len(consent_token.strip()) < 4:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "CONSENT_REQUIRED", "message": "声音导入须本人授权（consent_token 缺失）"},
-        )
-    cloud_items, provider_name = await _fetch_cloud_voices()
-    matched = next((item for item in cloud_items if str(item["voice"]) == cloud_id), None)
-    if matched is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, detail={"code": "CLOUD_VOICE_NOT_FOUND", "message": "云端声音不存在或已被清理"}
-        )
-    claimed = await repo.list_by_provider_voice_ids(db, [cloud_id])
-    mine = next((v for v in claimed if v.user_id == user_id), None)
-    if mine and mine.status in REVIVABLE_STATUSES:
-        # 本人曾否定/失败的记录：导入即复活，避免唯一索引下死锁该云端声音
-        mine.name = ((name or "").strip() or mine.name)[:64]
-        mine.status = "ready"
-        mine.consent_hash = consent_fingerprint(user_id, "voice", consent_token)
-        mine.consented_at = datetime.now(UTC)
-        await db.commit()
-        await db.refresh(mine)
-        logger.info("voice_cloud_import_revived", user_id=user_id, voice_id=mine.id, provider_voice_id=cloud_id)
-        return to_out(mine)
-    if claimed:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={
-                "code": "ALREADY_IMPORTED",
-                "message": "该云端声音已导入" if mine else "该云端声音已被其他账号认领",
-            },
-        )
-    in_flight_names = {v.name for v in await repo.list_in_flight_clones(db)}
-    if str(matched.get("title") or "") in in_flight_names:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "CLONE_IN_PROGRESS", "message": "该声音正在克隆确认流程中，请稍后再试"},
-        )
-    try:
-        v = await repo.create(
-            db,
-            user_id=user_id,
-            name=((name or "").strip() or str(matched.get("title") or "未命名声音"))[:64],
-            source="import",
-            provider=provider_name,
-            provider_voice_id=cloud_id,
-            rate=str(matched.get("rate") or "1.0"),
-            volume=str(matched.get("volume") or "1.0"),
-            pitch=str(matched.get("pitch") or "1.0"),
-            consent_hash=consent_fingerprint(user_id, "voice", consent_token),
-            consented_at=datetime.now(UTC),
-            status="ready",  # 云端已训练完成，导入即可用（无试听样音，可在试听台 TTS 合成）
-        )
-    except IntegrityError as e:
-        # 并发导入同一 cloud_id：唯一索引 uq_voices_provider_voice_id 兜底，后到者转 409
-        await db.rollback()
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            detail={"code": "ALREADY_IMPORTED", "message": "该云端声音已被认领"},
-        ) from e
-    logger.info("voice_cloud_imported", user_id=user_id, voice_id=v.id, provider_voice_id=cloud_id)
-    return to_out(v)
 
 
 async def clone_voice(
@@ -395,7 +278,7 @@ async def reject_voice(db: AsyncSession, user_id: str, voice_id: str) -> VoiceOu
 async def delete_voice(db: AsyncSession, user_id: str, voice_id: str) -> None:
     """删除声音：训练中先释放计费预留，并解绑引用该声音的 IP
 
-    产品决策：仅删本地记录不动云端，删除后该云端声音回到找回池可被任意账号导入（账号间共用供应商账号，视为主动释放）
+    产品决策：仅删本地记录不动云端（账号间共用供应商账号，视为主动释放）
     """
     v = await repo.get(db, voice_id, user_id)
     if not v:

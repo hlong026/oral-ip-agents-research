@@ -19,21 +19,6 @@ class VoiceOut(BaseModel):
     createdAt: str
 
 
-class CloudVoiceOut(BaseModel):
-    """云端历史克隆声音（找回导入用；cloudId 为不透明标识，不暴露供应商品牌）"""
-
-    cloudId: str
-    name: str
-    imported: bool  # 当前账号是否已导入
-    localVoiceId: str | None = None  # 已导入时对应的本地声音 ID
-
-
-class CloudImportIn(BaseModel):
-    cloudId: str
-    name: str | None = None  # 缺省用云端名称
-    consentToken: str  # 合规红线：导入同样须确认本人授权
-
-
 class CloneStatusOut(BaseModel):
     id: str
     status: str
