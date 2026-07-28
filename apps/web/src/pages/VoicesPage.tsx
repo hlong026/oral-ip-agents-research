@@ -60,6 +60,13 @@ function CloneForm({
 
   const startRecording = async () => {
     setError("");
+    // 非安全上下文（如 http://IP 访问）下 mediaDevices 不存在，需提前给出明确指引
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(
+        "当前环境不支持录音（需 HTTPS 或 localhost 访问），请改为上传音频文件",
+      );
+      return;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: true,
@@ -92,8 +99,20 @@ function CloneForm({
         () => setSeconds((s) => s + 1),
         1000,
       );
-    } catch {
-      setError("无法访问麦克风，请检查浏览器授权，或改为上传音频文件");
+    } catch (e) {
+      // 分因提示：授权被拒 / 无设备 / 其他，帮助用户定位到浏览器或系统设置
+      const name = e instanceof DOMException ? e.name : "";
+      if (name === "NotAllowedError" || name === "SecurityError") {
+        setError(
+          "麦克风授权被拒绝：请在浏览器地址栏或系统设置（隐私与安全性 → 麦克风）中允许本应用访问麦克风后重试",
+        );
+      } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+        setError("未检测到可用麦克风设备，请连接麦克风或改为上传音频文件");
+      } else if (name === "NotReadableError") {
+        setError("麦克风被其他应用占用，请关闭占用麦克风的应用后重试");
+      } else {
+        setError("无法访问麦克风，请检查浏览器授权，或改为上传音频文件");
+      }
     }
   };
 
