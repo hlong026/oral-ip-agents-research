@@ -9,6 +9,8 @@ from app.core.deps import get_current_user_id
 from . import service
 from .schemas import (
     CoverCandidateOut,
+    CoverPreviewIn,
+    CoverPreviewOut,
     CreatePipelineIn,
     MetadataSuggestionsOut,
     PublicationDraftPutIn,
@@ -107,6 +109,16 @@ async def cover_candidates(
     db: AsyncSession = Depends(get_db),
 ) -> list[CoverCandidateOut]:
     return await service.cover_candidates(db, task_id, user_id)
+
+
+@router.post("/{task_id}/cover-preview", response_model=CoverPreviewOut)
+async def cover_preview(
+    task_id: str,
+    inp: CoverPreviewIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> CoverPreviewOut:
+    return await service.cover_preview(db, task_id, user_id, inp)
 
 
 @router.post("/{task_id}/finalize", response_model=PublicationRevisionOut)

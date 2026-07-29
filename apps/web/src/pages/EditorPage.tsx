@@ -103,6 +103,9 @@ export default function EditorPage() {
   const [suggesting, setSuggesting] = useState(false);
   const [saveTick, setSaveTick] = useState(0);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [coverPreviewUrl, setCoverPreviewUrl] = useState("");
+  const [coverPreviewLoading, setCoverPreviewLoading] = useState(false);
+  const [coverPreviewError, setCoverPreviewError] = useState("");
   const contentRef = useRef<PublicationContentSpec | null>(null);
   const revisionRef = useRef(0);
   const currentRevisionRef = useRef<PublicationRevision | null>(null);
@@ -259,6 +262,43 @@ export default function EditorPage() {
     setMsg("");
     setError("");
   };
+
+  // 所见即所得封面预览：选帧/模板/文案变化后 debounce 请求后端按成片规格渲染
+  const coverSelectedFrameMs = content?.cover.selectedFrameMs;
+  const coverTemplate = content?.cover.template;
+  const coverText = content?.cover.text ?? "";
+  useEffect(() => {
+    if (!effectiveTaskId || coverSelectedFrameMs === undefined || !coverTemplate) {
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setCoverPreviewLoading(true);
+      setCoverPreviewError("");
+      pipelineApi
+        .coverPreview(effectiveTaskId, {
+          selectedFrameMs: coverSelectedFrameMs,
+          template: coverTemplate,
+          text: coverText,
+        })
+        .then((preview) => {
+          if (!cancelled) setCoverPreviewUrl(preview.imageUrl);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setCoverPreviewError(
+            err instanceof HttpError ? err.body.message : "预览生成失败",
+          );
+        })
+        .finally(() => {
+          if (!cancelled) setCoverPreviewLoading(false);
+        });
+    }, 450);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [effectiveTaskId, coverSelectedFrameMs, coverTemplate, coverText]);
 
   const saveNow = async () => {
     if (savePromiseRef.current) {
@@ -919,6 +959,32 @@ export default function EditorPage() {
                       </div>
                     </button>
                   ))}
+                </div>
+                <div className="mb-4">
+                  <label className="label">效果预览（与成片同规格）</label>
+                  <div className="relative mx-auto flex aspect-[9/16] max-h-[360px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
+                    {coverPreviewUrl ? (
+                      <img
+                        src={coverPreviewUrl}
+                        alt="封面所见即所得预览"
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-xs text-text-3">
+                        {coverPreviewError || "选择候选帧后生成预览"}
+                      </span>
+                    )}
+                    {coverPreviewLoading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                        <LoaderCircle className="h-5 w-5 animate-spin text-white" />
+                      </div>
+                    )}
+                  </div>
+                  {coverPreviewError && coverPreviewUrl && (
+                    <p className="mt-1 text-xs text-danger">
+                      预览更新失败：{coverPreviewError}
+                    </p>
+                  )}
                 </div>
                 {coverError ? (
                   <p className="text-xs text-danger">

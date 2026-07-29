@@ -7,7 +7,9 @@
 """
 
 import asyncio
+import functools
 import json as _json
+import subprocess
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -27,7 +29,7 @@ from .base import (
     SimilarityResult,
     StepRecoverableError,
 )
-from .cover import render_cover
+from .cover import render_cover, score_frame_quality
 from .media_quality import inspect_media
 
 logger = get_logger("oral.providers.real")
@@ -304,7 +306,13 @@ class FFmpegCompose:
             bgm_path = await _materialize(inp.bgm_key, workdir, "bgm") if inp.bgm_key else None
             logo_path = await _materialize(inp.logo_key, workdir, "logo") if inp.logo_key else None
             subtitle_path = workdir / "subtitles.ass"
-            if inp.subtitle_words:
+            # 本机 FFmpeg 未编译 libass 时 subtitles 滤镜不存在，烧字幕会令整个 filterchain
+            # 解析失败→降级 mock→质检不过。此时跳过烧字幕并告警，保证成片仍能产出。
+            burn_subtitles = bool(inp.subtitle_words)
+            if burn_subtitles and not await _ffmpeg_has_filter("subtitles"):
+                logger.warning("ffmpeg_subtitles_filter_unavailable_skip_burn")
+                burn_subtitles = False
+            if burn_subtitles:
                 subtitle_path.write_text(
                     _build_ass(inp.subtitle_words, width, height, inp.subtitle_style, exact=inp.subtitle_exact),
                     encoding="utf-8",
@@ -317,7 +325,7 @@ class FFmpegCompose:
                 audio_path,
                 bgm_path,
                 logo_path,
-                subtitle_path if inp.subtitle_words else None,
+                subtitle_path if burn_subtitles else None,
                 output_path,
                 width,
                 height,
@@ -351,14 +359,61 @@ class FFmpegCompose:
         )
 
 
+_CANDIDATE_OFFSETS_MS = (-320, -160, 0, 160, 320)
+
+
 async def extract_cover_candidate_frame(video_key: str, timestamp_ms: int) -> str:
-    """从 clean 视频源按毫秒提取候选封面帧并保存，调用方负责缓存返回 key。"""
+    """从 clean 视频源在指定时间的邻域多帧中按清晰度择优，保存候选封面帧。
+
+    锚点附近抽 ±0.32s 数帧，用 Laplacian 方差+亮度打分挑最锐利的一帧，
+    规避闭眼/运动模糊瞬间；单帧失败逐步兜底到锚点单帧、首帧。
+    """
     with tempfile.TemporaryDirectory(prefix="oral-cover-candidate-") as directory:
         workdir = Path(directory)
         video_path = await _materialize(video_key, workdir, "video")
-        cover_path = workdir / "candidate.jpg"
-        await _extract_cover_frame(video_path, cover_path, timestamp_ms)
-        return await save_bytes("cover-candidates", f"{timestamp_ms}.jpg", cover_path.read_bytes())
+        best = await _best_frame_near(video_path, workdir, timestamp_ms)
+        return await save_bytes("cover-candidates", f"{timestamp_ms}.jpg", best)
+
+
+async def _best_frame_near(video: Path, workdir: Path, timestamp_ms: int) -> bytes:
+    frames: list[bytes] = []
+    for idx, offset in enumerate(_CANDIDATE_OFFSETS_MS):
+        ts = timestamp_ms + offset
+        if ts < 0:
+            continue
+        frame = workdir / f"cand_{idx}.jpg"
+        try:
+            await _extract_cover_frame(video, frame, ts)
+        except StepRecoverableError:
+            continue
+        if await asyncio.to_thread(_file_nonempty, frame):
+            frames.append(frame.read_bytes())
+    if not frames:
+        # 邻域全部失败：回退到锚点单帧（_extract_cover_frame 内部再兜底首帧）
+        fallback = workdir / "cand_fallback.jpg"
+        await _extract_cover_frame(video, fallback, timestamp_ms)
+        return fallback.read_bytes()
+    if len(frames) == 1:
+        return frames[0]
+    return await asyncio.to_thread(lambda: max(frames, key=score_frame_quality))
+
+
+async def render_cover_preview_bytes(
+    video_key: str,
+    timestamp_ms: int,
+    title: str,
+    template: str,
+    width: int,
+    height: int,
+) -> bytes:
+    """所见即所得封面预览：抽帧 + 按模板叠标题，输出与成片同像素规格的 JPEG。"""
+    with tempfile.TemporaryDirectory(prefix="oral-cover-preview-") as directory:
+        workdir = Path(directory)
+        video_path = await _materialize(video_key, workdir, "video")
+        frame_path = workdir / "frame.jpg"
+        await _extract_cover_frame(video_path, frame_path, timestamp_ms)
+        frame_bytes = frame_path.read_bytes()
+        return await asyncio.to_thread(render_cover, frame_bytes, title, template, width, height)
 
 
 class ThirdPartyParser:
@@ -466,8 +521,10 @@ def _compose_command(
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30"
     )
     if subtitles:
-        escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        video_filter += f",subtitles='{escaped}'"
+        # subtitles 滤镜参数内单引号已保护路径中的 : 与 ,，只需转义 \\ 与 '；
+        # 采用文档化的 filename= 写法，避免裸路径被误解析为选项名。
+        escaped = str(subtitles).replace("\\", "\\\\").replace("'", "\\'")
+        video_filter += f",subtitles=filename='{escaped}'"
 
     filter_parts: list[str] = []
     video_map = "0:v:0"
@@ -520,10 +577,38 @@ def _compose_command(
     return command
 
 
+@functools.lru_cache(maxsize=16)
+def _ffmpeg_has_filter_sync(name: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == name:
+            return True
+    return False
+
+
+async def _ffmpeg_has_filter(name: str) -> bool:
+    """探测本机 FFmpeg 是否内置某滤镜（结果缓存，避免每次合成都探测）。"""
+    return await asyncio.to_thread(_ffmpeg_has_filter_sync, name)
+
+
 async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
+            # 断开 stdin：后台进程组继承终端 stdin 时 ffmpeg 读终端会触发 SIGTTIN 挂起整个服务
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -535,7 +620,9 @@ async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
         await process.communicate()
         raise StepRecoverableError("FFmpeg 合成超时") from exc
     if process.returncode != 0:
-        detail = stderr.decode("utf-8", errors="replace")[-500:]
+        text = stderr.decode("utf-8", errors="replace").strip()
+        # 保留头部（含 "No such filter"/"Error parsing filterchain" 等根因）+ 尾部，避免只截尾遗漏真因
+        detail = text if len(text) <= 800 else f"{text[:400]} …… {text[-400:]}"
         raise StepRecoverableError(f"FFmpeg 合成失败(exit={process.returncode}): {detail}")
 
 

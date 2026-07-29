@@ -467,6 +467,16 @@ export interface CoverCandidate {
   imageUrl: string;
 }
 
+export interface CoverPreviewInput {
+  selectedFrameMs: number;
+  template: string;
+  text: string;
+}
+
+export interface CoverPreview {
+  imageUrl: string;
+}
+
 export interface MetadataSuggestionGroup {
   title: string;
   tags: string[];

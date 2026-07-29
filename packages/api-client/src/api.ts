@@ -17,6 +17,8 @@ import type {
   PlanSku,
   PipelineMode,
   CoverCandidate,
+  CoverPreview,
+  CoverPreviewInput,
   MetadataSuggestions,
   PublicationContentSpec,
   PublicationRevision,
@@ -340,6 +342,8 @@ export const pipelineApi = {
     http.post<MetadataSuggestions>(`/pipelines/${id}/metadata-suggestions`, {}),
   coverCandidates: (id: string) =>
     http.get<CoverCandidate[]>(`/pipelines/${id}/cover-candidates`),
+  coverPreview: (id: string, input: CoverPreviewInput) =>
+    http.post<CoverPreview>(`/pipelines/${id}/cover-preview`, input),
   finalizePublication: (
     id: string,
     input: { quoteId: string; idempotencyKey: string; draftRevision: number },

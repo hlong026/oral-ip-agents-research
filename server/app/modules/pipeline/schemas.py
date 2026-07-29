@@ -174,6 +174,16 @@ class CoverCandidateOut(BaseModel):
     imageUrl: str
 
 
+class CoverPreviewIn(BaseModel):
+    selectedFrameMs: int = Field(default=1500, ge=0, le=3000)
+    template: Literal["bold-bottom", "center-band", "top-title", "none"] = "bold-bottom"
+    text: str = Field(default="", max_length=40)
+
+
+class CoverPreviewOut(BaseModel):
+    imageUrl: str
+
+
 class MetadataSuggestionGroupOut(BaseModel):
     title: str
     tags: list[str]

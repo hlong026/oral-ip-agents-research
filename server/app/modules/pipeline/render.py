@@ -13,6 +13,7 @@ from . import repository as repo
 from .engine import _compose_with_ctx
 from .models import PipelineRenderVersion, PublicationRevision
 from .schemas import EditConfigIn
+from app.providers.base import is_mock_provider
 
 logger = get_logger("oral.pipeline.render")
 
@@ -63,6 +64,10 @@ async def run_render_version(render_id: str) -> None:
             artifacts = _apply_raw_render_config(json.loads(task.artifacts_json or "{}"), raw_config)
             try:
                 result = await _compose_with_ctx(task, artifacts)
+                # 真实合成失败降级到 mock 时，产物为占位文件，会被质检误判为“质量不过”；
+                # 此处直接报失败并提示真实可能原因（FFmpeg/字幕环境），避免误导“稍后重试”。
+                if result.get("degraded_mock") or is_mock_provider(str(result.get("provider") or "")):
+                    raise RuntimeError("真实合成失败并降级为演示数据，请核查 FFmpeg 环境/字幕配置后重试")
                 quality = result.get("quality")
                 if not isinstance(quality, dict) or not quality.get("passed"):
                     raise RuntimeError("成片质量检查未通过")

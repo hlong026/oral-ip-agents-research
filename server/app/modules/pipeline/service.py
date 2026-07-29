@@ -23,6 +23,8 @@ from .engine import schedule_run
 from .models import STEP_ORDER, PipelineRenderVersion, PipelineTask, PublicationRevision
 from .schemas import (
     CoverCandidateOut,
+    CoverPreviewIn,
+    CoverPreviewOut,
     CreatePipelineIn,
     EditConfigIn,
     MetadataSuggestionGroupOut,
@@ -703,6 +705,48 @@ async def cover_candidates(
         task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
         await db.commit()
     return candidates
+
+
+async def cover_preview(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+    inp: CoverPreviewIn,
+) -> CoverPreviewOut:
+    """所见即所得封面预览：按选中帧+模板+文案渲染与成片同规格的封面图。"""
+    task = await _must_get(db, task_id, user_id)
+    artifacts = json.loads(task.artifacts_json or "{}")
+    clean_key = _clean_master_key(artifacts)
+    if not clean_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "CLEAN_MASTER_REQUIRED", "message": "无可用于提取封面的 clean 视频源"},
+        )
+    if not storage_exists(clean_key):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CLEAN_MASTER_MISSING",
+                "message": "成片源文件已不存在（可能被清理），请重新生成成片后再预览封面",
+            },
+        )
+    from app.providers.real import _target_size, render_cover_preview_bytes
+
+    width, height = _target_size(str(artifacts.get("ratio") or "9:16"))
+    try:
+        image_bytes = await render_cover_preview_bytes(
+            clean_key, inp.selectedFrameMs, inp.text, inp.template, width, height
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("cover_preview_render_failed", task_id=task_id, timestamp_ms=inp.selectedFrameMs)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "COVER_PREVIEW_FAILED", "message": "封面预览生成失败，请稍后重试"},
+        ) from exc
+    from app.core.storage import save_bytes
+
+    key = await save_bytes("cover-preview", f"{inp.selectedFrameMs}.jpg", image_bytes)
+    return CoverPreviewOut(imageUrl=signed_media_path(key))
 
 
 async def finalize_publication(
