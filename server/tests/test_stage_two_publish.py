@@ -5,7 +5,9 @@ import zipfile
 from io import BytesIO
 from types import SimpleNamespace
 
+import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 
 from app.core.db import SessionLocal, init_models
 from app.core.storage import read_bytes, save_bytes
@@ -269,10 +271,9 @@ async def test_changed_compose_output_does_not_reuse_old_export_job(monkeypatch)
     assert new_job.video_key == "compose/new.mp4"
 
 
-async def test_manual_publish_pins_the_active_render_version(monkeypatch) -> None:
+async def test_legacy_manual_publish_cannot_bypass_finalized_revision(monkeypatch) -> None:
     from app.modules.pipeline.models import PipelineRenderVersion, PipelineTask
     from app.modules.publish import service
-    from app.modules.publish.models import PublishJob
     from app.modules.publish.schemas import PublishIn
 
     monkeypatch.setattr(
@@ -333,36 +334,14 @@ async def test_manual_publish_pins_the_active_render_version(monkeypatch) -> Non
             platforms=["douyin"],
             title="发布活动成片",
         )
-        jobs = await service.create_jobs(
-            db,
-            task.user_id,
-            request,
-        )
-        duplicate = await service.create_jobs(db, task.user_id, request)
-        changed = await service.create_jobs(
-            db,
-            task.user_id,
-            PublishIn(
-                taskId=task.id,
-                platforms=["douyin"],
-                title="更新后的发布标题",
-                topics=["新版话题"],
-            ),
-        )
-        stored = await db.get(PublishJob, jobs[0].id)
+        with pytest.raises(HTTPException) as exc:
+            await service.create_jobs(db, task.user_id, request)
 
-    assert duplicate[0].id == jobs[0].id
-    assert changed[0].id == jobs[0].id
-    assert stored is not None
-    assert stored.title == "更新后的发布标题"
-    assert json.loads(stored.topics_json) == ["新版话题"]
-    assert stored.render_version == 2
-    assert stored.render_version_id
-    assert stored.video_key == "compose/v2.mp4"
-    assert stored.cover_key == "compose/v2.jpg"
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "PUBLICATION_REVISION_REQUIRED"
 
 
-async def test_manual_publish_backfills_legacy_job_with_bootstrapped_render_version(monkeypatch) -> None:
+async def test_legacy_job_is_not_backfilled_without_finalized_revision(monkeypatch) -> None:
     from app.modules.pipeline.models import PipelineTask
     from app.modules.publish import repository as publish_repo
     from app.modules.publish import service
@@ -400,21 +379,23 @@ async def test_manual_publish_backfills_legacy_job_with_bootstrapped_render_vers
             cover_key="compose/legacy.jpg",
             status="export_ready",
         )
-        jobs = await service.create_jobs(
-            db,
-            task.user_id,
-            PublishIn(
-                taskId=task.id,
-                platforms=["douyin"],
-                title="存量发布任务",
-            ),
-        )
+        with pytest.raises(HTTPException) as exc:
+            await service.create_jobs(
+                db,
+                task.user_id,
+                PublishIn(
+                    taskId=task.id,
+                    platforms=["douyin"],
+                    title="存量发布任务",
+                ),
+            )
         stored = await publish_repo.get_job(db, legacy.id, task.user_id)
 
-    assert jobs[0].id == legacy.id
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "PUBLICATION_REVISION_REQUIRED"
     assert stored is not None
-    assert stored.render_version == 1
-    assert stored.render_version_id
+    assert stored.render_version == 0
+    assert not stored.render_version_id
 
 
 async def test_export_package_contains_video_cover_and_metadata() -> None:

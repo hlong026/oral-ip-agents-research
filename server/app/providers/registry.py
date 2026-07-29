@@ -60,7 +60,7 @@ class ProviderRegistry:
             self.avatar_chain.append(MockAvatar())
             self.compose_chain.append(MockCompose())
         self.publish_drivers: dict[str, PublishDriver]
-        if settings.app_env == "dev":
+        if settings.app_env == "dev" and not settings.publish_force_real:
             self.publish_drivers = {
                 platform: MockPublishDriver(platform) for platform in ("douyin", "xiaohongshu", "shipinhao")
             }

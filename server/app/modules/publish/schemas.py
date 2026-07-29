@@ -1,6 +1,6 @@
 """publish 出入参"""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AccountOut(BaseModel):
@@ -29,19 +29,22 @@ class QrcodePollOut(BaseModel):
 
 
 class PublishIn(BaseModel):
-    taskId: str
+    publicationRevisionId: str = ""
     platforms: list[str]
-    title: str
-    topics: list[str] = []
+    accountIds: dict[str, str] = Field(default_factory=dict)
+    publishAt: str | None = None
+    taskId: str = ""
+    title: str = ""
+    topics: list[str] = Field(default_factory=list)
     # 兼容旧客户端回传，但服务端只信任任务中已登记的产物 key。
     videoKey: str | None = None
     coverKey: str | None = None
-    publishAt: str | None = None
 
 
 class JobOut(BaseModel):
     id: str
     taskId: str
+    publicationRevisionId: str = ""
     renderVersionId: str = ""
     renderVersion: int = 0
     platform: str

@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -26,13 +27,14 @@ from app.core.logging import get_logger, task_id_var, trace_id_var, user_id_var
 from app.core.runtime_limits import PIPELINE_SEMAPHORE_LEASE_SECONDS
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
-from app.providers.base import ComposeInput, is_mock_provider
+from app.providers.base import ComposeInput, WordTs, is_mock_provider
 from app.providers.registry import registry
 
-from .models import STEP_ORDER, PipelineTask
+from .models import STEP_ORDER, PipelineRenderVersion, PipelineTask, PublicationRevision
 from .repository import claim_for_run
 from .repository import get as repo_get
 from .repository import save as repo_save
+from .schemas import PublicationContentIn
 
 logger = get_logger("oral.pipeline.engine")
 settings = get_settings()
@@ -527,6 +529,43 @@ def _subtitle_style_from_ctx(ctx: dict) -> dict:
     return {"fontSize": 44, "color": "#FFFFFF", "position": "bottom", "stroke": 3}
 
 
+def _segments_to_words(segments: list[dict]) -> list[WordTs]:
+    words: list[WordTs] = []
+    for segment in segments:
+        try:
+            text = str(segment.get("text") or "").strip()
+            start = max(0.0, float(segment.get("startMs") or 0) / 1000)
+            end = max(start + 0.01, float(segment.get("endMs") or 0) / 1000)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if text:
+            words.append(WordTs(word=text, start=start, end=end))
+    return words
+
+
+def _apply_publication_content(ctx: dict) -> dict:
+    content = ctx.get("content")
+    if not isinstance(content, dict):
+        return ctx
+    subtitles_raw = content.get("subtitles")
+    subtitles = subtitles_raw if isinstance(subtitles_raw, dict) else {}
+    cover_raw = content.get("cover")
+    cover = cover_raw if isinstance(cover_raw, dict) else {}
+    updated = dict(ctx)
+    updated["subtitle_enabled"] = bool(subtitles.get("enabled"))
+    updated["subtitle_segments"] = subtitles.get("segments") or []
+    updated["subtitle_exact"] = bool(subtitles.get("segments"))
+    updated["subtitle_style"] = subtitles.get("style") or {}
+    updated["cover_title"] = (
+        str(cover.get("text") or "").strip() or content.get("title") or updated.get("cover_title")
+    )
+    updated["cover_template"] = cover.get("template") or updated.get("cover_template") or "bold-bottom"
+    updated["cover_frame_ms"] = cover.get("selectedFrameMs", updated.get("cover_frame_ms", 1000))
+    if updated.get("clean_video_key"):
+        updated["avatar_video_key"] = updated["clean_video_key"]
+    return updated
+
+
 def _preferred_title(task: PipelineTask, ctx: dict) -> str:
     """标题取值优先级（不截断）：上游 LLM 标题 > 解析标题 > 任务名（占位名跳过）"""
     for candidate in (ctx.get("cover_title"), ctx.get("title"), task.title):
@@ -544,25 +583,36 @@ def _cover_text_from_ctx(task: PipelineTask, ctx: dict) -> str:
 
 async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
     """合成执行体：compose 首跑与 edit 步按剪辑台配置重合成共用（字幕样式/封面模板真链路）"""
+    ctx = _apply_publication_content(ctx)
     # 字幕双模式（C4）：TTS 字级时间戳优先，ASR 校准兜底；剪辑台显式关闭字幕时跳过烧录
-    words = [] if ctx.get("subtitle_enabled") is False else (ctx.get("tts_words") or ctx.get("words") or [])
+    if ctx.get("subtitle_segments"):
+        words = _segments_to_words(ctx.get("subtitle_segments") or [])
+    elif ctx.get("subtitle_enabled") is True:
+        words = ctx.get("tts_words") or ctx.get("words") or []
+    elif "subtitle_enabled" not in ctx and not getattr(task, "user_id", ""):
+        words = ctx.get("tts_words") or ctx.get("words") or []
+    else:
+        words = []
     bgm_mode = str(ctx.get("bgm_mode") or "off")
     bgm_volume = float(ctx.get("bgm_volume") or 0.0)
+    clean_video_key = str(ctx.get("clean_video_key") or ctx.get("avatar_video_key") or ctx.get("video_key") or "")
     inp = ComposeInput(
-        video_key=ctx.get("avatar_video_key") or ctx.get("video_key") or "",
+        video_key=clean_video_key,
         audio_key=ctx.get("audio_key"),
         subtitle_words=[],  # 由 engine 转换
         subtitle_style=_subtitle_style_from_ctx(ctx),
+        subtitle_exact=bool(ctx.get("subtitle_exact")),
         bgm_key=str(ctx.get("bgm_key") or "") or None if bgm_mode == "custom" else None,
         bgm_mode=bgm_mode,
         cover_text=_cover_text_from_ctx(task, ctx),
         cover_template=str(ctx.get("cover_template") or "bold-bottom"),
+        cover_frame_ms=int(ctx.get("cover_frame_ms") or 1000),
         bgm_volume=max(0.0, min(bgm_volume, 1.0)),
         randomize=task.randomize,
     )
-    from app.providers.base import WordTs
-
-    inp.subtitle_words = [WordTs(word=w["word"], start=w["start"], end=w["end"]) for w in words]
+    inp.subtitle_words = [
+        w if isinstance(w, WordTs) else WordTs(word=w["word"], start=w["start"], end=w["end"]) for w in words
+    ]
     result, provider = await registry.run_with_fallback(
         "compose", registry.compose_chain, "compose", inp, trace_id=task.trace_id, task_id=task.id
     )
@@ -572,6 +622,8 @@ async def _compose_with_ctx(task: PipelineTask, ctx: dict) -> dict:
         provider,
         {
             "final_video_key": result.video_key,
+            "clean_video_key": result.video_key if not inp.subtitle_words else str(ctx.get("clean_video_key") or ""),
+            "subtitle_enabled": bool(inp.subtitle_words),
             "cover_key": result.cover_key,
             "duration": result.duration,
             "quality": result.quality,
@@ -605,6 +657,38 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
     from app.modules.publish.service import publish_task_video
 
     async with SessionLocal() as db:
+        persisted_task = await db.get(PipelineTask, task.id)
+        finalized = (
+            await db.execute(
+                select(PublicationRevision)
+                .where(
+                    PublicationRevision.task_id == task.id,
+                    PublicationRevision.user_id == task.user_id,
+                    PublicationRevision.status == "finalized",
+                )
+                .order_by(PublicationRevision.revision.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if finalized is None and persisted_task is not None:
+            return {"skipped": True, "note": "内容尚未定稿，已跳过外部发布"}
+        publish_title = _preferred_title(task, ctx) or str(ctx.get("script") or "") or task.title
+        publish_topics: list[str] | None = None
+        publish_video_key = str(ctx.get("final_video_key", ""))
+        publish_cover_key = str(ctx.get("cover_key", ""))
+        publish_render_id = str(ctx.get("render_version_id") or "")
+        publish_render_version = int(ctx.get("render_version") or 0)
+        if finalized is not None:
+            content = PublicationContentIn.model_validate(json.loads(finalized.content_spec_json or "{}"))
+            linked_render = await db.get(PipelineRenderVersion, finalized.render_version_id)
+            if linked_render is None or linked_render.status != "done":
+                return {"skipped": True, "note": "定稿成片尚未完成，已跳过外部发布"}
+            publish_title = content.title
+            publish_topics = content.topics
+            publish_video_key = linked_render.video_key
+            publish_cover_key = linked_render.cover_key
+            publish_render_id = linked_render.id
+            publish_render_version = linked_render.version
         job_ids = await publish_task_video(
             db,
             task.user_id,
@@ -612,12 +696,14 @@ async def step_publish(task: PipelineTask, ctx: dict) -> dict:
             platforms,
             # 发布标题与封面取值优先级对齐（LLM 标题优先、口播文案兜底），不复用封面版式的 24/18 字截断；
             # 字数限长由 publish_task_video 按平台限长表（TITLE_LIMITS）统一截断，此处不预截
-            title=_preferred_title(task, ctx) or str(ctx.get("script") or "") or task.title,
-            video_key=ctx.get("final_video_key", ""),
-            cover_key=ctx.get("cover_key", ""),
+            title=publish_title,
+            video_key=publish_video_key,
+            cover_key=publish_cover_key,
             scheduled_at=task.publish_at or None,
-            render_version_id=str(ctx.get("render_version_id") or ""),
-            render_version=int(ctx.get("render_version") or 0),
+            topics=publish_topics,
+            render_version_id=publish_render_id,
+            render_version=publish_render_version,
+            publication_revision_id=finalized.id if finalized is not None else "",
         )
     return {"publish_job_ids": job_ids}
 

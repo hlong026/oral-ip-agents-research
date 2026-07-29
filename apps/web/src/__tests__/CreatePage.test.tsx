@@ -571,9 +571,7 @@ describe("CreatePage 视频合成步全自动", () => {
         "成片尚未生成，请先回到「视频合成」步完成合成后再配置发布。",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "完成，稍后手动发布" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "进入剪辑定稿" })).toBeDisabled();
   });
 
   it("直达合成步但缺少文案时只引导补齐，不自动报价扣费", async () => {

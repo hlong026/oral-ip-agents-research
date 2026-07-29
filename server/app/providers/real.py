@@ -7,7 +7,9 @@
 """
 
 import asyncio
+import functools
 import json as _json
+import subprocess
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -27,7 +29,7 @@ from .base import (
     SimilarityResult,
     StepRecoverableError,
 )
-from .cover import render_cover
+from .cover import render_cover, score_frame_quality
 from .media_quality import inspect_media
 
 logger = get_logger("oral.providers.real")
@@ -122,9 +124,28 @@ class DeepSeekLLM:
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]:
         raw = await self._chat(
             "你是短视频标题党（合规版）",
-            f"为以下口播稿生成 {count} 组适配{platform}风格的标题+话题标签：\n{script[:400]}",
+            f"为以下口播稿生成 {count} 个适配{platform}风格的标题，"
+            f"每行一个，不带序号、不带“标题：”前缀：\n{script[:400]}",
         )
         return [line.strip() for line in raw.splitlines() if line.strip()][:count]
+
+    async def generate_metadata_groups(self, script: str, platform: str, count: int = 3) -> list[dict]:
+        """成组生成发布元数据：每组标题+标签+封面文案，严格 JSON 输出避免前缀污染"""
+        raw = await self._chat(
+            "你是短视频爆款运营专家，只输出严格 JSON，不输出任何解释文字。",
+            (
+                f"为以下口播稿生成 {count} 组适配{platform}的发布方案，每组包含：\n"
+                '1. title：吸睛标题，20 字内，不带引号、序号或“标题：”前缀\n'
+                "2. tags：4~6 个话题标签，不带 # 号\n"
+                "3. coverText：封面大字文案，12 字内，制造悬念/冲突/数字对比，可用【】标出 1 个爆点词\n"
+                '只输出 JSON 数组：[{"title":"...","tags":["..."],"coverText":"..."}]\n'
+                f"口播稿：\n{script[:400]}"
+            ),
+        )
+        groups = _parse_json_array(raw)
+        if not groups:
+            raise StepRecoverableError("元数据建议 JSON 解析失败")
+        return groups[:count]
 
     # ---- 三阶段仿写引擎 ----
 
@@ -244,6 +265,28 @@ def _parse_json(raw: str) -> dict:
         return {"raw": raw}
 
 
+def _parse_json_array(raw: str) -> list:
+    """LLM 输出解析为 JSON 数组（容错：剥离代码块标记、提取首个 [ ... ] 块）"""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        text = "\n".join(lines)
+    try:
+        parsed = _json.loads(text)
+        return parsed if isinstance(parsed, list) else []
+    except _json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                parsed = _json.loads(text[start:end])
+                return parsed if isinstance(parsed, list) else []
+            except _json.JSONDecodeError:
+                pass
+        return []
+
+
 class FFmpegCompose:
     """
     FFmpeg 子进程编排（架构借鉴 MoneyPrinterTurbo，MIT）
@@ -263,9 +306,16 @@ class FFmpegCompose:
             bgm_path = await _materialize(inp.bgm_key, workdir, "bgm") if inp.bgm_key else None
             logo_path = await _materialize(inp.logo_key, workdir, "logo") if inp.logo_key else None
             subtitle_path = workdir / "subtitles.ass"
-            if inp.subtitle_words:
+            # 本机 FFmpeg 未编译 libass 时 subtitles 滤镜不存在，烧字幕会令整个 filterchain
+            # 解析失败→降级 mock→质检不过。此时跳过烧字幕并告警，保证成片仍能产出。
+            burn_subtitles = bool(inp.subtitle_words)
+            if burn_subtitles and not await _ffmpeg_has_filter("subtitles"):
+                logger.warning("ffmpeg_subtitles_filter_unavailable_skip_burn")
+                burn_subtitles = False
+            if burn_subtitles:
                 subtitle_path.write_text(
-                    _build_ass(inp.subtitle_words, width, height, inp.subtitle_style), encoding="utf-8"
+                    _build_ass(inp.subtitle_words, width, height, inp.subtitle_style, exact=inp.subtitle_exact),
+                    encoding="utf-8",
                 )
 
             output_path = workdir / "final.mp4"
@@ -275,24 +325,23 @@ class FFmpegCompose:
                 audio_path,
                 bgm_path,
                 logo_path,
-                subtitle_path if inp.subtitle_words else None,
+                subtitle_path if burn_subtitles else None,
                 output_path,
                 width,
                 height,
                 bgm_volume=inp.bgm_volume,
             )
             await _run_ffmpeg(command, limit_seconds=300)
-            await _extract_cover_frame(output_path, cover_path)
+            await _extract_cover_frame(video_path, cover_path, inp.cover_frame_ms)
             cover_bytes = cover_path.read_bytes()
-            if inp.cover_template != "none" and inp.cover_text.strip():
-                # 封面自动生成（14 号方案 §3.5）：帧底图 + 模板槽位 + 标题自动排版
-                try:
-                    cover_bytes = await asyncio.to_thread(
-                        render_cover, cover_bytes, inp.cover_text, inp.cover_template, width, height
-                    )
-                except Exception:
-                    # 模板渲染失败不阻断成片，回退原始帧封面
-                    logger.warning("cover_render_failed", exc_info=True, extra={"template": inp.cover_template})
+            # 即使选择原图模板，也统一输出目标视频比例，避免横版源帧直接成为竖版封面。
+            try:
+                cover_bytes = await asyncio.to_thread(
+                    render_cover, cover_bytes, inp.cover_text, inp.cover_template, width, height
+                )
+            except Exception:
+                # 模板渲染失败不阻断成片，回退原始帧封面。
+                logger.warning("cover_render_failed", exc_info=True, extra={"template": inp.cover_template})
             video_key = await save_bytes("compose", "final.mp4", output_path.read_bytes())
             cover_key = await save_bytes("compose", "cover.jpg", cover_bytes)
 
@@ -308,6 +357,63 @@ class FFmpegCompose:
             duration=report.duration,
             quality=report.to_dict(),
         )
+
+
+_CANDIDATE_OFFSETS_MS = (-320, -160, 0, 160, 320)
+
+
+async def extract_cover_candidate_frame(video_key: str, timestamp_ms: int) -> str:
+    """从 clean 视频源在指定时间的邻域多帧中按清晰度择优，保存候选封面帧。
+
+    锚点附近抽 ±0.32s 数帧，用 Laplacian 方差+亮度打分挑最锐利的一帧，
+    规避闭眼/运动模糊瞬间；单帧失败逐步兜底到锚点单帧、首帧。
+    """
+    with tempfile.TemporaryDirectory(prefix="oral-cover-candidate-") as directory:
+        workdir = Path(directory)
+        video_path = await _materialize(video_key, workdir, "video")
+        best = await _best_frame_near(video_path, workdir, timestamp_ms)
+        return await save_bytes("cover-candidates", f"{timestamp_ms}.jpg", best)
+
+
+async def _best_frame_near(video: Path, workdir: Path, timestamp_ms: int) -> bytes:
+    frames: list[bytes] = []
+    for idx, offset in enumerate(_CANDIDATE_OFFSETS_MS):
+        ts = timestamp_ms + offset
+        if ts < 0:
+            continue
+        frame = workdir / f"cand_{idx}.jpg"
+        try:
+            await _extract_cover_frame(video, frame, ts)
+        except StepRecoverableError:
+            continue
+        if await asyncio.to_thread(_file_nonempty, frame):
+            frames.append(frame.read_bytes())
+    if not frames:
+        # 邻域全部失败：回退到锚点单帧（_extract_cover_frame 内部再兜底首帧）
+        fallback = workdir / "cand_fallback.jpg"
+        await _extract_cover_frame(video, fallback, timestamp_ms)
+        return fallback.read_bytes()
+    if len(frames) == 1:
+        return frames[0]
+    return await asyncio.to_thread(lambda: max(frames, key=score_frame_quality))
+
+
+async def render_cover_preview_bytes(
+    video_key: str,
+    timestamp_ms: int,
+    title: str,
+    template: str,
+    width: int,
+    height: int,
+) -> bytes:
+    """所见即所得封面预览：抽帧 + 按模板叠标题，输出与成片同像素规格的 JPEG。"""
+    with tempfile.TemporaryDirectory(prefix="oral-cover-preview-") as directory:
+        workdir = Path(directory)
+        video_path = await _materialize(video_key, workdir, "video")
+        frame_path = workdir / "frame.jpg"
+        await _extract_cover_frame(video_path, frame_path, timestamp_ms)
+        frame_bytes = frame_path.read_bytes()
+        return await asyncio.to_thread(render_cover, frame_bytes, title, template, width, height)
 
 
 class ThirdPartyParser:
@@ -363,11 +469,12 @@ def _file_nonempty(path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-async def _extract_cover_frame(video: Path, cover: Path) -> None:
-    """封面底图：优先取 1s 处帧（口播开场站定后更稳），过短视频回退首帧"""
+async def _extract_cover_frame(video: Path, cover: Path, timestamp_ms: int = 1000) -> None:
+    """封面底图：按用户选择时间抽帧，过短视频回退首帧。"""
+    seconds = max(0.0, min(float(timestamp_ms) / 1000, 3.0))
     try:
         await _run_ffmpeg(
-            ["ffmpeg", "-y", "-ss", "1", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
+            ["ffmpeg", "-y", "-ss", f"{seconds:g}", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
             limit_seconds=60,
         )
         if await asyncio.to_thread(_file_nonempty, cover):
@@ -414,8 +521,10 @@ def _compose_command(
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30"
     )
     if subtitles:
-        escaped = str(subtitles).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-        video_filter += f",subtitles='{escaped}'"
+        # subtitles 滤镜参数内单引号已保护路径中的 : 与 ,，只需转义 \\ 与 '；
+        # 采用文档化的 filename= 写法，避免裸路径被误解析为选项名。
+        escaped = str(subtitles).replace("\\", "\\\\").replace("'", "\\'")
+        video_filter += f",subtitles=filename='{escaped}'"
 
     filter_parts: list[str] = []
     video_map = "0:v:0"
@@ -468,10 +577,38 @@ def _compose_command(
     return command
 
 
+@functools.lru_cache(maxsize=16)
+def _ffmpeg_has_filter_sync(name: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-filters"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == name:
+            return True
+    return False
+
+
+async def _ffmpeg_has_filter(name: str) -> bool:
+    """探测本机 FFmpeg 是否内置某滤镜（结果缓存，避免每次合成都探测）。"""
+    return await asyncio.to_thread(_ffmpeg_has_filter_sync, name)
+
+
 async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
+            # 断开 stdin：后台进程组继承终端 stdin 时 ffmpeg 读终端会触发 SIGTTIN 挂起整个服务
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -483,7 +620,9 @@ async def _run_ffmpeg(command: list[str], *, limit_seconds: float) -> None:
         await process.communicate()
         raise StepRecoverableError("FFmpeg 合成超时") from exc
     if process.returncode != 0:
-        detail = stderr.decode("utf-8", errors="replace")[-500:]
+        text = stderr.decode("utf-8", errors="replace").strip()
+        # 保留头部（含 "No such filter"/"Error parsing filterchain" 等根因）+ 尾部，避免只截尾遗漏真因
+        detail = text if len(text) <= 800 else f"{text[:400]} …… {text[-400:]}"
         raise StepRecoverableError(f"FFmpeg 合成失败(exit={process.returncode}): {detail}")
 
 
@@ -500,7 +639,7 @@ def _ass_color(hex_color: str) -> str:
 
 
 def _ass_style_line(width: int, height: int, style: dict | None) -> str:
-    """剪辑台字幕配置 → ASS Style 行（字号按 1080 基准短边缩放，位置映射九宫格）"""
+    """剪辑台字幕配置 → ASS Style 行（字号按 1080 基准短边缩放，支持全局 x/y）"""
     style = style or {}
     scale = min(width, height) / 1080
     try:
@@ -509,9 +648,14 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         base_size = 54.0
     font_size = round(max(24.0, min(120.0, base_size)) * scale)
     primary = _ass_color(str(style.get("color") or "#FFFFFF"))
-    position = str(style.get("position") or "bottom")
-    alignment = {"top": 8, "middle": 5}.get(position, 2)
-    margin_v = {"top": round(80 * scale), "middle": 0}.get(position, round(120 * scale))
+    font_family = str(style.get("fontFamily") or "Arial")
+    position = str(style.get("position") or "")
+    if "yPercent" in style:
+        alignment = 5
+        margin_v = 0
+    else:
+        alignment = {"top": 8, "middle": 5}.get(position, 2)
+        margin_v = {"top": round(80 * scale), "middle": 0}.get(position, round(120 * scale))
     stroke = style.get("stroke", 3)
     if isinstance(stroke, bool):
         stroke = 3 if stroke else 0
@@ -519,7 +663,7 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         outline = max(0, min(8, round(float(stroke))))
     except (TypeError, ValueError):
         outline = 3
-    return f"Style: Default,Arial,{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
+    return f"Style: Default,{font_family},{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
 
 
 # 字幕分行：硬断句标点立即换行；软断句标点行长达标后换行；停顿间隙/行长上限兜底
@@ -552,7 +696,7 @@ def _split_subtitle_groups(words: list) -> list[list]:
     return groups
 
 
-def _build_ass(words: list, width: int, height: int, style: dict | None = None) -> str:
+def _build_ass(words: list, width: int, height: int, style: dict | None = None, *, exact: bool = False) -> str:
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -563,9 +707,22 @@ def _build_ass(words: list, width: int, height: int, style: dict | None = None) 
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
     events: list[str] = []
-    for group in _split_subtitle_groups(words):
+    style = style or {}
+    override = ""
+    if "xPercent" in style or "yPercent" in style:
+        try:
+            x = round(width * max(0, min(100, float(style.get("xPercent", 50)))) / 100)
+            y = round(height * max(0, min(100, float(style.get("yPercent", 82)))) / 100)
+            override = "{\\pos(" + f"{x},{y}" + ")}"
+        except (TypeError, ValueError):
+            override = ""
+    groups = [[word] for word in words] if exact else _split_subtitle_groups(words)
+    for group in groups:
         text = "".join(word.word for word in group).replace("\n", " ").replace("{", "（").replace("}", "）")
-        events.append(f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},Default,,0,0,0,,{text}")
+        events.append(
+            f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},"
+            f"Default,,0,0,0,,{override}{text}"
+        )
     return header + "\n".join(events) + "\n"
 
 

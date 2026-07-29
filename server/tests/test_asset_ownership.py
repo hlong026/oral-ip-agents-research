@@ -10,7 +10,8 @@ from app.core.db import SessionLocal
 from app.modules.avatar.models import Avatar
 from app.modules.ipasset.models import Persona
 from app.modules.ipasset.schemas import PersonaUpdate
-from app.modules.pipeline.models import PipelineTask
+from app.modules.pipeline.models import PipelineRenderVersion, PipelineTask, PublicationRevision
+from app.modules.pipeline.schemas import PublicationContentIn
 from app.modules.voice.models import Voice
 
 
@@ -173,6 +174,33 @@ async def test_publish_jobs_only_use_server_owned_pipeline_artifacts(
     )
     async with SessionLocal() as db:
         db.add(task)
+        await db.flush()
+        render = PipelineRenderVersion(
+            task_id=task.id,
+            user_id=owner_id,
+            version=2,
+            base_version=1,
+            status="done",
+            idempotency_key=f"ownership:{task.id}:2",
+            video_key="compose/owned.mp4",
+            cover_key="compose/owned.jpg",
+            quality_json='{"passed": true}',
+            is_active=True,
+        )
+        db.add(render)
+        await db.flush()
+        revision = PublicationRevision(
+            user_id=owner_id,
+            task_id=task.id,
+            revision=1,
+            status="finalized",
+            render_version_id=render.id,
+            content_spec_json=PublicationContentIn(
+                title="归属校验成片",
+                subtitles={"enabled": False},
+            ).model_dump_json(),
+        )
+        db.add(revision)
         await db.commit()
 
         with pytest.raises(HTTPException) as cross_user_error:
@@ -180,40 +208,26 @@ async def test_publish_jobs_only_use_server_owned_pipeline_artifacts(
                 db,
                 "publish-other-user",
                 PublishIn(
-                    taskId=task.id,
+                    publicationRevisionId=revision.id,
                     platforms=["shipinhao"],
-                    title="跨用户",
-                    videoKey="compose/owned.mp4",
                 ),
             )
-        assert cross_user_error.value.status_code == 404
-
-        with pytest.raises(HTTPException) as mismatch_error:
-            await create_jobs(
-                db,
-                owner_id,
-                PublishIn(
-                    taskId=task.id,
-                    platforms=["shipinhao"],
-                    title="篡改资源",
-                    videoKey="compose/other-users-video.mp4",
-                ),
-            )
-        assert mismatch_error.value.status_code == 422
-        assert mismatch_error.value.detail["code"] == "PUBLISH_ASSET_MISMATCH"
+        assert cross_user_error.value.status_code == 409
+        assert cross_user_error.value.detail["code"] == "PUBLICATION_REVISION_NOT_FINALIZED"
 
         jobs = await create_jobs(
             db,
             owner_id,
             PublishIn(
-                taskId=task.id,
+                publicationRevisionId=revision.id,
                 platforms=["shipinhao"],
-                title="合法发布",
-                videoKey="compose/owned.mp4",
-                coverKey="compose/owned.jpg",
+                title="客户端伪造标题",
+                videoKey="compose/other-users-video.mp4",
+                coverKey="compose/other-users-cover.jpg",
             ),
         )
         stored = await get_job(db, jobs[0].id, owner_id)
         assert stored is not None
+        assert stored.title == "归属校验成片"
         assert stored.video_key == "compose/owned.mp4"
         assert stored.cover_key == "compose/owned.jpg"

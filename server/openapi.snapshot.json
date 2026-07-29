@@ -2232,6 +2232,302 @@
         }
       }
     },
+    "/api/v1/pipelines/{task_id}/publication-draft": {
+      "get": {
+        "tags": ["pipeline"],
+        "summary": "Get Publication Draft",
+        "operationId": "get_publication_draft_api_v1_pipelines__task_id__publication_draft_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationRevisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["pipeline"],
+        "summary": "Put Publication Draft",
+        "operationId": "put_publication_draft_api_v1_pipelines__task_id__publication_draft_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationDraftPutIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationRevisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/metadata-suggestions": {
+      "post": {
+        "tags": ["pipeline"],
+        "summary": "Metadata Suggestions",
+        "operationId": "metadata_suggestions_api_v1_pipelines__task_id__metadata_suggestions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetadataSuggestionsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/cover-candidates": {
+      "get": {
+        "tags": ["pipeline"],
+        "summary": "Cover Candidates",
+        "operationId": "cover_candidates_api_v1_pipelines__task_id__cover_candidates_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CoverCandidateOut"
+                  },
+                  "title": "Response Cover Candidates Api V1 Pipelines  Task Id  Cover Candidates Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/finalize": {
+      "post": {
+        "tags": ["pipeline"],
+        "summary": "Finalize Publication",
+        "operationId": "finalize_publication_api_v1_pipelines__task_id__finalize_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationFinalizeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicationRevisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{task_id}/publication-revisions": {
+      "get": {
+        "tags": ["pipeline"],
+        "summary": "List Publication Revisions",
+        "operationId": "list_publication_revisions_api_v1_pipelines__task_id__publication_revisions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicationRevisionOut"
+                  },
+                  "title": "Response List Publication Revisions Api V1 Pipelines  Task Id  Publication Revisions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pipelines/{task_id}/recompose": {
       "post": {
         "tags": ["pipeline"],
@@ -4475,7 +4771,7 @@
       "post": {
         "tags": ["admin"],
         "summary": "Unbind Device",
-        "description": "清空设备绑定并吊销全部刷新会话，用户可在新设备重新登录绑定",
+        "description": "解绑全部设备并吊销全部刷新会话，用户可在任意设备重新登录首绑",
         "operationId": "unbind_device_api_admin_v1_users__user_id__unbind_device_post",
         "security": [
           {
@@ -4490,6 +4786,269 @@
             "schema": {
               "type": "string",
               "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/users/{user_id}/devices": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "List Devices",
+        "description": "用户已绑定设备列表",
+        "operationId": "list_devices_api_admin_v1_users__user_id__devices_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/users/{user_id}/devices/{device_id}/unbind": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Unbind Single Device",
+        "description": "单设备解绑（删行 + 吊销对应会话，该设备 refresh 立即失效）",
+        "operationId": "unbind_single_device_api_admin_v1_users__user_id__devices__device_id__unbind_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Device Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/device-requests": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "List Device Requests",
+        "description": "设备绑定申请列表（关联用户掩码激活码与当前设备列表，供审批选择解绑目标）",
+        "operationId": "list_device_requests_api_admin_v1_device_requests_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(pending|approved|rejected|all)$",
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/device-requests/{request_id}/approve": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Approve Device Request",
+        "description": "批准申请：解绑指定旧设备腾出名额，新设备下次登录自动绑定。\n若当前设备数已 < 上限（如管理员已手动解绑），unbindDeviceId 可空直接批准。",
+        "operationId": "approve_device_request_api_admin_v1_device_requests__request_id__approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceRequestApproveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/device-requests/{request_id}/reject": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Reject Device Request",
+        "operationId": "reject_device_request_api_admin_v1_device_requests__request_id__reject_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
             }
           }
         ],
@@ -5780,6 +6339,21 @@
         ],
         "title": "ContentJobOut"
       },
+      "CoverCandidateOut": {
+        "properties": {
+          "timestampMs": {
+            "type": "integer",
+            "title": "Timestampms"
+          },
+          "imageUrl": {
+            "type": "string",
+            "title": "Imageurl"
+          }
+        },
+        "type": "object",
+        "required": ["timestampMs", "imageUrl"],
+        "title": "CoverCandidateOut"
+      },
       "CreatePipelineIn": {
         "properties": {
           "ipId": {
@@ -5879,8 +6453,7 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Platforms",
-            "default": []
+            "title": "Platforms"
           },
           "publishAt": {
             "anyOf": [
@@ -5949,6 +6522,23 @@
         "type": "object",
         "required": ["points", "reason"],
         "title": "CreditAdjustIn"
+      },
+      "DeviceRequestApproveIn": {
+        "properties": {
+          "unbindDeviceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unbinddeviceid"
+          }
+        },
+        "type": "object",
+        "title": "DeviceRequestApproveIn"
       },
       "EditConfigIn": {
         "properties": {
@@ -6095,6 +6685,11 @@
           "taskId": {
             "type": "string",
             "title": "Taskid"
+          },
+          "publicationRevisionId": {
+            "type": "string",
+            "title": "Publicationrevisionid",
+            "default": ""
           },
           "renderVersionId": {
             "type": "string",
@@ -6259,6 +6854,57 @@
         "type": "object",
         "required": ["stopped"],
         "title": "KillSwitchOut"
+      },
+      "MetadataSuggestionGroupOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "coverText": {
+            "type": "string",
+            "title": "Covertext",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": ["title", "tags"],
+        "title": "MetadataSuggestionGroupOut"
+      },
+      "MetadataSuggestionsOut": {
+        "properties": {
+          "titles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Titles"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataSuggestionGroupOut"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": ["titles", "tags"],
+        "title": "MetadataSuggestionsOut"
       },
       "ModulePriceCatalogOut": {
         "properties": {
@@ -7668,6 +8314,277 @@
         "required": ["items"],
         "title": "ProviderStatusOut"
       },
+      "PublicationContentIn": {
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schemaversion",
+            "default": 1
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "title": "Topics"
+          },
+          "subtitles": {
+            "$ref": "#/components/schemas/PublicationSubtitlesIn"
+          },
+          "cover": {
+            "$ref": "#/components/schemas/PublicationCoverIn"
+          }
+        },
+        "type": "object",
+        "required": ["title"],
+        "title": "PublicationContentIn"
+      },
+      "PublicationCoverIn": {
+        "properties": {
+          "selectedFrameMs": {
+            "type": "integer",
+            "maximum": 3000,
+            "minimum": 0,
+            "title": "Selectedframems",
+            "default": 1500
+          },
+          "template": {
+            "type": "string",
+            "enum": ["bold-bottom", "center-band", "top-title", "none"],
+            "title": "Template",
+            "default": "bold-bottom"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Text",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "PublicationCoverIn"
+      },
+      "PublicationDraftPutIn": {
+        "properties": {
+          "draftRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Draftrevision"
+          },
+          "content": {
+            "$ref": "#/components/schemas/PublicationContentIn"
+          }
+        },
+        "type": "object",
+        "required": ["draftRevision", "content"],
+        "title": "PublicationDraftPutIn"
+      },
+      "PublicationFinalizeIn": {
+        "properties": {
+          "quoteId": {
+            "type": "string",
+            "title": "Quoteid"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 8,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Idempotencykey"
+          },
+          "draftRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "title": "Draftrevision"
+          }
+        },
+        "type": "object",
+        "required": ["quoteId", "idempotencyKey", "draftRevision"],
+        "title": "PublicationFinalizeIn"
+      },
+      "PublicationRevisionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "baseRenderVersionId": {
+            "type": "string",
+            "title": "Baserenderversionid",
+            "default": ""
+          },
+          "renderVersionId": {
+            "type": "string",
+            "title": "Renderversionid",
+            "default": ""
+          },
+          "content": {
+            "$ref": "#/components/schemas/PublicationContentIn"
+          },
+          "draftRevision": {
+            "type": "integer",
+            "title": "Draftrevision"
+          },
+          "lastError": {
+            "type": "string",
+            "title": "Lasterror",
+            "default": ""
+          },
+          "finalizedAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finalizedat"
+          },
+          "createdAt": {
+            "type": "string",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "title": "Updatedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "taskId",
+          "revision",
+          "status",
+          "content",
+          "draftRevision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "PublicationRevisionOut"
+      },
+      "PublicationStyleIn": {
+        "properties": {
+          "fontFamily": {
+            "type": "string",
+            "enum": ["Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC"],
+            "title": "Fontfamily",
+            "default": "Noto Sans CJK SC"
+          },
+          "fontSize": {
+            "type": "integer",
+            "maximum": 64,
+            "minimum": 32,
+            "title": "Fontsize",
+            "default": 44
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#[0-9A-Fa-f]{6}$",
+            "title": "Color",
+            "default": "#FFFFFF"
+          },
+          "stroke": {
+            "type": "integer",
+            "maximum": 6,
+            "minimum": 0,
+            "title": "Stroke",
+            "default": 3
+          },
+          "xPercent": {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Xpercent",
+            "default": 50
+          },
+          "yPercent": {
+            "type": "integer",
+            "maximum": 100,
+            "minimum": 0,
+            "title": "Ypercent",
+            "default": 82
+          }
+        },
+        "type": "object",
+        "title": "PublicationStyleIn"
+      },
+      "PublicationSubtitleSegmentIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "startMs": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Startms"
+          },
+          "endMs": {
+            "type": "integer",
+            "minimum": 0,
+            "title": "Endms"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": ["id", "startMs", "endMs", "text"],
+        "title": "PublicationSubtitleSegmentIn"
+      },
+      "PublicationSubtitlesIn": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "source": {
+            "type": "string",
+            "enum": ["asr_aligned", "tts_fallback", "manual"],
+            "title": "Source",
+            "default": "manual"
+          },
+          "segments": {
+            "items": {
+              "$ref": "#/components/schemas/PublicationSubtitleSegmentIn"
+            },
+            "type": "array",
+            "title": "Segments"
+          },
+          "style": {
+            "$ref": "#/components/schemas/PublicationStyleIn"
+          }
+        },
+        "type": "object",
+        "title": "PublicationSubtitlesIn"
+      },
       "PublishCapabilityOut": {
         "properties": {
           "platform": {
@@ -7963,8 +8880,7 @@
           "quality": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Quality",
-            "default": {}
+            "title": "Quality"
           },
           "error": {
             "type": "string",
@@ -8536,8 +9452,7 @@
               "type": "string"
             },
             "type": "object",
-            "title": "Artifacts",
-            "default": {}
+            "title": "Artifacts"
           },
           "startedAt": {
             "anyOf": [
@@ -8810,8 +9725,7 @@
           "artifacts": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Artifacts",
-            "default": {}
+            "title": "Artifacts"
           },
           "activeRenderVersion": {
             "type": "integer",
@@ -9259,9 +10173,10 @@
       },
       "app__modules__publish__schemas__PublishIn": {
         "properties": {
-          "taskId": {
+          "publicationRevisionId": {
             "type": "string",
-            "title": "Taskid"
+            "title": "Publicationrevisionid",
+            "default": ""
           },
           "platforms": {
             "items": {
@@ -9270,17 +10185,40 @@
             "type": "array",
             "title": "Platforms"
           },
+          "accountIds": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Accountids"
+          },
+          "publishAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publishat"
+          },
+          "taskId": {
+            "type": "string",
+            "title": "Taskid",
+            "default": ""
+          },
           "title": {
             "type": "string",
-            "title": "Title"
+            "title": "Title",
+            "default": ""
           },
           "topics": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Topics",
-            "default": []
+            "title": "Topics"
           },
           "videoKey": {
             "anyOf": [
@@ -9303,21 +10241,10 @@
               }
             ],
             "title": "Coverkey"
-          },
-          "publishAt": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Publishat"
           }
         },
         "type": "object",
-        "required": ["taskId", "platforms", "title"],
+        "required": ["platforms"],
         "title": "PublishIn"
       }
     },

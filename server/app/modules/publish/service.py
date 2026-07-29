@@ -79,6 +79,7 @@ def job_to_out(j: PublishJob, account: PublishAccount | None = None) -> JobOut:
     return JobOut(
         id=j.id,
         taskId=j.task_id,
+        publicationRevisionId=j.publication_revision_id,
         renderVersionId=j.render_version_id,
         renderVersion=j.render_version,
         platform=j.platform,
@@ -103,7 +104,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
     verified = {item.strip() for item in settings.publish_verified_platforms.split(",") if item.strip()}
     capabilities: list[PublishCapabilityOut] = []
     for platform, platform_name in PLATFORM_NAMES.items():
-        if settings.app_env == "dev":
+        if settings.app_env == "dev" and not settings.publish_force_real:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -292,6 +293,8 @@ async def publish_task_video(
     topics: list[str] | None = None,
     render_version_id: str = "",
     render_version: int = 0,
+    publication_revision_id: str = "",
+    account_ids: dict[str, str] | None = None,
 ) -> list[str]:
     """供 pipeline engine step_publish 调用：为各平台建发布任务并调度执行"""
     job_ids: list[str] = []
@@ -303,6 +306,13 @@ async def publish_task_video(
         # 导致用户看到的 job.title 与实际发出的不一致
         platform_title = title.strip()[: TITLE_LIMITS[platform]]
         topics_json = json.dumps(topics or [], ensure_ascii=False)
+        capability = _capability(platform)
+        account = (
+            await _select_publish_account(db, user_id, platform, (account_ids or {}).get(platform, ""))
+            if capability.automaticEnabled
+            else None
+        )
+        target_account_id = account.id if account is not None else ""
         existing = (
             await repo.get_task_render_platform_job(
                 db,
@@ -321,10 +331,13 @@ async def publish_task_video(
             cover_key=cover_key or "",
             scheduled_at=scheduled_at or "",
             topics_json=topics_json,
+            account_id=target_account_id,
         ):
             if render_version_id and not existing.render_version_id:
                 existing.render_version_id = render_version_id
                 existing.render_version = render_version
+            if publication_revision_id and not existing.publication_revision_id:
+                existing.publication_revision_id = publication_revision_id
             job_ids.append(existing.id)
             continue
         mutable_existing = None
@@ -342,8 +355,8 @@ async def publish_task_video(
             existing.cover_key = cover_key or ""
             existing.scheduled_at = scheduled_at or ""
             existing.topics_json = topics_json
+            existing.publication_revision_id = publication_revision_id
             mutable_existing = existing
-        capability = _capability(platform)
         if not capability.automaticEnabled:
             if mutable_existing is not None:
                 job = mutable_existing
@@ -354,6 +367,7 @@ async def publish_task_video(
                     db,
                     user_id=user_id,
                     task_id=task_id,
+                    publication_revision_id=publication_revision_id,
                     render_version_id=render_version_id,
                     render_version=render_version,
                     platform=platform,
@@ -375,7 +389,6 @@ async def publish_task_video(
             )
             job_ids.append(job.id)
             continue
-        account = await repo.active_account_for(db, user_id, platform)
         if account is None:
             if mutable_existing is not None:
                 job = mutable_existing
@@ -384,6 +397,7 @@ async def publish_task_video(
                     db,
                     user_id=user_id,
                     task_id=task_id,
+                    publication_revision_id=publication_revision_id,
                     render_version_id=render_version_id,
                     render_version=render_version,
                     platform=platform,
@@ -416,6 +430,7 @@ async def publish_task_video(
                 db,
                 user_id=user_id,
                 task_id=task_id,
+                publication_revision_id=publication_revision_id,
                 render_version_id=render_version_id,
                 render_version=render_version,
                 account_id=account.id,
@@ -445,59 +460,66 @@ async def create_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[Jo
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "PLATFORM_REQUIRED", "message": "至少选择一个平台"}
         )
-    # 空标题入口拦截：SAU 上传器对空标题会在发布时才报错，提前到建任务时确定性拒绝
-    if not inp.title.strip():
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": "TITLE_REQUIRED", "message": "发布标题不能为空"}
-        )
-    from app.modules.pipeline import repository as pipeline_repo
-
-    task = await pipeline_repo.get_for_update(db, inp.taskId, user_id)
-    if task is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            detail={"code": "TASK_NOT_FOUND", "message": "任务不存在或不属于当前用户"},
-        )
-    if task.status != "done":
+    if not inp.publicationRevisionId:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能创建发布任务"},
+            detail={
+                "code": "PUBLICATION_REVISION_REQUIRED",
+                "message": "请先在剪辑页完成发布内容定稿",
+            },
         )
-    from app.modules.pipeline.service import ensure_active_render_version
+    return await _create_revision_jobs(db, user_id, inp)
 
-    active_render = await ensure_active_render_version(db, task)
-    video_key = active_render.video_key
-    cover_key = active_render.cover_key
-    quality = json.loads(active_render.quality_json or "{}")
-    if not video_key or not isinstance(quality, dict) or not quality.get("passed"):
+
+async def _create_revision_jobs(db: AsyncSession, user_id: str, inp: PublishIn) -> list[JobOut]:
+    from app.modules.pipeline import repository as pipeline_repo
+    from app.modules.pipeline.service import publication_revision_to_out
+
+    revision = await pipeline_repo.finalized_publication_revision(db, inp.publicationRevisionId, user_id)
+    if revision is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "PUBLICATION_REVISION_NOT_FINALIZED", "message": "内容尚未定稿，不能发布"},
+        )
+    render = await pipeline_repo.get_render(db, revision.render_version_id, user_id)
+    if render is None or render.status != "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RENDER_VERSION_NOT_READY", "message": "定稿成片尚未完成"},
+        )
+    quality = json.loads(render.quality_json or "{}")
+    if not render.video_key or not isinstance(quality, dict) or not quality.get("passed"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "VIDEO_NOT_READY", "message": "成片缺失或未通过质量检查"},
         )
-    if (inp.videoKey and inp.videoKey != video_key) or (inp.coverKey and inp.coverKey != cover_key):
+    content = publication_revision_to_out(revision).content
+    if not content.title.strip():
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "PUBLISH_ASSET_MISMATCH", "message": "发布资源与任务最终产物不一致"},
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "TITLE_REQUIRED", "message": "发布标题不能为空"},
         )
     ids = await publish_task_video(
         db,
         user_id,
-        inp.taskId,
+        revision.task_id,
         inp.platforms,
-        inp.title,
-        video_key,
-        cover_key or None,
+        content.title,
+        render.video_key,
+        render.cover_key or None,
         inp.publishAt,
-        inp.topics,
-        active_render.id,
-        active_render.version,
+        content.topics,
+        render.id,
+        render.version,
+        publication_revision_id=revision.id,
+        account_ids=inp.accountIds,
     )
-    jobs = []
+    jobs: list[JobOut] = []
     for jid in ids:
-        j = await repo.get_job(db, jid, user_id)
-        acc = await repo.get_account(db, j.account_id, user_id) if j and j.account_id else None
-        if j:
-            jobs.append(job_to_out(j, acc))
+        job = await repo.get_job(db, jid, user_id)
+        account = await repo.get_account(db, job.account_id, user_id) if job and job.account_id else None
+        if job:
+            jobs.append(job_to_out(job, account))
     return jobs
 
 
@@ -826,6 +848,7 @@ def _can_reuse_publish_job(
     cover_key: str,
     scheduled_at: str,
     topics_json: str,
+    account_id: str,
 ) -> bool:
     same_payload = _same_publish_payload(
         job,
@@ -834,6 +857,7 @@ def _can_reuse_publish_job(
         cover_key=cover_key,
         scheduled_at=scheduled_at,
         topics_json=topics_json,
+        account_id=account_id,
     )
     if not same_payload:
         return False
@@ -850,6 +874,7 @@ def _same_publish_payload(
     cover_key: str,
     scheduled_at: str,
     topics_json: str,
+    account_id: str,
 ) -> bool:
     return (
         job.title == title
@@ -857,7 +882,31 @@ def _same_publish_payload(
         and job.cover_key == cover_key
         and job.scheduled_at == scheduled_at
         and job.topics_json == topics_json
+        and job.account_id == account_id
     )
+
+
+async def _select_publish_account(
+    db: AsyncSession,
+    user_id: str,
+    platform: str,
+    account_id: str = "",
+) -> PublishAccount | None:
+    if account_id:
+        account = await repo.get_account(db, account_id, user_id)
+        if account is None or account.platform != platform or account.status != "active":
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "ACCOUNT_NOT_AVAILABLE", "message": "发布账号不存在、平台不匹配或已失效"},
+            )
+        return account
+    accounts = await repo.active_accounts_for(db, user_id, platform)
+    if len(accounts) > 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ACCOUNT_ID_REQUIRED", "message": "该平台存在多个可用账号，必须显式选择 accountId"},
+        )
+    return accounts[0] if accounts else None
 
 
 def _check_platform(platform: str) -> None:

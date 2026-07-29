@@ -74,6 +74,7 @@ class LLMProvider(Protocol):
     async def generate_topics(self, keyword: str, count: int = 5) -> list[str]: ...
     async def check_similarity(self, text: str, reference_text: str | None = None) -> SimilarityResult: ...
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]: ...
+    async def generate_metadata_groups(self, script: str, platform: str, count: int = 3) -> list[dict]: ...
     # ---- 三阶段仿写引擎 ----
     async def analyze_structure(self, text: str, mode: str = "full") -> dict: ...
     async def generate_outline(self, structure: dict, persona_ctx: str, intensity: str, duration: int = 60) -> str: ...
@@ -137,10 +138,12 @@ class ComposeInput:
     bgm_mode: str  # auto | custom | off
     cover_text: str
     cover_template: str = "bold-bottom"  # 封面模板（cover.COVER_TEMPLATES，none=原始帧）
+    cover_frame_ms: int = 1000
     bgm_volume: float = 0.12  # BGM 混音音量（0~1），前端剪辑台可调
     logo_key: str | None = None
     ratio: str = "9:16"
     randomize: bool = False  # 差异化参数随机化（变速/镜像/抽帧，C5）
+    subtitle_exact: bool = False
 
 
 @dataclass

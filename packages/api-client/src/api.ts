@@ -16,6 +16,12 @@ import type {
   Persona,
   PlanSku,
   PipelineMode,
+  CoverCandidate,
+  CoverPreview,
+  CoverPreviewInput,
+  MetadataSuggestions,
+  PublicationContentSpec,
+  PublicationRevision,
   PipelineRenderVersion,
   PipelineTask,
   Platform,
@@ -325,13 +331,34 @@ export const pipelineApi = {
   confirm: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/confirm`),
   cancel: (id: string) => http.post<PipelineTask>(`/pipelines/${id}/cancel`),
   stats: () => http.get<TaskStats>("/pipelines/stats"),
+  publicationDraft: (id: string) =>
+    http.get<PublicationRevision>(`/pipelines/${id}/publication-draft`),
+  savePublicationDraft: (
+    id: string,
+    input: { draftRevision: number; content: PublicationContentSpec },
+  ) =>
+    http.put<PublicationRevision>(`/pipelines/${id}/publication-draft`, input),
+  metadataSuggestions: (id: string) =>
+    http.post<MetadataSuggestions>(`/pipelines/${id}/metadata-suggestions`, {}),
+  coverCandidates: (id: string) =>
+    http.get<CoverCandidate[]>(`/pipelines/${id}/cover-candidates`),
+  coverPreview: (id: string, input: CoverPreviewInput) =>
+    http.post<CoverPreview>(`/pipelines/${id}/cover-preview`, input),
+  finalizePublication: (
+    id: string,
+    input: { quoteId: string; idempotencyKey: string; draftRevision: number },
+  ) => http.post<PublicationRevision>(`/pipelines/${id}/finalize`, input),
+  publicationRevisions: (id: string) =>
+    http.get<PublicationRevision[]>(`/pipelines/${id}/publication-revisions`),
 };
 
 // ---------- publish（F-501~F-504） ----------
 export interface CreatePublishInput {
-  taskId: string;
+  publicationRevisionId?: string;
   platforms: Platform[];
-  title: string;
+  accountIds?: Record<string, string>;
+  taskId?: string;
+  title?: string;
   topics?: string[];
   videoKey?: string;
   coverKey?: string;

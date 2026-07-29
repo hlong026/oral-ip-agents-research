@@ -8,7 +8,14 @@ from app.core.deps import get_current_user_id
 
 from . import service
 from .schemas import (
+    CoverCandidateOut,
+    CoverPreviewIn,
+    CoverPreviewOut,
     CreatePipelineIn,
+    MetadataSuggestionsOut,
+    PublicationDraftPutIn,
+    PublicationFinalizeIn,
+    PublicationRevisionOut,
     RecomposeIn,
     RenderVersionOut,
     RetryStepIn,
@@ -65,6 +72,72 @@ async def list_render_versions(
     db: AsyncSession = Depends(get_db),
 ) -> list[RenderVersionOut]:
     return await service.list_render_versions(db, task_id, user_id)
+
+
+@router.get("/{task_id}/publication-draft", response_model=PublicationRevisionOut)
+async def get_publication_draft(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> PublicationRevisionOut:
+    return await service.get_publication_draft(db, task_id, user_id)
+
+
+@router.put("/{task_id}/publication-draft", response_model=PublicationRevisionOut)
+async def put_publication_draft(
+    task_id: str,
+    inp: PublicationDraftPutIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> PublicationRevisionOut:
+    return await service.put_publication_draft(db, task_id, user_id, inp)
+
+
+@router.post("/{task_id}/metadata-suggestions", response_model=MetadataSuggestionsOut)
+async def metadata_suggestions(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> MetadataSuggestionsOut:
+    return await service.metadata_suggestions(db, task_id, user_id)
+
+
+@router.get("/{task_id}/cover-candidates", response_model=list[CoverCandidateOut])
+async def cover_candidates(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[CoverCandidateOut]:
+    return await service.cover_candidates(db, task_id, user_id)
+
+
+@router.post("/{task_id}/cover-preview", response_model=CoverPreviewOut)
+async def cover_preview(
+    task_id: str,
+    inp: CoverPreviewIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> CoverPreviewOut:
+    return await service.cover_preview(db, task_id, user_id, inp)
+
+
+@router.post("/{task_id}/finalize", response_model=PublicationRevisionOut)
+async def finalize_publication(
+    task_id: str,
+    inp: PublicationFinalizeIn,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> PublicationRevisionOut:
+    return await service.finalize_publication(db, task_id, user_id, inp)
+
+
+@router.get("/{task_id}/publication-revisions", response_model=list[PublicationRevisionOut])
+async def list_publication_revisions(
+    task_id: str,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+) -> list[PublicationRevisionOut]:
+    return await service.list_publication_revisions(db, task_id, user_id)
 
 
 @router.post("/{task_id}/recompose", response_model=RenderVersionOut)

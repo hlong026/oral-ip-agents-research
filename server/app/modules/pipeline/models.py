@@ -98,3 +98,27 @@ class PipelineRenderVersion(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
+
+
+class PublicationRevision(Base):
+    """用户确认前后的发布内容快照；finalized 后只能读取，不能原地修改。"""
+
+    __tablename__ = "publication_revisions"
+    __table_args__ = (UniqueConstraint("task_id", "revision", name="uq_publication_revision_task_revision"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    task_id: Mapped[str] = mapped_column(String(32), index=True)
+    revision: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="draft", index=True)
+    # draft | rendering | finalized | superseded
+    base_render_version_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    render_version_id: Mapped[str] = mapped_column(String(32), default="", index=True)
+    content_spec_json: Mapped[str] = mapped_column(Text, default="{}")
+    draft_revision: Mapped[int] = mapped_column(Integer, default=1)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )

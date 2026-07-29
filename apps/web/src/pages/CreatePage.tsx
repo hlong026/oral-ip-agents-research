@@ -5,13 +5,10 @@ import {
   contentApi,
   HttpError,
   pipelineApi,
-  publishApi,
   voiceApi,
 } from "@oral/api-client";
 import { useIp, useQuota, useTasks } from "@oral/stores";
 import {
-  PLATFORM_NAMES,
-  PUBLISH_PLATFORMS,
   type ModulePrice,
   type PipelineTask,
   type Platform,
@@ -41,7 +38,6 @@ import {
 import { Link, useNavigate, useSearchParams } from "react-router";
 
 import LinkSourceInput from "../components/LinkSourceInput";
-import PlatformIcon from "../components/PlatformIcon";
 import {
   confirmMeteredOperation,
   mediaDurationSeconds,
@@ -103,7 +99,17 @@ const initialWizard: Wizard = {
 
 /** 参与任务创建的入参指纹（含 ipId，与 startCompose 的 pipelineApi.create 入参对齐） */
 const composeFingerprint = (w: Wizard, ipId: string): string =>
-  [ipId, w.sourceUrl, w.topic, w.scriptText, w.voiceId, w.avatarId, w.mode, w.randomize, w.count].join("|");
+  [
+    ipId,
+    w.sourceUrl,
+    w.topic,
+    w.scriptText,
+    w.voiceId,
+    w.avatarId,
+    w.mode,
+    w.randomize,
+    w.count,
+  ].join("|");
 
 // 向导状态跨页面持久化（断点A修复）：跳转任务详情页后回到 ?step=edit 仍能恢复 taskId 与成片预览
 const WIZARD_STORAGE_KEY = "create-wizard-v1";
@@ -422,15 +428,14 @@ function StepScript({
   const startedInitialGeneration = useRef(false);
   const loadQuota = useQuota((state) => state.load);
   const currentIp = useIp((state) => state.current);
-  
+
   // 自动生成标题候选：在文案步，当有 scriptText 但没有 title 时，从文案首句生成候选
   useEffect(() => {
-    if (
-      wiz.scriptText &&
-      !wiz.title &&
-      (wiz.sourceUrl || wiz.topic)
-    ) {
-      const firstSentence = wiz.scriptText.trim().split(/[。！？!?\n]/)[0]?.slice(0, 24);
+    if (wiz.scriptText && !wiz.title && (wiz.sourceUrl || wiz.topic)) {
+      const firstSentence = wiz.scriptText
+        .trim()
+        .split(/[。！？!?\n]/)[0]
+        ?.slice(0, 24);
       if (firstSentence) {
         setWiz((w) => ({ ...w, title: firstSentence }));
       }
@@ -853,43 +858,43 @@ function StepVoice({
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {ready.map((v) => (
-        <button
-          key={v.id}
-          onClick={() => setWiz({ ...wiz, voiceId: v.id })}
-          className={`rounded-xl border p-4 text-left transition-all ${
-            wiz.voiceId === v.id
-              ? "border-brand-from/60 bg-brand-from/10"
-              : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white">
-              <Music className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{v.name}</div>
-              <div className="text-xs text-text-3">
-                {v.source === "clone" ? "克隆音色" : "内置音色"} · {v.gender}
+        {ready.map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setWiz({ ...wiz, voiceId: v.id })}
+            className={`rounded-xl border p-4 text-left transition-all ${
+              wiz.voiceId === v.id
+                ? "border-brand-from/60 bg-brand-from/10"
+                : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white">
+                <Music className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{v.name}</div>
+                <div className="text-xs text-text-3">
+                  {v.source === "clone" ? "克隆音色" : "内置音色"} · {v.gender}
+                </div>
               </div>
             </div>
+          </button>
+        ))}
+        {isLoading && (
+          <div className="col-span-full py-8 text-center text-sm text-text-3">
+            加载音色库…
           </div>
-        </button>
-      ))}
-      {isLoading && (
-        <div className="col-span-full py-8 text-center text-sm text-text-3">
-          加载音色库…
-        </div>
-      )}
-      {!isLoading && ready.length === 0 && (
-        <div className="col-span-full py-8 text-center text-sm text-text-3">
-          还没有就绪的声音，
-          <Link className="text-brand-to hover:underline" to="/assets/voices">
-            先去克隆一个 →
-          </Link>
-        </div>
-      )}
-    </div>
+        )}
+        {!isLoading && ready.length === 0 && (
+          <div className="col-span-full py-8 text-center text-sm text-text-3">
+            还没有就绪的声音，
+            <Link className="text-brand-to hover:underline" to="/assets/voices">
+              先去克隆一个 →
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -923,45 +928,48 @@ function StepAvatar({
         </p>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-      {ready.map((a) => (
-        <button
-          key={a.id}
-          onClick={() => setWiz({ ...wiz, avatarId: a.id })}
-          className={`rounded-xl border p-4 text-left transition-all ${
-            wiz.avatarId === a.id
-              ? "border-brand-from/60 bg-brand-from/10"
-              : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">
-              <Smile className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium">{a.name}</div>
-              <div className="text-xs text-text-3">
-                {a.source === "clone"
-                  ? "克隆形象"
-                  : `公共库 · ${a.style ?? "通用"}`}
+        {ready.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => setWiz({ ...wiz, avatarId: a.id })}
+            className={`rounded-xl border p-4 text-left transition-all ${
+              wiz.avatarId === a.id
+                ? "border-brand-from/60 bg-brand-from/10"
+                : "border-stroke bg-white/[0.03] hover:border-stroke-strong"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">
+                <Smile className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{a.name}</div>
+                <div className="text-xs text-text-3">
+                  {a.source === "clone"
+                    ? "克隆形象"
+                    : `公共库 · ${a.style ?? "通用"}`}
+                </div>
               </div>
             </div>
+          </button>
+        ))}
+        {isLoading && (
+          <div className="col-span-full py-8 text-center text-sm text-text-3">
+            加载数字人…
           </div>
-        </button>
-      ))}
-      {isLoading && (
-        <div className="col-span-full py-8 text-center text-sm text-text-3">
-          加载数字人…
-        </div>
-      )}
-      {!isLoading && ready.length === 0 && (
-        <div className="col-span-full py-8 text-center text-sm text-text-3">
-          还没有就绪的数字人，
-          <Link className="text-brand-to hover:underline" to="/assets/avatars">
-            先去训练一个 →
-          </Link>
-        </div>
-      )}
-    </div>
+        )}
+        {!isLoading && ready.length === 0 && (
+          <div className="col-span-full py-8 text-center text-sm text-text-3">
+            还没有就绪的数字人，
+            <Link
+              className="text-brand-to hover:underline"
+              to="/assets/avatars"
+            >
+              先去训练一个 →
+            </Link>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -998,9 +1006,9 @@ function StepEdit({
           <Scissors className="h-9 w-9" />
         </span>
         <div>
-          <div className="font-medium">可先去剪辑台精修，也可直接发布</div>
+          <div className="font-medium">进入剪辑台完成发布内容定稿</div>
           <p className="mt-1 text-sm text-text-3">
-            字幕样式 / BGM 三模式 / 封面编辑，剪辑台支持对成片精修
+            校对字幕、生成标题与标签、选择封面后，才能进入发布流程
           </p>
         </div>
         <div className="flex gap-3">
@@ -1011,10 +1019,10 @@ function StepEdit({
               navigate(taskId ? `/editor?task=${taskId}` : "/editor")
             }
           >
-            先去剪辑台看看
+            进入剪辑台
           </button>
           <button className="btn-primary" onClick={onSkip}>
-            跳过，进入发布配置 →
+            下一步，准备定稿 →
           </button>
         </div>
       </div>
@@ -1024,27 +1032,7 @@ function StepEdit({
 
 // ---------------- 第 7 步：发布配置（对着已生成的成片选平台发布） ----------------
 
-function StepPublish({
-  wiz,
-  setWiz,
-  finalVideoUrl,
-}: {
-  wiz: Wizard;
-  setWiz: (w: Wizard) => void;
-  finalVideoUrl: string;
-}) {
-  const { data: capabilities } = useQuery({
-    queryKey: ["publish-capabilities"],
-    queryFn: () => publishApi.capabilities(),
-  });
-  const toggle = (p: Platform) =>
-    setWiz({
-      ...wiz,
-      platforms: wiz.platforms.includes(p)
-        ? wiz.platforms.filter((x) => x !== p)
-        : [...wiz.platforms, p],
-    });
-
+function StepPublish({ finalVideoUrl }: { finalVideoUrl: string }) {
   if (!finalVideoUrl) {
     return (
       <div className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
@@ -1067,56 +1055,12 @@ function StepPublish({
         />
       </div>
       <div>
-        <label className="label">
-          发布平台（可仅生成不发布，稍后在发布管理手动发）
-        </label>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          {PUBLISH_PLATFORMS.map((p) => {
-            const capability = capabilities?.find(
-              (item) => item.platform === p,
-            );
-            return (
-              <button
-                key={p}
-                onClick={() => toggle(p)}
-                className={`flex items-center justify-center gap-2 rounded-xl border p-3.5 text-sm transition-all ${
-                  wiz.platforms.includes(p)
-                    ? "border-brand-from/60 bg-brand-from/10 text-text-1"
-                    : "border-stroke bg-white/[0.03] text-text-3"
-                }`}
-              >
-                <PlatformIcon platform={p} size={18} />
-                <span>
-                  {PLATFORM_NAMES[p]}
-                  <span className="block text-[10px] opacity-70">
-                    {capability?.automaticEnabled ? "自动发布" : "人工发布包"}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
+        <div className="rounded-xl border border-brand-from/30 bg-brand-from/10 p-4">
+          <div className="font-medium">发布前必须先定稿</div>
+          <p className="mt-1 text-sm text-text-3">
+            剪辑台会生成可追溯的定稿版本。发布页只读取该版本的标题、标签、封面和最终成片，避免发布内容与预览不一致。
+          </p>
         </div>
-      </div>
-      <div>
-        <label className="label">视频标题（已在配音/数字人步可编辑）</label>
-        <input
-          className="input"
-          placeholder="留空则取文案首句"
-          value={wiz.title}
-          onChange={(e) => setWiz({ ...wiz, title: e.target.value })}
-        />
-        <p className="mt-1 text-xs text-text-3">
-          当前：{wiz.title || "未设置"} · 将在发布的视频上显示
-        </p>
-      </div>
-      <div>
-        <label className="label">定时发布（F-503，留空立即发布）</label>
-        <input
-          type="datetime-local"
-          className="input"
-          value={wiz.publishAt}
-          onChange={(e) => setWiz({ ...wiz, publishAt: e.target.value })}
-        />
       </div>
     </div>
   );
@@ -1159,7 +1103,10 @@ export default function CreatePage() {
   useEffect(() => {
     // IP 列表异步加载中时跳过，避免用空 ipId 误判指纹失配
     if (!current) return;
-    if (wiz.taskId && composeFingerprint(wiz, current.id) !== wiz.taskFingerprint) {
+    if (
+      wiz.taskId &&
+      composeFingerprint(wiz, current.id) !== wiz.taskFingerprint
+    ) {
       setWiz((w) => ({ ...w, taskId: "", taskFingerprint: "" }));
     }
   }, [wiz, current]);
@@ -1202,13 +1149,12 @@ export default function CreatePage() {
     (s) => s.step === "compose",
   )?.artifacts;
   const finalVideoKey = composeArtifacts?.final_video_key ?? "";
-  const coverKey = composeArtifacts?.cover_key ?? "";
   const finalVideoUrl = getFinalVideoUrl(task);
 
   // 检测任务是否已完成且拥有最终产物（用于容错显示）
   const hasComposeResult = Boolean(
     task?.steps.some((s) => s.step === "compose" && s.status === "done") &&
-    finalVideoKey
+    finalVideoKey,
   );
 
   // 当检测到任务已完成且有 compose 产物但缺少 finalVideoUrl 时，主动刷新
@@ -1248,7 +1194,10 @@ export default function CreatePage() {
   function getFinalVideoUrl(task?: PipelineTask | null): string {
     if (!task) return "";
     // 优先级 1: 任务级 final_video_url（to_out() 生成带签名的 URL）
-    if (typeof task.artifacts?.final_video_url === "string" && task.artifacts.final_video_url) {
+    if (
+      typeof task.artifacts?.final_video_url === "string" &&
+      task.artifacts.final_video_url
+    ) {
       return task.artifacts.final_video_url;
     }
     // 优先级 2: compose 步骤的 final_video_key，需与 cover_key 一起显示
@@ -1476,43 +1425,15 @@ export default function CreatePage() {
     setWiz(initialWizard);
   };
 
-  /** 发布步提交：对已生成的成片创建发布任务；未选平台则直接完成 */
-  const publishVideo = async () => {
+  /** 发布步只负责进入定稿台；发布任务只能从 finalized revision 创建。 */
+  const publishVideo = () => {
     if (!finalVideoKey || !wiz.taskId) {
       setError("成片尚未生成，请先完成合成步");
       return;
     }
-    if (wiz.platforms.length === 0) {
-      const doneTaskId = wiz.taskId;
-      finishWizard();
-      navigate(doneTaskId ? `/tasks/${doneTaskId}` : "/tasks");
-      return;
-    }
-    setSubmitting(true);
-    setError("");
-    try {
-      await publishApi.createJobs({
-        taskId: wiz.taskId,
-        platforms: wiz.platforms,
-        title: (
-          wiz.title.trim() ||
-          wiz.scriptText.split(/[。！？!?\n]/)[0] ||
-          "口播成片"
-        ).slice(0, 30),
-        videoKey: finalVideoKey,
-        coverKey: coverKey || undefined,
-        publishAt: wiz.publishAt
-          ? new Date(wiz.publishAt).toISOString()
-          : undefined,
-      });
-      finishWizard();
-      navigate("/publish/jobs");
-    } catch (e) {
-      setError(
-        e instanceof HttpError ? e.body.message : "创建发布任务失败，请重试",
-      );
-      setSubmitting(false);
-    }
+    const doneTaskId = wiz.taskId;
+    finishWizard();
+    navigate(`/editor?task=${doneTaskId}`);
   };
 
   return (
@@ -1522,7 +1443,15 @@ export default function CreatePage() {
           第 {stepIdx + 1} 步 · {STEPS[stepIdx]?.label}
         </h1>
 
-        {step === "link" && <StepLink wiz={wiz} setWiz={setWiz} initialUrl={params.get("url")?.replace(/^https?:\/\//, '') || undefined} />}
+        {step === "link" && (
+          <StepLink
+            wiz={wiz}
+            setWiz={setWiz}
+            initialUrl={
+              params.get("url")?.replace(/^https?:\/\//, "") || undefined
+            }
+          />
+        )}
         {step === "script" && <StepScript wiz={wiz} setWiz={setWiz} />}
         {step === "voice" && <StepVoice wiz={wiz} setWiz={setWiz} />}
         {step === "avatar" && <StepAvatar wiz={wiz} setWiz={setWiz} />}
@@ -1531,10 +1460,7 @@ export default function CreatePage() {
             // 任务已创建：根据任务状态显示不同内容
             (() => {
               // 如果任务已完成且有最终产物 URL，直接显示预览（避免立即跳转导致信息丢失）
-              if (
-                task?.status === "done" &&
-                finalVideoUrl
-              ) {
+              if (task?.status === "done" && finalVideoUrl) {
                 return (
                   <div className="space-y-4">
                     <div className="glass p-5">
@@ -1555,10 +1481,10 @@ export default function CreatePage() {
                           去剪辑精修
                         </Link>
                         <Link
-                          to={`/publish/jobs?task=${wiz.taskId}`}
+                          to={`/editor?task=${wiz.taskId}`}
                           className="btn-primary px-3 py-1.5 text-xs"
                         >
-                          去发布
+                          定稿后发布
                         </Link>
                       </div>
                     </div>
@@ -1632,13 +1558,7 @@ export default function CreatePage() {
             onSkip={next}
           />
         )}
-        {step === "publish" && (
-          <StepPublish
-            wiz={wiz}
-            setWiz={setWiz}
-            finalVideoUrl={finalVideoUrl}
-          />
-        )}
+        {step === "publish" && <StepPublish finalVideoUrl={finalVideoUrl} />}
 
         {error && (
           <div className="mt-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -1697,16 +1617,8 @@ export default function CreatePage() {
                 onClick={publishVideo}
                 disabled={submitting || !finalVideoKey}
               >
-                {submitting ? (
-                  "提交中…"
-                ) : wiz.platforms.length > 0 ? (
-                  <>
-                    <Zap className="h-4 w-4" />
-                    创建发布任务 ×{wiz.platforms.length}
-                  </>
-                ) : (
-                  "完成，稍后手动发布"
-                )}
+                <Scissors className="h-4 w-4" />
+                进入剪辑定稿
               </button>
             )}
           </div>
