@@ -443,6 +443,7 @@ export interface PublicationContentSpec {
   cover: {
     selectedFrameMs: number;
     template: "bold-bottom" | "center-band" | "top-title" | "none";
+    text?: string;
   };
 }
 
@@ -466,9 +467,16 @@ export interface CoverCandidate {
   imageUrl: string;
 }
 
+export interface MetadataSuggestionGroup {
+  title: string;
+  tags: string[];
+  coverText: string;
+}
+
 export interface MetadataSuggestions {
   titles: string[];
   tags: string[];
+  groups?: MetadataSuggestionGroup[];
 }
 
 export interface TaskStats {

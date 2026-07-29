@@ -193,12 +193,19 @@ async def test_metadata_suggestions_fallback_and_cover_candidates(monkeypatch) -
         return f"cover-candidates/{timestamp_ms}.jpg"
 
     monkeypatch.setattr(service, "_extract_cover_candidate_frame", fake_extract)
+    # 测试任务的 clean key 为虚构路径，绕过源文件存在性校验
+    monkeypatch.setattr(service, "storage_exists", lambda _key: True)
     async with SessionLocal() as db:
         suggestions = await service.metadata_suggestions(db, task_id, user_id)
         candidates = await service.cover_candidates(db, task_id, user_id)
 
     assert len(suggestions.titles) == 3
-    assert 5 <= len(suggestions.tags) <= 8
+    # 新契约：每组标题对应一组独立标签+封面文字，顶层 tags 取第 1 组
+    assert len(suggestions.groups) == 3
+    assert all(group.tags for group in suggestions.groups)
+    assert all(group.coverText for group in suggestions.groups)
+    assert suggestions.tags == suggestions.groups[0].tags
+    assert 1 <= len(suggestions.tags) <= 8
     assert [item.timestampMs for item in candidates] == [300, 1500, 2700]
     assert all(item.imageUrl for item in candidates)
     assert extracted == [300, 1500, 2700]

@@ -135,6 +135,11 @@ describe("EditorPage publication draft", () => {
     vi.mocked(pipelineApi.metadataSuggestions).mockResolvedValue({
       titles: ["爆款标题 A", "爆款标题 B", "爆款标题 C"],
       tags: ["AI", "口播", "成交", "增长", "案例", "私域"],
+      groups: [
+        { title: "爆款标题 A", tags: ["AI", "口播"], coverText: "【爆点】A" },
+        { title: "爆款标题 B", tags: ["成交", "增长"], coverText: "【爆点】B" },
+        { title: "爆款标题 C", tags: ["案例", "私域"], coverText: "" },
+      ],
     });
     vi.mocked(pipelineApi.coverCandidates).mockResolvedValue([
       { timestampMs: 0, imageUrl: "/covers/0.jpg" },
@@ -209,17 +214,18 @@ describe("EditorPage publication draft", () => {
     });
   });
 
-  it("AI 标题标签候选可采用，封面候选可选择并保存", async () => {
+  it("AI 生成后自动填充第 1 组，可切换其他组，封面候选可选择并保存", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
     await user.click(
       await screen.findByRole("button", { name: "AI生成标题和标签" }),
     );
+    // 生成后自动采用第 1 组：标题+标签+封面文字直接填充
+    expect(await screen.findByLabelText("标题")).toHaveValue("爆款标题 A");
     await user.click(
-      await screen.findByRole("button", { name: "采用 爆款标题 B" }),
+      await screen.findByRole("button", { name: "采用第 2 组" }),
     );
-    await user.click(screen.getByRole("button", { name: "添加标签 AI" }));
     await user.click(screen.getByRole("button", { name: /选择 2\.0s 封面/ }));
 
     await vi.advanceTimersByTimeAsync(750);
@@ -230,27 +236,30 @@ describe("EditorPage publication draft", () => {
         expect.objectContaining({
           content: expect.objectContaining({
             title: "爆款标题 B",
-            topics: expect.arrayContaining(["AI"]),
-            cover: expect.objectContaining({ selectedFrameMs: 2000 }),
+            topics: ["成交", "增长"],
+            cover: expect.objectContaining({
+              selectedFrameMs: 2000,
+              text: "【爆点】B",
+            }),
           }),
         }),
       );
     });
   });
 
-  it("定稿前先保存草稿、报价并调用 finalize", async () => {
+  it("合成前先保存草稿、报价并调用 finalize", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
     await user.clear(await screen.findByLabelText("标题"));
     await user.type(screen.getByLabelText("标题"), "准备定稿的标题");
-    await user.click(screen.getByRole("button", { name: "定稿发布内容" }));
+    await user.click(screen.getByRole("button", { name: "合成最终视频" }));
 
     await waitFor(() => {
       expect(pipelineApi.savePublicationDraft).toHaveBeenCalled();
       expect(confirmMeteredOperation).toHaveBeenCalledWith(
         "hd_export",
-        "定稿发布内容",
+        "合成最终视频",
         { assets: 1 },
       );
       expect(pipelineApi.finalizePublication).toHaveBeenCalledWith(
@@ -262,7 +271,7 @@ describe("EditorPage publication draft", () => {
         }),
       );
     });
-    expect(await screen.findByText("去发布 →")).toHaveAttribute(
+    expect(await screen.findByText("带内容去发布 →")).toHaveAttribute(
       "href",
       `/publish/jobs?task=${task.id}&revision=pub-final-1`,
     );

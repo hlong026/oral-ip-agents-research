@@ -122,9 +122,28 @@ class DeepSeekLLM:
     async def generate_titles(self, script: str, platform: str, count: int = 3) -> list[str]:
         raw = await self._chat(
             "你是短视频标题党（合规版）",
-            f"为以下口播稿生成 {count} 组适配{platform}风格的标题+话题标签：\n{script[:400]}",
+            f"为以下口播稿生成 {count} 个适配{platform}风格的标题，"
+            f"每行一个，不带序号、不带“标题：”前缀：\n{script[:400]}",
         )
         return [line.strip() for line in raw.splitlines() if line.strip()][:count]
+
+    async def generate_metadata_groups(self, script: str, platform: str, count: int = 3) -> list[dict]:
+        """成组生成发布元数据：每组标题+标签+封面文案，严格 JSON 输出避免前缀污染"""
+        raw = await self._chat(
+            "你是短视频爆款运营专家，只输出严格 JSON，不输出任何解释文字。",
+            (
+                f"为以下口播稿生成 {count} 组适配{platform}的发布方案，每组包含：\n"
+                '1. title：吸睛标题，20 字内，不带引号、序号或“标题：”前缀\n'
+                "2. tags：4~6 个话题标签，不带 # 号\n"
+                "3. coverText：封面大字文案，12 字内，制造悬念/冲突/数字对比，可用【】标出 1 个爆点词\n"
+                '只输出 JSON 数组：[{"title":"...","tags":["..."],"coverText":"..."}]\n'
+                f"口播稿：\n{script[:400]}"
+            ),
+        )
+        groups = _parse_json_array(raw)
+        if not groups:
+            raise StepRecoverableError("元数据建议 JSON 解析失败")
+        return groups[:count]
 
     # ---- 三阶段仿写引擎 ----
 
@@ -242,6 +261,28 @@ def _parse_json(raw: str) -> dict:
             except _json.JSONDecodeError:
                 pass
         return {"raw": raw}
+
+
+def _parse_json_array(raw: str) -> list:
+    """LLM 输出解析为 JSON 数组（容错：剥离代码块标记、提取首个 [ ... ] 块）"""
+    text = raw.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = [line for line in lines if not line.strip().startswith("```")]
+        text = "\n".join(lines)
+    try:
+        parsed = _json.loads(text)
+        return parsed if isinstance(parsed, list) else []
+    except _json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]") + 1
+        if start >= 0 and end > start:
+            try:
+                parsed = _json.loads(text[start:end])
+                return parsed if isinstance(parsed, list) else []
+            except _json.JSONDecodeError:
+                pass
+        return []
 
 
 class FFmpegCompose:

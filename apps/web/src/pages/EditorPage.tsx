@@ -2,6 +2,7 @@ import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type {
   CoverCandidate,
+  MetadataSuggestionGroup,
   MetadataSuggestions,
   PipelineTask,
   PublicationContentSpec,
@@ -69,7 +70,7 @@ function defaultContent(task: PipelineTask): PublicationContentSpec {
         yPercent: 82,
       },
     },
-    cover: { selectedFrameMs: 0, template: "bold-bottom" },
+    cover: { selectedFrameMs: 0, template: "bold-bottom", text: "" },
   };
 }
 
@@ -85,7 +86,7 @@ export default function EditorPage() {
   const [params] = useSearchParams();
   const queryTaskId = params.get("task") ?? "";
   const liveTasks = useTasks((s) => s.tasks);
-  const [taskId, setTaskId] = useState(queryTaskId);
+  const taskId = queryTaskId;
   const [content, setContent] = useState<PublicationContentSpec | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
   const [currentRevision, setCurrentRevision] =
@@ -101,6 +102,7 @@ export default function EditorPage() {
   );
   const [suggesting, setSuggesting] = useState(false);
   const [saveTick, setSaveTick] = useState(0);
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const contentRef = useRef<PublicationContentSpec | null>(null);
   const revisionRef = useRef(0);
   const currentRevisionRef = useRef<PublicationRevision | null>(null);
@@ -146,10 +148,17 @@ export default function EditorPage() {
     enabled: Boolean(effectiveTaskId),
   });
 
-  const { data: coverCandidates } = useQuery({
+  const {
+    data: coverCandidates,
+    error: coverError,
+    isLoading: coverLoading,
+  } = useQuery({
     queryKey: ["cover-candidates", effectiveTaskId],
     queryFn: () => pipelineApi.coverCandidates(effectiveTaskId),
     enabled: Boolean(effectiveTaskId),
+    // 业务类错误（如缺少 clean 视频源的 409）不重试，直接把原因展示给用户
+    retry: (failureCount, err) =>
+      !(err instanceof HttpError && err.status < 500) && failureCount < 2,
   });
 
   const { data: revisions, refetch: refetchRevisions } = useQuery({
@@ -220,7 +229,7 @@ export default function EditorPage() {
     currentRevisionRef.current = refreshed;
     setCurrentRevision(refreshed);
     if (refreshed.status === "finalized") {
-      setMsg("定稿完成，可前往发布。");
+      setMsg("合成完成，标题/标签/封面/成片已就绪，可前往发布。");
       setError("");
     } else if (refreshed.status === "draft" && refreshed.lastError) {
       setMsg("");
@@ -305,12 +314,50 @@ export default function EditorPage() {
     }
   };
 
+  const toggleSection = (key: string) =>
+    setCollapsed((current) => ({ ...current, [key]: !current[key] }));
+
+  // 前端兜底清洗：去掉“第N组/标题：/序号”等前缀，防止 LLM 原文渗入输入框
+  const cleanSuggestion = (value: string) =>
+    value
+      .replace(
+        /^(第\s*\S+\s*组\s*[:：.、]?|标题\s*[:：]|标签\s*[:：]|封面\s*[:：]|\d+\s*[.、)]\s*)+/,
+        "",
+      )
+      .trim();
+
+  const applyGroup = (group: MetadataSuggestionGroup) => {
+    const title = cleanSuggestion(group.title);
+    const tags = group.tags
+      .map((tag) => cleanSuggestion(tag).replace(/^#+/, ""))
+      .filter(Boolean)
+      .slice(0, 8);
+    const coverText = cleanSuggestion(group.coverText ?? "").slice(0, 40);
+    updateContent((current) => ({
+      ...current,
+      title: title || current.title,
+      topics: tags.length ? tags : current.topics,
+      cover: { ...current.cover, text: coverText || current.cover.text },
+    }));
+  };
+
   const requestSuggestions = async () => {
     if (!effectiveTaskId) return;
     setSuggesting(true);
     setError("");
     try {
-      setSuggestions(await pipelineApi.metadataSuggestions(effectiveTaskId));
+      const next = await pipelineApi.metadataSuggestions(effectiveTaskId);
+      setSuggestions(next);
+      const first = next.groups?.[0] ?? {
+        title: next.titles[0] ?? "",
+        tags: next.tags,
+        coverText: "",
+      };
+      if (first.title) {
+        // 默认采用第 1 组：标题、标签、封面文字自动填充
+        applyGroup(first);
+        setMsg("已自动填充第 1 组建议，可在下方切换其他组");
+      }
     } catch (err) {
       setError(
         err instanceof HttpError
@@ -383,7 +430,7 @@ export default function EditorPage() {
   const finalize = async () => {
     if (!effectiveTaskId || !contentRef.current) return;
     if (!contentRef.current.title.trim()) {
-      setError("定稿标题不能为空");
+      setError("合成前请先填写标题");
       return;
     }
     setFinalizing(true);
@@ -392,7 +439,7 @@ export default function EditorPage() {
       const saved = dirty ? await saveNow() : currentRevision;
       const quoteId = await confirmMeteredOperation(
         "hd_export",
-        "定稿发布内容",
+        "合成最终视频",
         { assets: 1 },
       );
       const revision = await pipelineApi.finalizePublication(effectiveTaskId, {
@@ -407,8 +454,8 @@ export default function EditorPage() {
       setDirty(false);
       setMsg(
         revision.status === "finalized"
-          ? "定稿完成，可前往发布。"
-          : "已提交定稿，正在生成最终成片。",
+          ? "合成完成，可前往发布。"
+          : "已提交合成，正在生成最终成片，完成后左侧预览自动更新。",
       );
       await refetchRevisions();
     } catch (err) {
@@ -426,6 +473,16 @@ export default function EditorPage() {
   const firstThreeSeconds = (coverCandidates ?? []).filter(
     (candidate: CoverCandidate) => candidate.timestampMs <= 3000,
   );
+  const suggestionGroups = useMemo<MetadataSuggestionGroup[]>(() => {
+    if (!suggestions) return [];
+    if (suggestions.groups?.length) return suggestions.groups.slice(0, 3);
+    // 老版接口只有平铺 titles/tags 时降级拼组
+    return suggestions.titles.slice(0, 3).map((title) => ({
+      title,
+      tags: suggestions.tags.slice(0, 6),
+      coverText: "",
+    }));
+  }, [suggestions]);
 
   return (
     <div className="space-y-5">
@@ -436,18 +493,6 @@ export default function EditorPage() {
             成片微调 · 字幕校对 · 封面 · 定稿发布
           </p>
         </div>
-        <select
-          className="input h-10 w-72 px-3 py-0 text-sm"
-          value={effectiveTaskId}
-          onChange={(event) => setTaskId(event.target.value)}
-        >
-          <option value="">选择要精修的成片任务…</option>
-          {candidates.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.title}
-            </option>
-          ))}
-        </select>
       </div>
 
       {!detail && (
@@ -495,6 +540,8 @@ export default function EditorPage() {
                       left: `${content.subtitles.style.xPercent}%`,
                       top: `${content.subtitles.style.yPercent}%`,
                       transform: "translate(-50%, -50%)",
+                      // 不换行才能保证 translate(-50%) 是真居中，贴边时不被容器挤压折行
+                      whiteSpace: "nowrap",
                       color: content.subtitles.style.color,
                       fontFamily: content.subtitles.style.fontFamily,
                       fontSize: Math.max(
@@ -523,10 +570,10 @@ export default function EditorPage() {
                   {isRendering ? (
                     <span className="flex items-center gap-1">
                       <LoaderCircle className="h-3 w-3 animate-spin" />
-                      定稿渲染中
+                      成片合成中
                     </span>
                   ) : currentRevision?.status === "finalized" ? (
-                    "已定稿"
+                    "已合成"
                   ) : (
                     "草稿"
                   )}
@@ -536,7 +583,11 @@ export default function EditorPage() {
 
             <div className="space-y-4">
               <div className="glass p-5">
-                <div className="mb-4 flex items-center justify-between gap-3">
+                <div
+                  className={`flex cursor-pointer select-none items-center justify-between gap-3 ${collapsed.meta ? "" : "mb-4"}`}
+                  title="双击折叠/展开"
+                  onDoubleClick={() => toggleSection("meta")}
+                >
                   <h2 className="font-medium">标题和标签</h2>
                   <button
                     className="btn-ghost px-3 py-1 text-xs"
@@ -546,6 +597,8 @@ export default function EditorPage() {
                     {suggesting ? "生成中…" : "AI生成标题和标签"}
                   </button>
                 </div>
+                {!collapsed.meta && (
+                  <>
                 <label className="label" htmlFor="publication-title">
                   标题
                 </label>
@@ -561,32 +614,41 @@ export default function EditorPage() {
                     }))
                   }
                 />
-                {suggestions && (
+                {suggestionGroups.length > 0 && (
                   <div className="mt-3 space-y-2">
-                    <div className="flex flex-wrap gap-2">
-                      {suggestions.titles.slice(0, 3).map((title) => (
+                    {suggestionGroups.map((group, index) => (
+                      <div
+                        key={`${group.title}-${index}`}
+                        className="flex items-start justify-between gap-3 rounded-xl border border-stroke bg-white/[0.03] p-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-medium">
+                            {group.title}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {group.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="chip px-2 py-0.5 text-[11px]"
+                              >
+                                #{tag}
+                              </span>
+                            ))}
+                          </div>
+                          {group.coverText && (
+                            <div className="mt-1 text-xs text-text-3">
+                              封面文字：{group.coverText}
+                            </div>
+                          )}
+                        </div>
                         <button
-                          key={title}
-                          className="chip px-3 py-1 text-xs"
-                          onClick={() =>
-                            updateContent((current) => ({ ...current, title }))
-                          }
+                          className="btn-ghost shrink-0 px-3 py-1 text-xs"
+                          onClick={() => applyGroup(group)}
                         >
-                          采用 {title}
+                          采用第 {index + 1} 组
                         </button>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {suggestions.tags.slice(0, 8).map((tag) => (
-                        <button
-                          key={tag}
-                          className="chip px-3 py-1 text-xs"
-                          onClick={() => addTag(tag)}
-                        >
-                          添加标签 {tag}
-                        </button>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -617,10 +679,16 @@ export default function EditorPage() {
                     添加
                   </button>
                 </div>
+                  </>
+                )}
               </div>
 
               <div className="glass p-5">
-                <div className="mb-4 flex items-center justify-between gap-3">
+                <div
+                  className={`flex cursor-pointer select-none items-center justify-between gap-3 ${collapsed.subtitles ? "" : "mb-4"}`}
+                  title="双击折叠/展开"
+                  onDoubleClick={() => toggleSection("subtitles")}
+                >
                   <h2 className="font-medium">字幕</h2>
                   <button
                     role="switch"
@@ -643,6 +711,8 @@ export default function EditorPage() {
                     {content.subtitles.enabled ? "显示字幕" : "字幕已关闭"}
                   </button>
                 </div>
+                {!collapsed.subtitles && (
+                  <>
                 <fieldset
                   disabled={!content.subtitles.enabled}
                   className={`grid gap-4 md:grid-cols-2 ${
@@ -787,15 +857,46 @@ export default function EditorPage() {
                     </div>
                   ))}
                 </div>
+                  </>
+                )}
               </div>
 
               <div className="glass p-5">
-                <div className="mb-4 flex items-center justify-between">
+                <div
+                  className={`flex cursor-pointer select-none items-center justify-between ${collapsed.cover ? "" : "mb-4"}`}
+                  title="双击折叠/展开"
+                  onDoubleClick={() => toggleSection("cover")}
+                >
                   <h2 className="font-medium">封面</h2>
                   <span className="text-xs text-text-3">
                     当前选中 {(content.cover.selectedFrameMs / 1000).toFixed(1)}
                     s
                   </span>
+                </div>
+                {!collapsed.cover && (
+                  <>
+                <div className="mb-4">
+                  <label className="label" htmlFor="cover-text">
+                    封面文字
+                  </label>
+                  <input
+                    id="cover-text"
+                    className="input"
+                    maxLength={40}
+                    value={content.cover.text ?? ""}
+                    placeholder="12 字内爆点文案，可用【】标出 1 个爆点词"
+                    onChange={(event) =>
+                      updateContent((current) => ({
+                        ...current,
+                        cover: { ...current.cover, text: event.target.value },
+                      }))
+                    }
+                  />
+                  {content.cover.template === "none" && (
+                    <p className="mt-1 text-xs text-text-3">
+                      “原始帧”模板不叠加文字，切换其他模板后生效
+                    </p>
+                  )}
                 </div>
                 <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   {COVER_TEMPLATES.map((template) => (
@@ -819,6 +920,18 @@ export default function EditorPage() {
                     </button>
                   ))}
                 </div>
+                {coverError ? (
+                  <p className="text-xs text-danger">
+                    封面候选帧加载失败：
+                    {coverError instanceof HttpError
+                      ? coverError.body.message
+                      : "网络异常，请稍后重试"}
+                  </p>
+                ) : firstThreeSeconds.length === 0 ? (
+                  <p className="text-xs text-text-3">
+                    {coverLoading ? "候选帧提取中…" : "暂无候选帧可选"}
+                  </p>
+                ) : (
                 <div className="grid gap-3 sm:grid-cols-3">
                   {firstThreeSeconds.map((candidate) => (
                     <button
@@ -849,6 +962,9 @@ export default function EditorPage() {
                     </button>
                   ))}
                 </div>
+                )}
+                  </>
+                )}
               </div>
 
               <div className="glass flex flex-wrap items-center gap-3 p-4">
@@ -873,14 +989,18 @@ export default function EditorPage() {
                   }
                   onClick={() => void finalize()}
                 >
-                  {finalizing ? "定稿中…" : "定稿发布内容"}
+                  {finalizing
+                    ? "提交合成中…"
+                    : isRendering
+                      ? "成片合成中…"
+                      : "合成最终视频"}
                 </button>
                 {currentRevision?.status === "finalized" && (
                   <Link
                     to={`/publish/jobs?task=${detail.id}&revision=${currentRevision.id}`}
-                    className="btn-ghost text-xs"
+                    className="btn-primary px-5 text-sm"
                   >
-                    去发布 →
+                    带内容去发布 →
                   </Link>
                 )}
               </div>

@@ -87,6 +87,18 @@ class MockLLM:
         base = script.strip()[:12] or "口播干货"
         return [f"{base}，第 {i + 1} 点最关键 #{platform} 干货" for i in range(count)]
 
+    async def generate_metadata_groups(self, script: str, platform: str, count: int = 3) -> list[dict]:
+        await asyncio.sleep(0.5)
+        base = script.strip()[:12] or "口播干货"
+        return [
+            {
+                "title": f"{base}，第 {i + 1} 点最关键",
+                "tags": [f"{platform}干货", "知识分享", f"重点{i + 1}", "口播"],
+                "coverText": f"【第{i + 1}点】太关键了",
+            }
+            for i in range(count)
+        ]
+
     # ---- 三阶段仿写引擎 Mock ----
 
     async def analyze_structure(self, text: str, mode: str = "full") -> dict:

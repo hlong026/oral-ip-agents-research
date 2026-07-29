@@ -6453,8 +6453,7 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Platforms",
-            "default": []
+            "title": "Platforms"
           },
           "publishAt": {
             "anyOf": [
@@ -6856,6 +6855,29 @@
         "required": ["stopped"],
         "title": "KillSwitchOut"
       },
+      "MetadataSuggestionGroupOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "coverText": {
+            "type": "string",
+            "title": "Covertext",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": ["title", "tags"],
+        "title": "MetadataSuggestionGroupOut"
+      },
       "MetadataSuggestionsOut": {
         "properties": {
           "titles": {
@@ -6871,6 +6893,13 @@
             },
             "type": "array",
             "title": "Tags"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/MetadataSuggestionGroupOut"
+            },
+            "type": "array",
+            "title": "Groups"
           }
         },
         "type": "object",
@@ -8332,6 +8361,12 @@
             "enum": ["bold-bottom", "center-band", "top-title", "none"],
             "title": "Template",
             "default": "bold-bottom"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Text",
+            "default": ""
           }
         },
         "type": "object",
@@ -8541,8 +8576,7 @@
               "$ref": "#/components/schemas/PublicationSubtitleSegmentIn"
             },
             "type": "array",
-            "title": "Segments",
-            "default": []
+            "title": "Segments"
           },
           "style": {
             "$ref": "#/components/schemas/PublicationStyleIn"
@@ -8846,8 +8880,7 @@
           "quality": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Quality",
-            "default": {}
+            "title": "Quality"
           },
           "error": {
             "type": "string",
@@ -9419,8 +9452,7 @@
               "type": "string"
             },
             "type": "object",
-            "title": "Artifacts",
-            "default": {}
+            "title": "Artifacts"
           },
           "startedAt": {
             "anyOf": [
@@ -9693,8 +9725,7 @@
           "artifacts": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Artifacts",
-            "default": {}
+            "title": "Artifacts"
           },
           "activeRenderVersion": {
             "type": "integer",
@@ -10159,8 +10190,7 @@
               "type": "string"
             },
             "type": "object",
-            "title": "Accountids",
-            "default": {}
+            "title": "Accountids"
           },
           "publishAt": {
             "anyOf": [
@@ -10188,8 +10218,7 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Topics",
-            "default": []
+            "title": "Topics"
           },
           "videoKey": {
             "anyOf": [

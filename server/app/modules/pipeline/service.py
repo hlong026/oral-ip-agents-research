@@ -4,6 +4,7 @@
 
 import asyncio
 import json
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -24,6 +25,7 @@ from .schemas import (
     CoverCandidateOut,
     CreatePipelineIn,
     EditConfigIn,
+    MetadataSuggestionGroupOut,
     MetadataSuggestionsOut,
     PublicationContentIn,
     PublicationDraftPutIn,
@@ -575,6 +577,37 @@ async def put_publication_draft(
     return publication_revision_to_out(draft)
 
 
+_SUGGESTION_NOISE_RE = re.compile(
+    r"^(第\s*[\d一二三四五六七八九十]+\s*组\s*[:：.、]?|标题\s*[:：]|标签\s*[:：]|封面\s*[:：]|[\d]+\s*[.、)]\s*)+"
+)
+
+
+def _clean_suggestion_text(value: object, limit: int = 60) -> str:
+    """清洗 LLM 建议文本：去“第N组/标题：/序号”前缀与包裹引号，避免原文直接渗入输入框"""
+    text = str(value or "").strip().strip('"“”')
+    text = _SUGGESTION_NOISE_RE.sub("", text).strip()
+    return text[:limit]
+
+
+def _normalize_suggestion_groups(raw_groups: list) -> list[MetadataSuggestionGroupOut]:
+    groups: list[MetadataSuggestionGroupOut] = []
+    for raw in raw_groups:
+        if not isinstance(raw, dict):
+            continue
+        title = _clean_suggestion_text(raw.get("title"), 40)
+        if not title:
+            continue
+        tags_raw = raw.get("tags")
+        tags = [
+            _clean_suggestion_text(item, 20).lstrip("#")
+            for item in (tags_raw if isinstance(tags_raw, list) else [])
+        ]
+        tags = [item for item in tags if item][:6]
+        cover_text = _clean_suggestion_text(raw.get("coverText"), 20)
+        groups.append(MetadataSuggestionGroupOut(title=title, tags=tags, coverText=cover_text))
+    return groups[:3]
+
+
 async def metadata_suggestions(
     db: AsyncSession,
     task_id: str,
@@ -583,46 +616,45 @@ async def metadata_suggestions(
     task = await _must_get(db, task_id, user_id)
     content = _default_publication_content(task)
     title = content.title.strip() or task.title or "口播视频"
-    tags = content.topics or [item for item in [task.topic.strip()] if item]
     script = task.script_text or str(json.loads(task.artifacts_json or "{}").get("script") or "")
+    groups: list[MetadataSuggestionGroupOut] = []
     try:
         from app.providers.registry import registry
 
-        titles, _ = await registry.run_with_fallback(
+        raw_groups, _ = await registry.run_with_fallback(
             "llm",
             registry.llm_chain,
-            "generate_titles",
+            "generate_metadata_groups",
             script or title,
             "douyin",
             3,
             trace_id=task.trace_id,
             task_id=task.id,
         )
-        provider_tags, _ = await registry.run_with_fallback(
-            "llm",
-            registry.llm_chain,
-            "generate_topics",
-            task.topic or script or title,
-            8,
-            trace_id=task.trace_id,
-            task_id=task.id,
-        )
-        titles = [item.strip() for item in titles if str(item).strip()][:3]
-        tags = [item.strip().lstrip("#") for item in provider_tags if str(item).strip()][:8]
+        groups = _normalize_suggestion_groups(raw_groups if isinstance(raw_groups, list) else [])
     except Exception:  # noqa: BLE001
         logger.warning("publication_metadata_suggestion_fallback", task_id=task_id, user_id=user_id)
-        titles = []
-    if not tags:
-        tags = ["口播", "知识分享"]
-    while len(tags) < 5:
-        tags.append(["短视频", "个人IP", "内容运营"][len(tags) % 3])
-    if not titles:
-        titles = [title, title[:20] + "完整版" if len(title) > 8 else f"{title}指南", f"{title[:18]}实战"]
-    while len(titles) < 3:
-        titles.append(f"{title[:18]}发布版{len(titles) + 1}")
+    if not groups:
+        # 降级兑底：用任务标题/话题拼出 3 组可用建议，保证前端交互不中断
+        base_tags = content.topics or [item for item in [task.topic.strip()] if item] or ["口播", "知识分享"]
+        fillers = ["短视频", "个人IP", "内容运营"]
+        fallback_titles = [
+            title,
+            title[:20] + "完整版" if len(title) > 8 else f"{title}指南",
+            f"{title[:18]}实战",
+        ]
+        groups = [
+            MetadataSuggestionGroupOut(
+                title=item[:40],
+                tags=(base_tags + [fillers[index % 3]])[:6],
+                coverText=item[:12],
+            )
+            for index, item in enumerate(fallback_titles)
+        ]
     return MetadataSuggestionsOut(
-        titles=titles[:3],
-        tags=tags[:8],
+        titles=[group.title for group in groups][:3],
+        tags=(groups[0].tags if groups else [])[:8],
+        groups=groups,
     )
 
 
@@ -644,6 +676,15 @@ async def cover_candidates(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "CLEAN_MASTER_REQUIRED", "message": "无可用于提取封面的 clean 视频源"},
+        )
+    if not storage_exists(clean_key):
+        # 源文件已丢失（如本地存储被清理），明确告知而非误导“稍后重试”
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "CLEAN_MASTER_MISSING",
+                "message": "成片源文件已不存在（可能被清理），请重新生成成片后再选封面",
+            },
         )
     cache = artifacts.get("cover_candidates")
     if not isinstance(cache, dict):
