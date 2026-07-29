@@ -40,6 +40,7 @@ async def _probe_media_path(path: Path) -> dict | None:
             "-of",
             "json",
             str(path),
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -89,6 +90,7 @@ async def extract_audio_key(key: str) -> bytes:
                 "-b:a",
                 "64k",
                 str(output),
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -132,6 +134,7 @@ async def extract_audio_bytes(data: bytes, suffix: str) -> bytes:
                 "-b:a",
                 "64k",
                 str(output),
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -175,6 +178,7 @@ async def transcode_audio_to_m4a(data: bytes, suffix: str) -> bytes:
                 "-movflags",
                 "+faststart",
                 str(output),
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -238,6 +242,7 @@ async def probe_duration(
             "-of",
             "default=noprint_wrappers=1:nokey=1",
             video_url,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

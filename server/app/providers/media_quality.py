@@ -127,6 +127,7 @@ async def _run(command: list[str], *, limit_seconds: float) -> str:
     try:
         process = await asyncio.create_subprocess_exec(
             *command,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -158,6 +159,7 @@ async def _mean_volume(source: str) -> float | None:
             "-f",
             "null",
             "-",
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
