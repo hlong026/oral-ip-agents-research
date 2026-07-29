@@ -110,6 +110,11 @@ class Settings(BaseSettings):
     publish_cookie_heartbeat_min: int = 30  # Cookie 心跳检测间隔（分钟）
     # 仅列出已经用真实账号验收通过的平台；未列出平台只提供完整人工发布包。
     publish_verified_platforms: str = ""
+    # 本机验证开关：dev 环境下也强制使用真实发布驱动（真实扫码绑定/发布），
+    # 而不改动 app_env——避免切到 test 触发 StubBroker 导致后台队列静默失效。
+    # 注意：仅开此开关不够，还需把目标平台加入 publish_verified_platforms，
+    # 否则扫码入口会因 AUTOMATION_NOT_VERIFIED 返回 409。
+    publish_force_real: bool = False
 
     # 抖音 IM 私信（启用后必须配置真实 APP_KEY；禁止 Mock 结果进入发送状态）
     im_enabled: bool = False

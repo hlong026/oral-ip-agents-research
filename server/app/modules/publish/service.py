@@ -104,7 +104,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
     verified = {item.strip() for item in settings.publish_verified_platforms.split(",") if item.strip()}
     capabilities: list[PublishCapabilityOut] = []
     for platform, platform_name in PLATFORM_NAMES.items():
-        if settings.app_env == "dev":
+        if settings.app_env == "dev" and not settings.publish_force_real:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
