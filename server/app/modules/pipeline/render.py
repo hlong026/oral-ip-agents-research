@@ -11,7 +11,7 @@ from app.modules.billing.models import CreditReservation
 
 from . import repository as repo
 from .engine import _compose_with_ctx
-from .models import PipelineRenderVersion
+from .models import PipelineRenderVersion, PublicationRevision
 from .schemas import EditConfigIn
 
 logger = get_logger("oral.pipeline.render")
@@ -25,6 +25,20 @@ def _apply_config(artifacts: dict, config: EditConfigIn) -> dict:
     updated["bgm_volume"] = config.bgmVolume / 100
     updated["cover_template"] = config.coverTemplate
     return updated
+
+
+def _apply_raw_render_config(artifacts: dict, raw_config: dict) -> dict:
+    if raw_config.get("publication_revision_id"):
+        updated = dict(artifacts)
+        updated["publication_revision_id"] = raw_config["publication_revision_id"]
+        updated["content"] = raw_config.get("content") or {}
+        updated["clean_video_key"] = raw_config.get("clean_video_key") or artifacts.get("clean_video_key") or ""
+        updated["avatar_video_key"] = updated["clean_video_key"] or artifacts.get("avatar_video_key") or ""
+        updated["subtitle_enabled"] = bool(raw_config.get("subtitleEnabled"))
+        updated["subtitle_style"] = raw_config.get("subtitleStyle") or {}
+        updated["cover_template"] = raw_config.get("coverTemplate") or "bold-bottom"
+        return updated
+    return _apply_config(artifacts, EditConfigIn.model_validate(raw_config))
 
 
 async def run_render_version(render_id: str) -> None:
@@ -45,8 +59,8 @@ async def run_render_version(render_id: str) -> None:
             return
 
         if render.status != "rendered":
-            config = EditConfigIn.model_validate(json.loads(render.config_json or "{}"))
-            artifacts = _apply_config(json.loads(task.artifacts_json or "{}"), config)
+            raw_config = json.loads(render.config_json or "{}")
+            artifacts = _apply_raw_render_config(json.loads(task.artifacts_json or "{}"), raw_config)
             try:
                 result = await _compose_with_ctx(task, artifacts)
                 quality = result.get("quality")
@@ -113,10 +127,11 @@ async def _settle_and_activate(db, render_id: str) -> None:
     task = await repo.get(db, render.task_id, render.user_id) if render else None
     if render is None or task is None or render.status != "rendered":
         return
-    config = EditConfigIn.model_validate(json.loads(render.config_json or "{}"))
+    raw_config = json.loads(render.config_json or "{}")
     # 同步顶层键（subtitle_enabled/subtitle_style/bgm/cover_template）：
     # 主流水线重跑 compose 步只读顶层键，需沿用激活版剪辑配置而非仅存 edit_config
-    artifacts = _apply_config(json.loads(task.artifacts_json or "{}"), config)
+    config = EditConfigIn.model_validate(raw_config)
+    artifacts = _apply_raw_render_config(json.loads(task.artifacts_json or "{}"), raw_config)
     artifacts.update(
         {
             "final_video_key": render.video_key,
@@ -140,6 +155,23 @@ async def _settle_and_activate(db, render_id: str) -> None:
     render.error = ""
     task.active_render_version = render.version
     task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
+    revision = await _linked_revision(db, render, raw_config)
+    if revision is not None:
+        await db.execute(
+            update(PublicationRevision)
+            .where(
+                PublicationRevision.task_id == task.id,
+                PublicationRevision.user_id == render.user_id,
+                PublicationRevision.status == "finalized",
+                PublicationRevision.id != revision.id,
+            )
+            .values(status="superseded")
+        )
+        revision.status = "finalized"
+        revision.last_error = ""
+        from datetime import UTC, datetime
+
+        revision.finalized_at = datetime.now(UTC)
     await db.commit()
     logger.info(
         "pipeline_render_activated",
@@ -166,4 +198,28 @@ async def _fail_render(db, render: PipelineRenderVersion, message: str) -> None:
     current.status = "failed"
     current.error = message[:500]
     current.queue_message_id = ""
+    raw_config = json.loads(current.config_json or "{}")
+    revision = await _linked_revision(db, current, raw_config)
+    if revision is not None:
+        revision.status = "draft"
+        revision.last_error = message[:500]
     await db.commit()
+
+
+async def _linked_revision(db, render: PipelineRenderVersion, raw_config: dict) -> PublicationRevision | None:
+    from sqlalchemy import select
+
+    revision_id = str(raw_config.get("publication_revision_id") or "")
+    revision = await db.get(PublicationRevision, revision_id) if revision_id else None
+    if revision is None:
+        revision = (
+            await db.execute(
+                select(PublicationRevision).where(
+                    PublicationRevision.render_version_id == render.id,
+                    PublicationRevision.user_id == render.user_id,
+                )
+            )
+        ).scalar_one_or_none()
+    if revision is None or revision.user_id != render.user_id or revision.render_version_id != render.id:
+        return None
+    return revision

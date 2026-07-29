@@ -1,10 +1,11 @@
 import { pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
-import type { PipelineRenderVersion, PipelineTask } from "@oral/types";
+import type { PipelineTask, PublicationRevision } from "@oral/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { confirmMeteredOperation } from "../lib/meteredOperation";
 import EditorPage from "../pages/EditorPage";
 
@@ -17,9 +18,12 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       list: vi.fn(),
       get: vi.fn(),
       renderVersions: vi.fn(),
-      recompose: vi.fn(),
-      cancelRender: vi.fn(),
-      retryStep: vi.fn(),
+      publicationDraft: vi.fn(),
+      savePublicationDraft: vi.fn(),
+      metadataSuggestions: vi.fn(),
+      coverCandidates: vi.fn(),
+      finalizePublication: vi.fn(),
+      publicationRevisions: vi.fn(),
     },
   };
 });
@@ -53,59 +57,46 @@ const task: PipelineTask = {
   quotaCost: 3,
   artifacts: {
     final_video_url: "/media/compose/v1.mp4?exp=1&sig=test",
-    script: "这是用于编辑器测试的口播文案。",
+    script: "第一句。第二句。",
   },
   activeRenderVersion: 1,
   createdAt: "2026-07-27T00:00:00Z",
   updatedAt: "2026-07-27T00:00:00Z",
 };
 
-const activeRender: PipelineRenderVersion = {
-  id: "render-v1",
+const draft: PublicationRevision = {
+  id: "pub-draft-1",
   taskId: task.id,
-  version: 1,
-  baseVersion: 0,
-  status: "done",
-  config: {
-    subtitleEnabled: true,
-    subtitleStyle: {
-      fontSize: 52,
-      color: "#FDE047",
-      position: "top",
-      stroke: 4,
+  revision: 1,
+  status: "draft",
+  baseRenderVersionId: "render-v1",
+  renderVersionId: null,
+  draftRevision: 3,
+  lastError: "",
+  content: {
+    schemaVersion: 1,
+    title: "原始标题",
+    topics: ["旧标签"],
+    subtitles: {
+      enabled: true,
+      source: "asr_aligned",
+      segments: [
+        { id: "s1", startMs: 0, endMs: 1200, text: "第一句" },
+        { id: "s2", startMs: 1200, endMs: 2400, text: "第二句" },
+      ],
+      style: {
+        fontFamily: "PingFang SC",
+        fontSize: 44,
+        color: "#FFFFFF",
+        stroke: 2,
+        xPercent: 50,
+        yPercent: 82,
+      },
     },
-    bgmMode: "off",
-    bgmVolume: 0,
-    coverTemplate: "center-band",
+    cover: { selectedFrameMs: 0, template: "bold-bottom" },
   },
-  videoUrl: "/media/compose/v1.mp4?exp=1&sig=test",
-  coverUrl: "/media/compose/v1.jpg?exp=1&sig=test",
-  quality: { passed: true },
-  error: "",
-  isActive: true,
   createdAt: "2026-07-27T00:00:00Z",
   updatedAt: "2026-07-27T00:00:00Z",
-};
-
-const failedRender: PipelineRenderVersion = {
-  ...activeRender,
-  id: "render-v2-failed",
-  version: 2,
-  baseVersion: 1,
-  status: "failed",
-  config: {
-    ...activeRender.config,
-    subtitleStyle: {
-      ...activeRender.config.subtitleStyle,
-      fontSize: 56,
-    },
-  },
-  videoUrl: null,
-  coverUrl: null,
-  quality: {},
-  error: "重新合成失败，请稍后重试",
-  isActive: false,
-  updatedAt: "2026-07-27T00:01:00Z",
 };
 
 function renderEditor() {
@@ -121,8 +112,10 @@ function renderEditor() {
   );
 }
 
-describe("EditorPage 原子重合成", () => {
+describe("EditorPage publication draft", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.mocked(pipelineApi.list).mockResolvedValue({
       items: [task],
       total: 1,
@@ -130,114 +123,202 @@ describe("EditorPage 原子重合成", () => {
       pageSize: 20,
     });
     vi.mocked(pipelineApi.get).mockResolvedValue(task);
-    vi.mocked(pipelineApi.renderVersions).mockResolvedValue([activeRender]);
-    vi.mocked(pipelineApi.recompose).mockResolvedValue({
-      ...activeRender,
-      id: "render-v2",
-      version: 2,
-      baseVersion: 1,
-      status: "pending",
-      isActive: false,
+    vi.mocked(pipelineApi.renderVersions).mockResolvedValue([]);
+    vi.mocked(pipelineApi.publicationDraft).mockResolvedValue(draft);
+    vi.mocked(pipelineApi.savePublicationDraft).mockImplementation(
+      async (_id, input) => ({
+        ...draft,
+        content: input.content,
+        draftRevision: input.draftRevision + 1,
+      }),
+    );
+    vi.mocked(pipelineApi.metadataSuggestions).mockResolvedValue({
+      titles: ["爆款标题 A", "爆款标题 B", "爆款标题 C"],
+      tags: ["AI", "口播", "成交", "增长", "案例", "私域"],
     });
-    vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-hd-export");
+    vi.mocked(pipelineApi.coverCandidates).mockResolvedValue([
+      { timestampMs: 0, imageUrl: "/covers/0.jpg" },
+      { timestampMs: 1000, imageUrl: "/covers/1.jpg" },
+      { timestampMs: 2000, imageUrl: "/covers/2.jpg" },
+      { timestampMs: 3000, imageUrl: "/covers/3.jpg" },
+    ]);
+    vi.mocked(pipelineApi.finalizePublication).mockResolvedValue({
+      ...draft,
+      status: "finalized",
+      id: "pub-final-1",
+      renderVersionId: "render-v2",
+    });
+    vi.mocked(pipelineApi.publicationRevisions).mockResolvedValue([]);
+    vi.mocked(confirmMeteredOperation).mockResolvedValue("quote-finalize");
     useTasks.setState({ tasks: {} });
   });
 
-  it("恢复活动版本配置，并用单次报价调用版本化重合成接口", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("编辑字幕、字体和拖动坐标后用 CAS 自动保存", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
-    expect(await screen.findByText("字号（52px）")).toBeInTheDocument();
-    fireEvent.change(screen.getAllByRole("slider")[0]!, {
-      target: { value: "56" },
+    const subtitle = await screen.findByDisplayValue("第二句");
+    await user.clear(subtitle);
+    await user.type(subtitle, "第二句已校对");
+    await user.selectOptions(
+      screen.getByLabelText("字幕字体"),
+      "Source Han Sans SC",
+    );
+
+    const overlay = screen.getByTestId("subtitle-overlay");
+    Object.defineProperty(overlay.parentElement, "getBoundingClientRect", {
+      value: () => ({ left: 0, top: 0, width: 200, height: 400 }),
     });
-    fireEvent.click(screen.getByRole("button", { name: "保存并重新合成" }));
+    fireEvent.pointerDown(overlay, { clientX: 100, clientY: 328 });
+    window.dispatchEvent(
+      new MouseEvent("pointermove", {
+        clientX: 80,
+        clientY: 240,
+        bubbles: true,
+      }),
+    );
+    window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+
+    await vi.advanceTimersByTimeAsync(750);
 
     await waitFor(() => {
-      expect(confirmMeteredOperation).toHaveBeenCalledWith(
-        "hd_export",
-        "重新合成成片",
-        { assets: 1 },
-      );
-      expect(pipelineApi.recompose).toHaveBeenCalledWith(
+      expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
         task.id,
         expect.objectContaining({
-          quoteId: "quote-hd-export",
-          baseVersion: 1,
-          idempotencyKey: expect.any(String),
-          config: expect.objectContaining({
-            subtitleEnabled: true,
-            subtitleStyle: expect.objectContaining({ fontSize: 56 }),
-            bgmMode: "off",
-            bgmVolume: 0,
-            coverTemplate: "center-band",
+          content: expect.objectContaining({
+            subtitles: expect.objectContaining({
+              segments: expect.arrayContaining([
+                expect.objectContaining({
+                  id: "s2",
+                  text: expect.stringContaining("第二句已校对"),
+                }),
+              ]),
+              style: expect.objectContaining({
+                fontFamily: "Source Han Sans SC",
+                xPercent: 40,
+                yPercent: 60,
+              }),
+            }),
           }),
         }),
       );
     });
-    expect(pipelineApi.retryStep).not.toHaveBeenCalled();
   });
 
-  it("展示失败版本并保留失败配置供重新报价重试", async () => {
-    vi.mocked(pipelineApi.renderVersions).mockResolvedValue([
-      failedRender,
-      activeRender,
-    ]);
-
+  it("AI 标题标签候选可采用，封面候选可选择并保存", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
-    expect(
-      await screen.findByText("重新合成失败，请稍后重试"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("字号（56px）")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "保存并重新合成" }),
-    ).toBeEnabled();
-  });
+    await user.click(
+      await screen.findByRole("button", { name: "AI生成标题和标签" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "采用 爆款标题 B" }),
+    );
+    await user.click(screen.getByRole("button", { name: "添加标签 AI" }));
+    await user.click(screen.getByRole("button", { name: /选择 2\.0s 封面/ }));
 
-  it("关闭字幕开关后预览隐藏字幕，保存提交 subtitleEnabled=false", async () => {
-    renderEditor();
-
-    const toggle = await screen.findByRole("switch", { name: "显示字幕" });
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-    fireEvent.click(toggle);
-
-    expect(
-      screen.getByRole("switch", { name: "字幕已关闭" }),
-    ).toHaveAttribute("aria-checked", "false");
-    expect(
-      screen.getByText("重新合成后成片将不含字幕"),
-    ).toBeInTheDocument();
-    // 预览叠层随开关隐藏（取脚本第三句作为预览样本）
-    expect(screen.queryByText(/字幕效果实时预览/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "保存并重新合成" }));
+    await vi.advanceTimersByTimeAsync(750);
 
     await waitFor(() => {
-      expect(pipelineApi.recompose).toHaveBeenCalledWith(
+      expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
         task.id,
         expect.objectContaining({
-          config: expect.objectContaining({ subtitleEnabled: false }),
+          content: expect.objectContaining({
+            title: "爆款标题 B",
+            topics: expect.arrayContaining(["AI"]),
+            cover: expect.objectContaining({ selectedFrameMs: 2000 }),
+          }),
         }),
       );
     });
   });
 
-  it("旧渲染版本配置缺 subtitleEnabled 字段时默认视为开启", async () => {
-    const legacyConfig: Partial<PipelineRenderVersion["config"]> = {
-      ...activeRender.config,
-    };
-    delete legacyConfig.subtitleEnabled;
-    vi.mocked(pipelineApi.renderVersions).mockResolvedValue([
-      {
-        ...activeRender,
-        config: legacyConfig as PipelineRenderVersion["config"],
-      },
-    ]);
-
+  it("定稿前先保存草稿、报价并调用 finalize", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
-    expect(
-      await screen.findByRole("switch", { name: "显示字幕" }),
-    ).toHaveAttribute("aria-checked", "true");
+    await user.clear(await screen.findByLabelText("标题"));
+    await user.type(screen.getByLabelText("标题"), "准备定稿的标题");
+    await user.click(screen.getByRole("button", { name: "定稿发布内容" }));
+
+    await waitFor(() => {
+      expect(pipelineApi.savePublicationDraft).toHaveBeenCalled();
+      expect(confirmMeteredOperation).toHaveBeenCalledWith(
+        "hd_export",
+        "定稿发布内容",
+        { assets: 1 },
+      );
+      expect(pipelineApi.finalizePublication).toHaveBeenCalledWith(
+        task.id,
+        expect.objectContaining({
+          quoteId: "quote-finalize",
+          draftRevision: 4,
+          idempotencyKey: expect.any(String),
+        }),
+      );
+    });
+    expect(await screen.findByText("去发布 →")).toHaveAttribute(
+      "href",
+      `/publish/jobs?task=${task.id}&revision=pub-final-1`,
+    );
+  });
+
+  it("保存请求期间继续编辑时不会被旧响应覆盖", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let resolveFirst: ((value: PublicationRevision) => void) | undefined;
+    let saveCount = 0;
+    vi.mocked(pipelineApi.savePublicationDraft).mockImplementation(
+      async (_id, input) => {
+        saveCount += 1;
+        if (saveCount === 1) {
+          return await new Promise<PublicationRevision>((resolve) => {
+            resolveFirst = resolve;
+          });
+        }
+        return {
+          ...draft,
+          content: input.content,
+          draftRevision: input.draftRevision + 1,
+        };
+      },
+    );
+    renderEditor();
+
+    const title = await screen.findByLabelText("标题");
+    await user.clear(title);
+    await user.type(title, "第一次编辑");
+    await vi.advanceTimersByTimeAsync(700);
+    await waitFor(() =>
+      expect(pipelineApi.savePublicationDraft).toHaveBeenCalledTimes(1),
+    );
+
+    await user.clear(title);
+    await user.type(title, "第二次编辑");
+    await vi.advanceTimersByTimeAsync(700);
+    resolveFirst?.({
+      ...draft,
+      content: {
+        ...draft.content,
+        title: "第一次编辑",
+      },
+      draftRevision: 4,
+    });
+
+    await waitFor(() => {
+      expect(pipelineApi.savePublicationDraft).toHaveBeenCalledTimes(2);
+      expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
+        task.id,
+        expect.objectContaining({
+          draftRevision: 4,
+          content: expect.objectContaining({ title: "第二次编辑" }),
+        }),
+      );
+    });
+    expect(screen.getByLabelText("标题")).toHaveValue("第二次编辑");
   });
 });

@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-27T16:10:54.358Z
+ * API 版本：1.0.0 · 生成时间：2026-07-29T11:19:04.986Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -158,6 +158,11 @@ export interface ContentJobOut {
   updatedAt: string;
 }
 
+export interface CoverCandidateOut {
+  timestampMs: number;
+  imageUrl: string;
+}
+
 export interface CreatePipelineIn {
   ipId: string;
   sourceUrl?: string | null;
@@ -180,6 +185,10 @@ export interface CreditAdjustIn {
   points: number;
   reason: string;
   expiresAt?: string | null;
+}
+
+export interface DeviceRequestApproveIn {
+  unbindDeviceId?: string | null;
 }
 
 export interface EditConfigIn {
@@ -216,6 +225,7 @@ export interface GrayAccountOut {
 export interface JobOut {
   id: string;
   taskId: string;
+  publicationRevisionId?: string;
   renderVersionId?: string;
   renderVersion?: number;
   platform: string;
@@ -249,6 +259,11 @@ export interface KillSwitchIn {
 export interface KillSwitchOut {
   stopped: boolean;
   canceledMessages?: number;
+}
+
+export interface MetadataSuggestionsOut {
+  titles: string[];
+  tags: string[];
 }
 
 export interface ModulePriceCatalogOut {
@@ -523,6 +538,68 @@ export interface ProviderStatusItem {
 
 export interface ProviderStatusOut {
   items: ProviderStatusItem[];
+}
+
+export interface PublicationContentIn {
+  schemaVersion?: number;
+  title: string;
+  topics?: string[];
+  subtitles?: PublicationSubtitlesIn;
+  cover?: PublicationCoverIn;
+}
+
+export interface PublicationCoverIn {
+  selectedFrameMs?: number;
+  template?: "bold-bottom" | "center-band" | "top-title" | "none";
+}
+
+export interface PublicationDraftPutIn {
+  draftRevision: number;
+  content: PublicationContentIn;
+}
+
+export interface PublicationFinalizeIn {
+  quoteId: string;
+  idempotencyKey: string;
+  draftRevision: number;
+}
+
+export interface PublicationRevisionOut {
+  id: string;
+  taskId: string;
+  revision: number;
+  status: string;
+  baseRenderVersionId?: string;
+  renderVersionId?: string;
+  content: PublicationContentIn;
+  draftRevision: number;
+  lastError?: string;
+  finalizedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PublicationStyleIn {
+  fontFamily?: "Noto Sans CJK SC" | "Source Han Sans SC" | "PingFang SC";
+  fontSize?: number;
+  color?: string;
+  stroke?: number;
+  xPercent?: number;
+  yPercent?: number;
+}
+
+export interface PublicationSubtitleSegmentIn {
+  id: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface PublicationSubtitlesIn {
+  enabled?: boolean;
+  source?: "asr_aligned" | "tts_fallback" | "manual";
+  segments?: PublicationSubtitleSegmentIn[];
+  style?: PublicationStyleIn;
 }
 
 export interface PublishCapabilityOut {
@@ -867,11 +944,13 @@ export interface app__modules__catalog__schemas__PublishIn {
 }
 
 export interface app__modules__publish__schemas__PublishIn {
-  taskId: string;
+  publicationRevisionId?: string;
   platforms: string[];
-  title: string;
+  accountIds?: Record<string, string>;
+  publishAt?: string | null;
+  taskId?: string;
+  title?: string;
   topics?: string[];
   videoKey?: string | null;
   coverKey?: string | null;
-  publishAt?: string | null;
 }

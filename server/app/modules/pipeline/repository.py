@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import PipelineRenderVersion, PipelineTask
+from .models import PipelineRenderVersion, PipelineTask, PublicationRevision
 
 
 async def create(db: AsyncSession, **fields) -> PipelineTask:
@@ -251,5 +251,79 @@ async def list_recoverable_renders(
             | (PipelineRenderVersion.status == "rendered")
             | ((PipelineRenderVersion.status == "pending") & (PipelineRenderVersion.queue_message_id == ""))
         )
+    )
+    return list(result.scalars().all())
+
+
+async def get_publication_revision(
+    db: AsyncSession,
+    revision_id: str,
+    user_id: str | None = None,
+) -> PublicationRevision | None:
+    query = select(PublicationRevision).where(PublicationRevision.id == revision_id)
+    if user_id:
+        query = query.where(PublicationRevision.user_id == user_id)
+    return (await db.execute(query)).scalar_one_or_none()
+
+
+async def latest_publication_revision(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> PublicationRevision | None:
+    return (
+        await db.execute(
+            select(PublicationRevision)
+            .where(PublicationRevision.task_id == task_id, PublicationRevision.user_id == user_id)
+            .order_by(PublicationRevision.revision.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def latest_draft_publication_revision(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> PublicationRevision | None:
+    return (
+        await db.execute(
+            select(PublicationRevision)
+            .where(
+                PublicationRevision.task_id == task_id,
+                PublicationRevision.user_id == user_id,
+                PublicationRevision.status == "draft",
+            )
+            .order_by(PublicationRevision.revision.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def finalized_publication_revision(
+    db: AsyncSession,
+    revision_id: str,
+    user_id: str,
+) -> PublicationRevision | None:
+    return (
+        await db.execute(
+            select(PublicationRevision).where(
+                PublicationRevision.id == revision_id,
+                PublicationRevision.user_id == user_id,
+                PublicationRevision.status == "finalized",
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def list_publication_revisions(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> list[PublicationRevision]:
+    result = await db.execute(
+        select(PublicationRevision)
+        .where(PublicationRevision.task_id == task_id, PublicationRevision.user_id == user_id)
+        .order_by(PublicationRevision.revision.desc())
     )
     return list(result.scalars().all())

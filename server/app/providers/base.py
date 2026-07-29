@@ -137,10 +137,12 @@ class ComposeInput:
     bgm_mode: str  # auto | custom | off
     cover_text: str
     cover_template: str = "bold-bottom"  # 封面模板（cover.COVER_TEMPLATES，none=原始帧）
+    cover_frame_ms: int = 1000
     bgm_volume: float = 0.12  # BGM 混音音量（0~1），前端剪辑台可调
     logo_key: str | None = None
     ratio: str = "9:16"
     randomize: bool = False  # 差异化参数随机化（变速/镜像/抽帧，C5）
+    subtitle_exact: bool = False
 
 
 @dataclass

@@ -8,19 +8,28 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.core.storage import exists as storage_exists
 from app.core.storage import signed_media_path
 from app.core.white_label import public_metadata
 
 from . import repository as repo
 from .engine import schedule_run
-from .models import STEP_ORDER, PipelineRenderVersion, PipelineTask
+from .models import STEP_ORDER, PipelineRenderVersion, PipelineTask, PublicationRevision
 from .schemas import (
+    CoverCandidateOut,
     CreatePipelineIn,
     EditConfigIn,
+    MetadataSuggestionsOut,
+    PublicationContentIn,
+    PublicationDraftPutIn,
+    PublicationFinalizeIn,
+    PublicationRevisionOut,
+    PublicationSubtitlesIn,
     RecomposeIn,
     RenderVersionOut,
     StatsOut,
@@ -477,6 +486,333 @@ async def list_render_versions(
     return [render_to_out(item) for item in await repo.list_renders(db, task_id, user_id)]
 
 
+async def get_publication_draft(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> PublicationRevisionOut:
+    task = await _must_get(db, task_id, user_id)
+    if task.status != "done":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能创建发布草稿"},
+        )
+    draft = await repo.latest_draft_publication_revision(db, task_id, user_id)
+    if draft is None:
+        latest = await repo.latest_publication_revision(db, task_id, user_id)
+        revision = (latest.revision + 1) if latest else 1
+        content = (
+            _content_from_revision(latest)
+            if latest and latest.status == "finalized"
+            else _default_publication_content(task)
+        )
+        draft = PublicationRevision(
+            user_id=user_id,
+            task_id=task_id,
+            revision=revision,
+            status="draft",
+            base_render_version_id=_base_render_version_id(task),
+            content_spec_json=content.model_dump_json(),
+            draft_revision=1,
+        )
+        db.add(draft)
+        await db.commit()
+        await db.refresh(draft)
+    return publication_revision_to_out(draft)
+
+
+async def put_publication_draft(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+    inp: PublicationDraftPutIn,
+) -> PublicationRevisionOut:
+    await _must_get(db, task_id, user_id)
+    draft = await repo.latest_draft_publication_revision(db, task_id, user_id)
+    if draft is None:
+        latest = await repo.latest_publication_revision(db, task_id, user_id)
+        if latest is not None and latest.status == "finalized":
+            draft = PublicationRevision(
+                user_id=user_id,
+                task_id=task_id,
+                revision=latest.revision + 1,
+                status="draft",
+                base_render_version_id=latest.render_version_id,
+                content_spec_json=latest.content_spec_json,
+                draft_revision=inp.draftRevision,
+            )
+            db.add(draft)
+            await db.flush()
+        else:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "PUBLICATION_DRAFT_MISSING", "message": "草稿不存在，请刷新后重试"},
+            )
+    result = await db.execute(
+        update(PublicationRevision)
+        .where(
+            PublicationRevision.id == draft.id,
+            PublicationRevision.user_id == user_id,
+            PublicationRevision.status == "draft",
+            PublicationRevision.draft_revision == inp.draftRevision,
+        )
+        .values(
+            content_spec_json=inp.content.model_dump_json(),
+            draft_revision=PublicationRevision.draft_revision + 1,
+            last_error="",
+            updated_at=datetime.now(UTC),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if int(getattr(result, "rowcount", 0) or 0) != 1:
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "PUBLICATION_DRAFT_CONFLICT", "message": "草稿已被更新，请刷新后再保存"},
+    )
+    await db.commit()
+    await db.refresh(draft)
+    return publication_revision_to_out(draft)
+
+
+async def metadata_suggestions(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> MetadataSuggestionsOut:
+    task = await _must_get(db, task_id, user_id)
+    content = _default_publication_content(task)
+    title = content.title.strip() or task.title or "口播视频"
+    tags = content.topics or [item for item in [task.topic.strip()] if item]
+    script = task.script_text or str(json.loads(task.artifacts_json or "{}").get("script") or "")
+    try:
+        from app.providers.registry import registry
+
+        titles, _ = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "generate_titles",
+            script or title,
+            "douyin",
+            3,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
+        provider_tags, _ = await registry.run_with_fallback(
+            "llm",
+            registry.llm_chain,
+            "generate_topics",
+            task.topic or script or title,
+            8,
+            trace_id=task.trace_id,
+            task_id=task.id,
+        )
+        titles = [item.strip() for item in titles if str(item).strip()][:3]
+        tags = [item.strip().lstrip("#") for item in provider_tags if str(item).strip()][:8]
+    except Exception:  # noqa: BLE001
+        logger.warning("publication_metadata_suggestion_fallback", task_id=task_id, user_id=user_id)
+        titles = []
+    if not tags:
+        tags = ["口播", "知识分享"]
+    while len(tags) < 5:
+        tags.append(["短视频", "个人IP", "内容运营"][len(tags) % 3])
+    if not titles:
+        titles = [title, title[:20] + "完整版" if len(title) > 8 else f"{title}指南", f"{title[:18]}实战"]
+    while len(titles) < 3:
+        titles.append(f"{title[:18]}发布版{len(titles) + 1}")
+    return MetadataSuggestionsOut(
+        titles=titles[:3],
+        tags=tags[:8],
+    )
+
+
+async def cover_candidates(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> list[CoverCandidateOut]:
+    task = await _must_get(db, task_id, user_id)
+    artifacts = json.loads(task.artifacts_json or "{}")
+    duration_ms = max(1, int(float(artifacts.get("duration") or 3.0) * 1000))
+    defaults = [300, 1500, 2700]
+    timestamps = [min(item, max(0, duration_ms - 1)) for item in defaults]
+    if duration_ms < 2700:
+        step = max(1, duration_ms // 4)
+        timestamps = [min(duration_ms - 1, step * idx) for idx in (1, 2, 3)]
+    clean_key = _clean_master_key(artifacts)
+    if not clean_key:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "CLEAN_MASTER_REQUIRED", "message": "无可用于提取封面的 clean 视频源"},
+        )
+    cache = artifacts.get("cover_candidates")
+    if not isinstance(cache, dict):
+        cache = {}
+    changed = False
+    candidates: list[CoverCandidateOut] = []
+    for timestamp in timestamps:
+        key = str(cache.get(str(timestamp)) or "")
+        if not key or not storage_exists(key):
+            key = await _extract_cover_candidate_frame(clean_key, timestamp)
+            cache[str(timestamp)] = key
+            changed = True
+        candidates.append(CoverCandidateOut(timestampMs=timestamp, imageUrl=signed_media_path(key) if key else ""))
+    if changed:
+        artifacts["cover_candidates"] = cache
+        task.artifacts_json = json.dumps(artifacts, ensure_ascii=False)
+        await db.commit()
+    return candidates
+
+
+async def finalize_publication(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+    inp: PublicationFinalizeIn,
+) -> PublicationRevisionOut:
+    lock = _render_creation_locks.setdefault(f"publication:{task_id}", asyncio.Lock())
+    async with lock:
+        task = await repo.get_for_update(db, task_id, user_id)
+        if task is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "任务不存在"})
+        if task.status != "done":
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "TASK_NOT_READY", "message": "任务尚未完成，不能定稿"},
+            )
+        latest = await repo.latest_publication_revision(db, task_id, user_id)
+        if (
+            latest is not None
+            and latest.draft_revision == inp.draftRevision
+            and latest.status in {"rendering", "finalized"}
+            and latest.render_version_id
+        ):
+            return publication_revision_to_out(latest)
+        draft = latest if latest is not None and latest.status == "draft" else None
+        if draft is None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "PUBLICATION_DRAFT_MISSING", "message": "草稿不存在，请刷新后重试"},
+            )
+        if draft.draft_revision != inp.draftRevision:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "PUBLICATION_DRAFT_CONFLICT", "message": "草稿已被更新，请刷新后再定稿"},
+            )
+        if draft.status in {"rendering", "finalized"} and draft.render_version_id:
+            return publication_revision_to_out(draft)
+        artifacts = json.loads(task.artifacts_json or "{}")
+        clean_video_key = _clean_master_key(artifacts)
+        if not clean_video_key:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "CLEAN_MASTER_REQUIRED", "message": "旧成片已烧字幕且缺少无字幕母版，不能再次烧录字幕"},
+            )
+        existing = await repo.get_render_by_idempotency(db, user_id, inp.idempotencyKey)
+        if existing is not None:
+            if existing.task_id != task_id:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    detail={"code": "IDEMPOTENCY_KEY_REUSED", "message": "该幂等键已用于其它任务"},
+                )
+            linked = await _revision_for_render(db, existing.id, user_id)
+            if linked is not None:
+                return publication_revision_to_out(linked)
+        active = await ensure_active_render_version(db, task)
+        if draft.base_render_version_id and draft.base_render_version_id != active.id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RENDER_VERSION_CONFLICT", "message": "成片已更新，请刷新草稿后再定稿"},
+            )
+        render_history = await repo.list_renders(db, task_id, user_id)
+        inflight = next((item for item in render_history if item.status in {"pending", "running", "rendered"}), None)
+        if inflight is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                detail={"code": "RENDER_IN_PROGRESS", "message": "已有渲染任务正在处理"},
+            )
+        from app.modules.billing.service import attach_reservation, reserve_quote
+
+        reservation_batch = await reserve_quote(
+            db,
+            user_id,
+            inp.quoteId,
+            operation={"module": "hd_export", "measures": {"assets": 1}},
+            commit=False,
+        )
+        reservation_id = reservation_batch.items[0].id
+        content = _content_from_revision(draft)
+        render = PipelineRenderVersion(
+            task_id=task.id,
+            user_id=user_id,
+            version=max((item.version for item in render_history), default=active.version) + 1,
+            base_version=active.version,
+            status="pending",
+            config_json=json.dumps(
+                _publication_render_config(draft.id, content, clean_video_key),
+                ensure_ascii=False,
+            ),
+            reservation_id=reservation_id,
+            idempotency_key=inp.idempotencyKey,
+        )
+        try:
+            db.add(render)
+            await db.flush()
+            draft.status = "rendering"
+            draft.base_render_version_id = active.id
+            draft.render_version_id = render.id
+            draft.last_error = ""
+            await attach_reservation(db, reservation_id, user_id, render.id)
+            await db.commit()
+            await db.refresh(draft)
+            await db.refresh(render)
+        except BaseException:
+            await db.rollback()
+            raise
+        try:
+            message_id = schedule_render(render.id)
+        except Exception:
+            logger.exception(
+                "publication_render_enqueue_failed",
+                task_id=task_id,
+                render_id=render.id,
+                revision_id=draft.id,
+                user_id=user_id,
+            )
+            from app.modules.pipeline.render import _fail_render
+
+            await _fail_render(db, render, "定稿渲染队列暂不可用")
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={"code": "RENDER_QUEUE_UNAVAILABLE", "message": "定稿渲染队列暂不可用，积分已退回"},
+            ) from None
+        await repo.record_render_queue_message(db, render.id, message_id)
+        await db.refresh(draft)
+        return publication_revision_to_out(draft)
+
+
+async def list_publication_revisions(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> list[PublicationRevisionOut]:
+    await _must_get(db, task_id, user_id)
+    return [publication_revision_to_out(item) for item in await repo.list_publication_revisions(db, task_id, user_id)]
+
+
+async def _extract_cover_candidate_frame(clean_video_key: str, timestamp_ms: int) -> str:
+    from app.providers.real import extract_cover_candidate_frame
+
+    try:
+        return await extract_cover_candidate_frame(clean_video_key, timestamp_ms)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("cover_candidate_extract_failed", video_key=clean_video_key, timestamp_ms=timestamp_ms)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "COVER_CANDIDATE_FAILED", "message": "封面候选帧提取失败，请稍后重试"},
+        ) from exc
+
+
 async def cancel_render(
     db: AsyncSession,
     task_id: str,
@@ -881,7 +1217,15 @@ def _clear_artifacts_from(task: PipelineTask, step: str) -> None:
         "rewrite": {"script", "similarity", "topic_candidates"},
         "voice": {"audio_key", "tts_words", "duration"},
         "avatar": {"avatar_render_task_id", "avatar_provider", "avatar_video_key", "duration"},
-        "compose": {"final_video_key", "cover_key", "quality", "duration"},
+        "compose": {
+            "clean_video_key",
+            "subtitle_enabled",
+            "cover_candidates",
+            "final_video_key",
+            "cover_key",
+            "quality",
+            "duration",
+        },
         "edit": {"edited"},
         "publish": {"publish_job_ids"},
     }
@@ -905,6 +1249,138 @@ async def _must_get(db: AsyncSession, task_id: str, user_id: str) -> PipelineTas
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "NOT_FOUND", "message": "任务不存在"})
     return t
+
+
+def _base_render_version_id(task: PipelineTask) -> str:
+    artifacts = json.loads(task.artifacts_json or "{}")
+    return str(artifacts.get("render_version_id") or "")
+
+
+def _content_from_revision(revision: PublicationRevision) -> PublicationContentIn:
+    try:
+        return PublicationContentIn.model_validate(json.loads(revision.content_spec_json or "{}"))
+    except ValueError:
+        return PublicationContentIn(title="未命名发布")
+
+
+def _default_publication_content(task: PipelineTask) -> PublicationContentIn:
+    artifacts = json.loads(task.artifacts_json or "{}")
+    title = str(artifacts.get("cover_title") or artifacts.get("title") or task.title or "").strip()
+    if not title or title == "未命名任务":
+        title = str(artifacts.get("script") or task.script_text or "未命名发布")[:40]
+    topics = [item for item in [task.topic.strip()] if item]
+    words = artifacts.get("tts_words") or artifacts.get("words") or []
+    segments = _subtitle_segments_from_words(words)
+    subtitles = PublicationSubtitlesIn.model_validate(
+        {
+            "enabled": bool(segments),
+            "source": "tts_fallback",
+            "segments": segments,
+        }
+    )
+    return PublicationContentIn(
+        title=title[:80],
+        topics=topics[:8],
+        subtitles=subtitles,
+    )
+
+
+def _subtitle_segments_from_words(words: list) -> list[dict]:
+    segments: list[dict] = []
+    current: list[dict] = []
+    length = 0
+    for raw in words[:240]:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            text = str(raw.get("word") or "").strip()
+            start = float(raw.get("start") or 0)
+            end = float(raw.get("end") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not text:
+            continue
+        if current and start - float(current[-1]["end"]) > 0.5:
+            segments.append(_subtitle_segment(len(segments) + 1, current))
+            current, length = [], 0
+        current.append({"word": text, "start": start, "end": end})
+        length += len(text)
+        tail = text[-1:]
+        if tail in "。！？!?；;" or length >= 16 or (tail in "，,、：:" and length >= 10):
+            segments.append(_subtitle_segment(len(segments) + 1, current))
+            current, length = [], 0
+    if current:
+        segments.append(_subtitle_segment(len(segments) + 1, current))
+    return segments
+
+
+def _subtitle_segment(index: int, words: list[dict]) -> dict:
+    return {
+        "id": f"s{index}",
+        "startMs": max(0, round(float(words[0]["start"]) * 1000)),
+        "endMs": max(1, round(float(words[-1]["end"]) * 1000)),
+        "text": "".join(str(word["word"]) for word in words),
+    }
+
+
+def _clean_master_key(artifacts: dict) -> str:
+    clean_key = str(artifacts.get("clean_video_key") or "")
+    if clean_key:
+        return clean_key
+    # 存量无字幕活动成片可视作 clean master；已烧字幕但未保存 clean master 必须阻止二次烧录。
+    if artifacts.get("subtitle_enabled") is True:
+        return ""
+    return str(artifacts.get("final_video_key") or "")
+
+
+def _publication_render_config(
+    revision_id: str,
+    content: PublicationContentIn,
+    clean_video_key: str,
+) -> dict:
+    style = content.subtitles.style.model_dump()
+    return {
+        "publication_revision_id": revision_id,
+        "content": content.model_dump(),
+        "clean_video_key": clean_video_key,
+        "subtitleEnabled": content.subtitles.enabled,
+        "subtitleStyle": style,
+        "bgmMode": "off",
+        "bgmVolume": 0,
+        "coverTemplate": content.cover.template,
+    }
+
+
+async def _revision_for_render(
+    db: AsyncSession,
+    render_id: str,
+    user_id: str,
+) -> PublicationRevision | None:
+    return (
+        await db.execute(
+            select(PublicationRevision).where(
+                PublicationRevision.render_version_id == render_id,
+                PublicationRevision.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+def publication_revision_to_out(revision: PublicationRevision) -> PublicationRevisionOut:
+    return PublicationRevisionOut(
+        id=revision.id,
+        taskId=revision.task_id,
+        revision=revision.revision,
+        status=revision.status,
+        baseRenderVersionId=revision.base_render_version_id,
+        renderVersionId=revision.render_version_id,
+        content=_content_from_revision(revision),
+        draftRevision=revision.draft_revision,
+        lastError=revision.last_error,
+        finalizedAt=revision.finalized_at.astimezone(UTC).isoformat() if revision.finalized_at else None,
+        createdAt=revision.created_at.astimezone(UTC).isoformat(),
+        updatedAt=revision.updated_at.astimezone(UTC).isoformat(),
+    )
 
 
 def to_out(t: PipelineTask) -> TaskOut:

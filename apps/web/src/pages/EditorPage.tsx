@@ -1,8 +1,15 @@
 import { HttpError, pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
-import type { EditConfig as ApiEditConfig, PipelineTask } from "@oral/types";
+import type {
+  CoverCandidate,
+  MetadataSuggestions,
+  PipelineTask,
+  PublicationContentSpec,
+  PublicationRevision,
+} from "@oral/types";
 import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, Play } from "lucide-react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { confirmMeteredOperation } from "../lib/meteredOperation";
@@ -14,76 +21,113 @@ const SUB_COLORS = [
   { key: "#F87171", label: "红" },
 ] as const;
 
-// 封面模板：key 与服务端 cover.COVER_TEMPLATES 一致（帧底图 + 槽位 + 标题自动排版）
+const FONTS: PublicationContentSpec["subtitles"]["style"]["fontFamily"][] = [
+  "Noto Sans CJK SC",
+  "Source Han Sans SC",
+  "PingFang SC",
+];
+
 const COVER_TEMPLATES = [
-  {
-    key: "bold-bottom",
-    label: "大字标题",
-    desc: "底部压暗 + 超大粗体，爆点词黄色高亮",
-  },
-  {
-    key: "center-band",
-    label: "居中色带",
-    desc: "品牌色横带 + 居中标题，正式感",
-  },
-  { key: "top-title", label: "顶部标题", desc: "适配底部被平台 UI 遮挡的场景" },
-  { key: "none", label: "原始帧", desc: "不叠加文字，直接用视频帧" },
+  { key: "bold-bottom", label: "大字标题" },
+  { key: "center-band", label: "居中色带" },
+  { key: "top-title", label: "顶部标题" },
+  { key: "none", label: "原始帧" },
 ] as const;
 
-interface EditConfig {
-  subtitleEnabled: boolean;
-  fontSize: number;
-  color: string;
-  position: "bottom" | "middle" | "top";
-  stroke: number;
-  bgmMode: "off";
-  bgmVolume: 0;
-  coverTemplate: ApiEditConfig["coverTemplate"];
+function textArtifact(task: PipelineTask | undefined, key: string) {
+  const value = task?.artifacts?.[key];
+  return typeof value === "string" && value ? value : "";
 }
 
-const DEFAULT_CONFIG: EditConfig = {
-  subtitleEnabled: true,
-  fontSize: 44,
-  color: "#FFFFFF",
-  position: "bottom",
-  stroke: 2,
-  bgmMode: "off",
-  bgmVolume: 0,
-  coverTemplate: "bold-bottom",
-};
+function defaultContent(task: PipelineTask): PublicationContentSpec {
+  const script = textArtifact(task, "script") || task.title;
+  const lines = script
+    .split(/[。！？!?\n]/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
 
-/** 视频剪辑台（流水线第⑥步 edit 产物精修：字幕样式/BGM/封面，F-401/402/404） */
+  return {
+    schemaVersion: 1,
+    title: task.title,
+    topics: [],
+    subtitles: {
+      enabled: true,
+      source: "asr_aligned",
+      segments: (lines.length ? lines : [task.title]).map((text, index) => ({
+        id: `segment-${index + 1}`,
+        startMs: index * 1800,
+        endMs: (index + 1) * 1800,
+        text,
+      })),
+      style: {
+        fontFamily: "PingFang SC",
+        fontSize: 44,
+        color: "#FFFFFF",
+        stroke: 2,
+        xPercent: 50,
+        yPercent: 82,
+      },
+    },
+    cover: { selectedFrameMs: 0, template: "bold-bottom" },
+  };
+}
+
+function newIdempotencyKey() {
+  return (
+    globalThis.crypto?.randomUUID?.() ??
+    `publication-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
+}
+
+/** 成片发布定稿台：编辑 publication draft，定稿后交给发布页只读分发。 */
 export default function EditorPage() {
   const [params] = useSearchParams();
   const queryTaskId = params.get("task") ?? "";
   const liveTasks = useTasks((s) => s.tasks);
   const [taskId, setTaskId] = useState(queryTaskId);
-  const [cfg, setCfg] = useState<EditConfig>(DEFAULT_CONFIG);
+  const [content, setContent] = useState<PublicationContentSpec | null>(null);
+  const [draftRevision, setDraftRevision] = useState(0);
+  const [currentRevision, setCurrentRevision] =
+    useState<PublicationRevision | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
-  const [submittedRenderId, setSubmittedRenderId] = useState("");
-  const idempotencyKey = useRef("");
+  const [tagText, setTagText] = useState("");
+  const [suggestions, setSuggestions] = useState<MetadataSuggestions | null>(
+    null,
+  );
+  const [suggesting, setSuggesting] = useState(false);
+  const [saveTick, setSaveTick] = useState(0);
+  const contentRef = useRef<PublicationContentSpec | null>(null);
+  const revisionRef = useRef(0);
+  const currentRevisionRef = useRef<PublicationRevision | null>(null);
+  const contentVersionRef = useRef(0);
+  const savedContentVersionRef = useRef(0);
+  const savePromiseRef = useRef<Promise<PublicationRevision | null> | null>(
+    null,
+  );
+  const overlayBoxRef = useRef<HTMLDivElement | null>(null);
 
-  // 候选任务：已产出成片的任务（compose 步完成）
   const { data: doneTasks } = useQuery({
     queryKey: ["tasks", "done", "editor"],
     queryFn: () => pipelineApi.list("done", 1, 20),
   });
   const candidates = useMemo(
     () =>
-      (doneTasks?.items ?? []).filter((t) =>
-        t.steps.some(
-          (s) => s.step === "compose" && s.artifacts?.final_video_key,
+      (doneTasks?.items ?? []).filter((task) =>
+        task.steps.some(
+          (step) => step.step === "compose" && step.artifacts?.final_video_key,
         ),
       ),
     [doneTasks],
   );
 
-  const task: PipelineTask | undefined =
+  const task =
     liveTasks[taskId] ??
-    candidates.find((t) => t.id === taskId) ??
+    candidates.find((item) => item.id === taskId) ??
     (taskId ? undefined : candidates[0]);
   const effectiveTaskId = task?.id ?? taskId;
 
@@ -91,173 +135,297 @@ export default function EditorPage() {
     queryKey: ["task", effectiveTaskId],
     queryFn: () => pipelineApi.get(effectiveTaskId),
     enabled: Boolean(effectiveTaskId),
-    refetchInterval: (q) => {
-      // 首拉失败时也持续重试，避免 WS 不可用 + 首次拉取失败时页面永久卡住
-      if (!q.state.data) return 3000;
-      // 「保存并重新合成」重跑期间持续轮询，新成片就绪后自动停止
-      const s = q.state.data.status;
-      return s === "pending" || s === "running" || s === "waiting_confirm"
-        ? 3000
-        : false;
-    },
-    // 标签页切后台时也保持轮询，切回即见最新进度
+    refetchInterval: 3000,
     refetchIntervalInBackground: true,
   });
   const detail = liveTasks[effectiveTaskId] ?? taskDetail ?? task;
-  const { data: renderVersions, refetch: refetchRenders } = useQuery({
-    queryKey: ["task-renders", effectiveTaskId],
-    queryFn: () => pipelineApi.renderVersions(effectiveTaskId),
+
+  const { data: draftData } = useQuery({
+    queryKey: ["publication-draft", effectiveTaskId],
+    queryFn: () => pipelineApi.publicationDraft(effectiveTaskId),
+    enabled: Boolean(effectiveTaskId),
+  });
+
+  const { data: coverCandidates } = useQuery({
+    queryKey: ["cover-candidates", effectiveTaskId],
+    queryFn: () => pipelineApi.coverCandidates(effectiveTaskId),
+    enabled: Boolean(effectiveTaskId),
+  });
+
+  const { data: revisions, refetch: refetchRevisions } = useQuery({
+    queryKey: ["publication-revisions", effectiveTaskId],
+    queryFn: () => pipelineApi.publicationRevisions(effectiveTaskId),
     enabled: Boolean(effectiveTaskId),
     refetchInterval: (query) =>
-      query.state.data?.some((render) =>
-        ["pending", "running", "rendered"].includes(render.status),
-      )
+      query.state.data?.some((revision) => revision.status === "rendering")
         ? 3000
         : false,
     refetchIntervalInBackground: true,
   });
-  const activeRender = renderVersions?.find((render) => render.isActive);
-  const inflightRender = renderVersions?.find((render) =>
-    ["pending", "running", "rendered"].includes(render.status),
+
+  const finalizedRevision = revisions?.find(
+    (revision) =>
+      revision.id === currentRevision?.id && revision.status === "finalized",
   );
-  const submittedRender = renderVersions?.find(
-    (render) => render.id === submittedRenderId,
-  );
-  const terminalAttempt = renderVersions?.find(
-    (render) =>
-      !render.isActive &&
-      ["failed", "canceled"].includes(render.status) &&
-      render.version > (activeRender?.version ?? 0),
-  );
-  const rerunning =
-    Boolean(inflightRender) ||
-    detail?.status === "pending" ||
-    detail?.status === "running" ||
-    detail?.status === "waiting_confirm";
+  const isRendering =
+    currentRevision?.status === "rendering" ||
+    revisions?.some((revision) => revision.status === "rendering");
 
   useEffect(() => {
+    setContent(null);
+    setDraftRevision(0);
+    setCurrentRevision(null);
     setDirty(false);
     setMsg("");
     setError("");
-    setSubmittedRenderId("");
-    idempotencyKey.current = "";
+    setSuggestions(null);
+    setTagText("");
+    contentRef.current = null;
+    revisionRef.current = 0;
+    currentRevisionRef.current = null;
+    contentVersionRef.current = 0;
+    savedContentVersionRef.current = 0;
+    savePromiseRef.current = null;
   }, [effectiveTaskId]);
 
   useEffect(() => {
-    if (!activeRender || dirty || submittedRenderId) return;
-    setCfg({
-      subtitleEnabled: activeRender.config.subtitleEnabled ?? true,
-      fontSize: activeRender.config.subtitleStyle.fontSize,
-      color: activeRender.config.subtitleStyle.color,
-      position: activeRender.config.subtitleStyle.position,
-      stroke: activeRender.config.subtitleStyle.stroke,
-      bgmMode: "off",
-      bgmVolume: 0,
-      coverTemplate: activeRender.config.coverTemplate,
-    });
-  }, [activeRender, dirty, submittedRenderId]);
+    const nextContent =
+      draftData?.content ?? (detail ? defaultContent(detail) : null);
+    if (
+      !nextContent ||
+      dirty ||
+      saving ||
+      finalizing ||
+      currentRevision?.status === "finalized" ||
+      currentRevision?.status === "rendering" ||
+      (draftData?.draftRevision ?? 0) < revisionRef.current
+    ) {
+      return;
+    }
+    setContent(nextContent);
+    setDraftRevision(draftData?.draftRevision ?? 0);
+    setCurrentRevision(draftData ?? null);
+    contentRef.current = nextContent;
+    revisionRef.current = draftData?.draftRevision ?? 0;
+    currentRevisionRef.current = draftData ?? null;
+    contentVersionRef.current = 0;
+    savedContentVersionRef.current = 0;
+  }, [detail, draftData, dirty, saving, finalizing, currentRevision?.status]);
 
   useEffect(() => {
-    if (!terminalAttempt) return;
-    setCfg({
-      subtitleEnabled: terminalAttempt.config.subtitleEnabled ?? true,
-      fontSize: terminalAttempt.config.subtitleStyle.fontSize,
-      color: terminalAttempt.config.subtitleStyle.color,
-      position: terminalAttempt.config.subtitleStyle.position,
-      stroke: terminalAttempt.config.subtitleStyle.stroke,
-      bgmMode: "off",
-      bgmVolume: 0,
-      coverTemplate: terminalAttempt.config.coverTemplate,
-    });
-    setDirty(true);
-    setSubmittedRenderId("");
-    idempotencyKey.current = "";
-    setMsg("");
-    setError(
-      terminalAttempt.status === "failed"
-        ? terminalAttempt.error || "重新合成失败，请稍后重试"
-        : "本次重合成已取消，可调整后重新提交",
+    const refreshed = revisions?.find(
+      (revision) => revision.id === currentRevisionRef.current?.id,
     );
-  }, [terminalAttempt]);
+    if (!refreshed) return;
+    currentRevisionRef.current = refreshed;
+    setCurrentRevision(refreshed);
+    if (refreshed.status === "finalized") {
+      setMsg("定稿完成，可前往发布。");
+      setError("");
+    } else if (refreshed.status === "draft" && refreshed.lastError) {
+      setMsg("");
+      setError(refreshed.lastError);
+    }
+  }, [revisions]);
 
   useEffect(() => {
-    if (submittedRender?.status !== "done") return;
-    setSubmittedRenderId("");
-    idempotencyKey.current = "";
-    setMsg(`v${submittedRender.version} 已完成并切换为当前成片`);
-  }, [submittedRender]);
+    if (!dirty || !effectiveTaskId || !content) return;
+    const timer = window.setTimeout(() => {
+      void saveNow();
+    }, 700);
+    return () => window.clearTimeout(timer);
+    // saveTick makes explicit save requests reuse the same save path.
+  }, [dirty, effectiveTaskId, content, saveTick]);
 
-  // 任务级 artifacts 为全量产物；步骤级 artifacts 服务端截断至 200 字，仅供展示归因
-  const detailArt = (key: string) => {
-    const v = detail?.artifacts?.[key];
-    return typeof v === "string" && v ? v : undefined;
-  };
-  const videoUrl = activeRender?.videoUrl ?? detailArt("final_video_url");
-  const script =
-    detailArt("script") ??
-    detail?.steps.find((s) => s.step === "rewrite")?.artifacts?.script ??
-    "";
-  const subtitleLines = useMemo(
-    () =>
-      script
-        .split(/[。！？!?\n]/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .slice(0, 8),
-    [script],
-  );
-
-  const update = (patch: Partial<EditConfig>) => {
-    setCfg((c) => ({ ...c, ...patch }));
+  const updateContent = (
+    updater: (current: PublicationContentSpec) => PublicationContentSpec,
+  ) => {
+    const current = contentRef.current;
+    if (!current) return;
+    const next = updater(current);
+    contentRef.current = next;
+    contentVersionRef.current += 1;
+    setContent(next);
     setDirty(true);
-    idempotencyKey.current = "";
     setMsg("");
+    setError("");
   };
 
-  const save = async () => {
-    if (!detail || !activeRender) return;
-    setBusy(true);
+  const saveNow = async () => {
+    if (savePromiseRef.current) {
+      await savePromiseRef.current;
+    }
+    if (
+      savedContentVersionRef.current === contentVersionRef.current &&
+      currentRevisionRef.current
+    ) {
+      return currentRevisionRef.current;
+    }
+    const draftContent = contentRef.current;
+    if (!effectiveTaskId || !draftContent) return currentRevision;
+    const snapshotVersion = contentVersionRef.current;
+    setSaving(true);
     setError("");
-    setMsg("");
+    const pending = (async () => {
+      try {
+        const saved = await pipelineApi.savePublicationDraft(effectiveTaskId, {
+          draftRevision: revisionRef.current,
+          content: draftContent,
+        });
+        savedContentVersionRef.current = snapshotVersion;
+        setDraftRevision(saved.draftRevision);
+        revisionRef.current = saved.draftRevision;
+        currentRevisionRef.current = saved;
+        setCurrentRevision(saved);
+        if (contentVersionRef.current === snapshotVersion) {
+          setContent(saved.content);
+          contentRef.current = saved.content;
+          setDirty(false);
+          setMsg("草稿已保存");
+        } else {
+          setDirty(true);
+        }
+        return saved;
+      } catch (err) {
+        setError(
+          err instanceof HttpError ? err.body.message : "草稿保存失败，请重试",
+        );
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    savePromiseRef.current = pending;
     try {
-      const quoteId = await confirmMeteredOperation(
-        "hd_export",
-        "重新合成成片",
-        { assets: 1 },
-      );
-      idempotencyKey.current ||=
-        globalThis.crypto?.randomUUID?.() ??
-        `editor-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-      const config: ApiEditConfig = {
-        subtitleEnabled: cfg.subtitleEnabled,
-        subtitleStyle: {
-          fontSize: cfg.fontSize,
-          color: cfg.color,
-          position: cfg.position,
-          stroke: cfg.stroke,
-        },
-        bgmMode: "off",
-        bgmVolume: 0,
-        coverTemplate: cfg.coverTemplate,
-      };
-      const created = await pipelineApi.recompose(detail.id, {
-        quoteId,
-        idempotencyKey: idempotencyKey.current,
-        baseVersion: activeRender.version,
-        config,
-      });
-      setSubmittedRenderId(created.id);
-      setDirty(false);
-      setMsg(
-        `已提交 v${activeRender.version + 1}，旧成片会保留到新版本通过质量检查`,
-      );
-      await refetchRenders();
-    } catch (e) {
-      setError(e instanceof HttpError ? e.body.message : "保存失败，请重试");
+      return await pending;
     } finally {
-      setBusy(false);
+      if (savePromiseRef.current === pending) {
+        savePromiseRef.current = null;
+      }
     }
   };
+
+  const requestSuggestions = async () => {
+    if (!effectiveTaskId) return;
+    setSuggesting(true);
+    setError("");
+    try {
+      setSuggestions(await pipelineApi.metadataSuggestions(effectiveTaskId));
+    } catch (err) {
+      setError(
+        err instanceof HttpError
+          ? err.body.message
+          : "AI生成失败，可继续手动填写",
+      );
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const addTag = (tag: string) => {
+    const value = tag.trim();
+    if (!value) return;
+    updateContent((current) => ({
+      ...current,
+      topics: current.topics.includes(value)
+        ? current.topics
+        : [...current.topics, value].slice(0, 8),
+    }));
+    setTagText("");
+  };
+
+  const removeTag = (tag: string) => {
+    updateContent((current) => ({
+      ...current,
+      topics: current.topics.filter((item) => item !== tag),
+    }));
+  };
+
+  const startDrag = (event: ReactPointerEvent) => {
+    event.preventDefault();
+    const box = overlayBoxRef.current;
+    if (!box) return;
+    const move = (moveEvent: PointerEvent) => {
+      const rect = box.getBoundingClientRect();
+      const left = Number.isFinite(rect.left) ? rect.left : 0;
+      const top = Number.isFinite(rect.top) ? rect.top : 0;
+      const width = rect.width || Math.max(1, rect.right - rect.left);
+      const height = rect.height || Math.max(1, rect.bottom - rect.top);
+      if (width <= 0 || height <= 0) return;
+      if (
+        !Number.isFinite(moveEvent.clientX) ||
+        !Number.isFinite(moveEvent.clientY)
+      ) {
+        return;
+      }
+      const xPercent = Math.round(
+        Math.min(100, Math.max(0, ((moveEvent.clientX - left) / width) * 100)),
+      );
+      const yPercent = Math.round(
+        Math.min(100, Math.max(0, ((moveEvent.clientY - top) / height) * 100)),
+      );
+      updateContent((current) => ({
+        ...current,
+        subtitles: {
+          ...current.subtitles,
+          style: { ...current.subtitles.style, xPercent, yPercent },
+        },
+      }));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  };
+
+  const finalize = async () => {
+    if (!effectiveTaskId || !contentRef.current) return;
+    if (!contentRef.current.title.trim()) {
+      setError("定稿标题不能为空");
+      return;
+    }
+    setFinalizing(true);
+    setError("");
+    try {
+      const saved = dirty ? await saveNow() : currentRevision;
+      const quoteId = await confirmMeteredOperation(
+        "hd_export",
+        "定稿发布内容",
+        { assets: 1 },
+      );
+      const revision = await pipelineApi.finalizePublication(effectiveTaskId, {
+        quoteId,
+        idempotencyKey: newIdempotencyKey(),
+        draftRevision: saved?.draftRevision ?? revisionRef.current,
+      });
+      setCurrentRevision(revision);
+      currentRevisionRef.current = revision;
+      setDraftRevision(revision.draftRevision);
+      revisionRef.current = revision.draftRevision;
+      setDirty(false);
+      setMsg(
+        revision.status === "finalized"
+          ? "定稿完成，可前往发布。"
+          : "已提交定稿，正在生成最终成片。",
+      );
+      await refetchRevisions();
+    } catch (err) {
+      setError(
+        err instanceof HttpError ? err.body.message : "定稿失败，草稿已保留",
+      );
+    } finally {
+      setFinalizing(false);
+    }
+  };
+
+  const videoUrl = textArtifact(detail, "final_video_url");
+  const firstSubtitle =
+    content?.subtitles.segments[0]?.text || "字幕效果实时预览";
+  const firstThreeSeconds = (coverCandidates ?? []).filter(
+    (candidate: CoverCandidate) => candidate.timestampMs <= 3000,
+  );
 
   return (
     <div className="space-y-5">
@@ -265,18 +433,18 @@ export default function EditorPage() {
         <div>
           <h1 className="text-xl font-bold">视频剪辑</h1>
           <p className="mt-1 text-sm text-text-3">
-            成片微调 · 字幕样式 · 封面 · 版本可追溯
+            成片微调 · 字幕校对 · 封面 · 定稿发布
           </p>
         </div>
         <select
           className="input h-10 w-72 px-3 py-0 text-sm"
           value={effectiveTaskId}
-          onChange={(e) => setTaskId(e.target.value)}
+          onChange={(event) => setTaskId(event.target.value)}
         >
           <option value="">选择要精修的成片任务…</option>
-          {candidates.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.title}
+          {candidates.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.title}
             </option>
           ))}
         </select>
@@ -291,12 +459,14 @@ export default function EditorPage() {
         </div>
       )}
 
-      {detail && (
+      {detail && content && (
         <>
           <div className="grid items-start gap-4 lg:grid-cols-[300px_1fr]">
-            {/* 预览：成片就绪后直接内嵌播放器，字幕样式叠加层实时预览 */}
             <div className="glass p-4">
-              <div className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
+              <div
+                ref={overlayBoxRef}
+                className="relative flex aspect-[9/16] max-h-[440px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40"
+              >
                 {videoUrl ? (
                   <video
                     src={videoUrl}
@@ -316,26 +486,28 @@ export default function EditorPage() {
                 <span className="pointer-events-none absolute left-3 top-3 rounded-full bg-black/50 px-2 py-0.5 text-[11px]">
                   1080P
                 </span>
-                {/* 字幕预览：随开关与样式实时变化（不拦截播放器控件点击） */}
-                {cfg.subtitleEnabled && (
+                {content.subtitles.enabled && (
                   <span
-                    className={`pointer-events-none absolute left-1/2 -translate-x-1/2 px-4 text-center font-bold leading-snug ${
-                      cfg.position === "bottom"
-                        ? "bottom-14"
-                        : cfg.position === "middle"
-                          ? "top-1/2 -translate-y-1/2"
-                          : "top-6"
-                    }`}
+                    data-testid="subtitle-overlay"
+                    onPointerDown={startDrag}
+                    className="absolute cursor-move select-none px-4 text-center font-bold leading-snug"
                     style={{
-                      color: cfg.color,
-                      fontSize: Math.max(12, cfg.fontSize / 2.2),
+                      left: `${content.subtitles.style.xPercent}%`,
+                      top: `${content.subtitles.style.yPercent}%`,
+                      transform: "translate(-50%, -50%)",
+                      color: content.subtitles.style.color,
+                      fontFamily: content.subtitles.style.fontFamily,
+                      fontSize: Math.max(
+                        12,
+                        content.subtitles.style.fontSize / 2.2,
+                      ),
                       textShadow:
-                        cfg.stroke > 0
-                          ? `0 0 ${cfg.stroke * 2}px rgba(0,0,0,.9), 0 ${cfg.stroke}px ${cfg.stroke}px rgba(0,0,0,.8)`
+                        content.subtitles.style.stroke > 0
+                          ? `0 0 ${content.subtitles.style.stroke * 2}px rgba(0,0,0,.9)`
                           : "none",
                     }}
                   >
-                    {subtitleLines[2] ?? "字幕效果实时预览"}
+                    {firstSubtitle}
                   </span>
                 )}
               </div>
@@ -343,75 +515,213 @@ export default function EditorPage() {
                 <div className="min-w-0">
                   <b className="block truncate">{detail.title}</b>
                   <div className="mt-0.5 text-xs text-text-3">
-                    当前 v{activeRender?.version ?? detail.activeRenderVersion}{" "}
-                    · {dirty ? "有未保存修改" : "配置已同步"}
+                    draft r{draftRevision} ·{" "}
+                    {saving ? "保存中" : dirty ? "有未保存修改" : "草稿已同步"}
                   </div>
                 </div>
                 <span className="chip shrink-0 text-[11px]">
-                  {rerunning ? (
+                  {isRendering ? (
                     <span className="flex items-center gap-1">
                       <LoaderCircle className="h-3 w-3 animate-spin" />
-                      重新合成中
+                      定稿渲染中
                     </span>
-                  ) : videoUrl ? (
-                    "成片就绪"
+                  ) : currentRevision?.status === "finalized" ? (
+                    "已定稿"
                   ) : (
-                    "合成中"
+                    "草稿"
                   )}
                 </span>
               </div>
             </div>
 
             <div className="space-y-4">
-              {/* 字幕样式（F-401）：开关关闭时重合成输出无字幕成片，样式配置保留 */}
               <div className="glass p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
-                  <h2 className="font-medium">字幕样式</h2>
-                  <div className="flex items-center gap-2">
-                    {!cfg.subtitleEnabled && (
-                      <span className="text-xs text-text-3">
-                        重新合成后成片将不含字幕
-                      </span>
-                    )}
-                    <button
-                      role="switch"
-                      aria-checked={cfg.subtitleEnabled}
-                      onClick={() =>
-                        update({ subtitleEnabled: !cfg.subtitleEnabled })
-                      }
-                      className={`chip px-3 py-1 text-xs ${cfg.subtitleEnabled ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
-                    >
-                      {cfg.subtitleEnabled ? "显示字幕" : "字幕已关闭"}
-                    </button>
-                  </div>
+                  <h2 className="font-medium">标题和标签</h2>
+                  <button
+                    className="btn-ghost px-3 py-1 text-xs"
+                    disabled={suggesting}
+                    onClick={() => void requestSuggestions()}
+                  >
+                    {suggesting ? "生成中…" : "AI生成标题和标签"}
+                  </button>
                 </div>
-                {/* fieldset disabled：关闭字幕时鼠标/键盘/辅助技术一致禁用样式控件 */}
+                <label className="label" htmlFor="publication-title">
+                  标题
+                </label>
+                <input
+                  id="publication-title"
+                  className="input"
+                  value={content.title}
+                  maxLength={128}
+                  onChange={(event) =>
+                    updateContent((current) => ({
+                      ...current,
+                      title: event.target.value,
+                    }))
+                  }
+                />
+                {suggestions && (
+                  <div className="mt-3 space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      {suggestions.titles.slice(0, 3).map((title) => (
+                        <button
+                          key={title}
+                          className="chip px-3 py-1 text-xs"
+                          onClick={() =>
+                            updateContent((current) => ({ ...current, title }))
+                          }
+                        >
+                          采用 {title}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {suggestions.tags.slice(0, 8).map((tag) => (
+                        <button
+                          key={tag}
+                          className="chip px-3 py-1 text-xs"
+                          onClick={() => addTag(tag)}
+                        >
+                          添加标签 {tag}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {content.topics.map((tag) => (
+                    <button
+                      key={tag}
+                      className="chip border-brand-to/40 px-2 py-1 text-xs text-brand-to"
+                      onClick={() => removeTag(tag)}
+                    >
+                      #{tag} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <input
+                    className="input h-9 flex-1"
+                    value={tagText}
+                    onChange={(event) => setTagText(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") addTag(tagText);
+                    }}
+                    placeholder="手动添加标签"
+                  />
+                  <button
+                    className="btn-ghost px-3 py-1 text-xs"
+                    onClick={() => addTag(tagText)}
+                  >
+                    添加
+                  </button>
+                </div>
+              </div>
+
+              <div className="glass p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h2 className="font-medium">字幕</h2>
+                  <button
+                    role="switch"
+                    aria-checked={content.subtitles.enabled}
+                    onClick={() =>
+                      updateContent((current) => ({
+                        ...current,
+                        subtitles: {
+                          ...current.subtitles,
+                          enabled: !current.subtitles.enabled,
+                        },
+                      }))
+                    }
+                    className={`chip px-3 py-1 text-xs ${
+                      content.subtitles.enabled
+                        ? "border-brand-from/50 bg-brand-from/15 text-text-1"
+                        : ""
+                    }`}
+                  >
+                    {content.subtitles.enabled ? "显示字幕" : "字幕已关闭"}
+                  </button>
+                </div>
                 <fieldset
-                  disabled={!cfg.subtitleEnabled}
-                  className={`grid gap-4 md:grid-cols-2 ${cfg.subtitleEnabled ? "" : "opacity-40"}`}
+                  disabled={!content.subtitles.enabled}
+                  className={`grid gap-4 md:grid-cols-2 ${
+                    content.subtitles.enabled ? "" : "opacity-40"
+                  }`}
                 >
                   <div>
-                    <label className="label">字号（{cfg.fontSize}px）</label>
+                    <label className="label" htmlFor="subtitle-font">
+                      字幕字体
+                    </label>
+                    <select
+                      id="subtitle-font"
+                      className="input"
+                      value={content.subtitles.style.fontFamily}
+                      onChange={(event) =>
+                        updateContent((current) => ({
+                          ...current,
+                          subtitles: {
+                            ...current.subtitles,
+                            style: {
+                              ...current.subtitles.style,
+                              fontFamily: event.target
+                                .value as PublicationContentSpec["subtitles"]["style"]["fontFamily"],
+                            },
+                          },
+                        }))
+                      }
+                    >
+                      {FONTS.map((font) => (
+                        <option key={font} value={font}>
+                          {font}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label">
+                      字号（{content.subtitles.style.fontSize}px）
+                    </label>
                     <input
                       type="range"
                       min={32}
                       max={64}
-                      value={cfg.fontSize}
-                      onChange={(e) =>
-                        update({ fontSize: Number(e.target.value) })
+                      value={content.subtitles.style.fontSize}
+                      onChange={(event) =>
+                        updateContent((current) => ({
+                          ...current,
+                          subtitles: {
+                            ...current.subtitles,
+                            style: {
+                              ...current.subtitles.style,
+                              fontSize: Number(event.target.value),
+                            },
+                          },
+                        }))
                       }
                       className="w-full accent-brand-from"
                     />
                   </div>
                   <div>
-                    <label className="label">描边粗细（{cfg.stroke}px）</label>
+                    <label className="label">
+                      描边粗细（{content.subtitles.style.stroke}px）
+                    </label>
                     <input
                       type="range"
                       min={0}
                       max={6}
-                      value={cfg.stroke}
-                      onChange={(e) =>
-                        update({ stroke: Number(e.target.value) })
+                      value={content.subtitles.style.stroke}
+                      onChange={(event) =>
+                        updateContent((current) => ({
+                          ...current,
+                          subtitles: {
+                            ...current.subtitles,
+                            style: {
+                              ...current.subtitles.style,
+                              stroke: Number(event.target.value),
+                            },
+                          },
+                        }))
                       }
                       className="w-full accent-brand-from"
                     />
@@ -419,186 +729,163 @@ export default function EditorPage() {
                   <div>
                     <label className="label">颜色</label>
                     <div className="flex gap-2">
-                      {SUB_COLORS.map((c) => (
+                      {SUB_COLORS.map((color) => (
                         <button
-                          key={c.key}
-                          onClick={() => update({ color: c.key })}
-                          title={c.label}
-                          className={`h-8 w-8 rounded-lg border-2 ${cfg.color === c.key ? "border-brand-to" : "border-stroke"}`}
-                          style={{ background: c.key }}
+                          key={color.key}
+                          title={color.label}
+                          onClick={() =>
+                            updateContent((current) => ({
+                              ...current,
+                              subtitles: {
+                                ...current.subtitles,
+                                style: {
+                                  ...current.subtitles.style,
+                                  color: color.key,
+                                },
+                              },
+                            }))
+                          }
+                          className={`h-8 w-8 rounded-lg border-2 ${
+                            content.subtitles.style.color === color.key
+                              ? "border-brand-to"
+                              : "border-stroke"
+                          }`}
+                          style={{ background: color.key }}
                         />
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <label className="label">位置</label>
-                    <div className="flex gap-2">
-                      {(
-                        [
-                          ["top", "顶部"],
-                          ["middle", "中部"],
-                          ["bottom", "底部安全区"],
-                        ] as const
-                      ).map(([k, label]) => (
-                        <button
-                          key={k}
-                          onClick={() => update({ position: k })}
-                          className={`chip px-3 py-1 ${cfg.position === k ? "border-brand-from/50 bg-brand-from/15 text-text-1" : ""}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                 </fieldset>
-              </div>
-
-              {/* BGM 在真实素材归属链路开放前保持关闭，避免伪曲库与任意 key。 */}
-              <div className="glass p-5">
-                <h2 className="mb-4 font-medium">背景音乐</h2>
-                <div className="rounded-xl border border-stroke bg-white/[0.03] p-3.5">
-                  <div className="text-sm font-medium">当前使用纯人声</div>
-                  <div className="mt-1 text-xs leading-relaxed text-text-3">
-                    平台曲库和自定义上传将在素材库完成真实授权、归属校验与版权审计后开放；当前不会提交虚假的
-                    BGM 配置。
-                  </div>
+                <div className="mt-4 space-y-2">
+                  {content.subtitles.segments.map((segment, index) => (
+                    <div
+                      key={segment.id}
+                      className="grid gap-2 md:grid-cols-[90px_1fr]"
+                    >
+                      <span className="pt-2 text-xs text-text-3">
+                        {(segment.startMs / 1000).toFixed(1)}s
+                      </span>
+                      <input
+                        className="input"
+                        value={segment.text}
+                        aria-label={`字幕 ${index + 1}`}
+                        onChange={(event) =>
+                          updateContent((current) => ({
+                            ...current,
+                            subtitles: {
+                              ...current.subtitles,
+                              segments: current.subtitles.segments.map(
+                                (item) =>
+                                  item.id === segment.id
+                                    ? { ...item, text: event.target.value }
+                                    : item,
+                              ),
+                            },
+                          }))
+                        }
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* 封面模板（F-404）：服务端自动取帧 + 标题自动排版，选模板即可 */}
               <div className="glass p-5">
                 <div className="mb-4 flex items-center justify-between">
-                  <h2 className="font-medium">封面模板</h2>
+                  <h2 className="font-medium">封面</h2>
                   <span className="text-xs text-text-3">
-                    标题自动匹配视频帧，保存后生效
+                    当前选中 {(content.cover.selectedFrameMs / 1000).toFixed(1)}
+                    s
                   </span>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {COVER_TEMPLATES.map((t) => (
+                <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {COVER_TEMPLATES.map((template) => (
                     <button
-                      key={t.key}
-                      onClick={() => update({ coverTemplate: t.key })}
-                      className={`rounded-xl border p-3.5 text-left ${cfg.coverTemplate === t.key ? "border-brand-from/60 bg-brand-from/10" : "border-stroke bg-white/[0.03]"}`}
+                      key={template.key}
+                      onClick={() =>
+                        updateContent((current) => ({
+                          ...current,
+                          cover: { ...current.cover, template: template.key },
+                        }))
+                      }
+                      className={`rounded-xl border p-3.5 text-left ${
+                        content.cover.template === template.key
+                          ? "border-brand-from/60 bg-brand-from/10"
+                          : "border-stroke bg-white/[0.03]"
+                      }`}
                     >
-                      <div className="text-sm font-medium">{t.label}</div>
-                      <div className="mt-1 text-xs text-text-3">{t.desc}</div>
+                      <div className="text-sm font-medium">
+                        {template.label}
+                      </div>
                     </button>
                   ))}
                 </div>
-                {(activeRender?.coverUrl || detail.coverUrl) && (
-                  <div className="mt-4 flex items-center gap-3">
-                    <img
-                      src={activeRender?.coverUrl ?? detail.coverUrl ?? ""}
-                      alt="当前封面"
-                      className="h-24 rounded-lg border border-stroke object-cover"
-                    />
-                    <span className="text-xs text-text-3">
-                      当前封面 · 重新合成后按所选模板更新
-                    </span>
-                  </div>
-                )}
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {firstThreeSeconds.map((candidate) => (
+                    <button
+                      key={candidate.timestampMs}
+                      className={`overflow-hidden rounded-xl border text-left ${
+                        content.cover.selectedFrameMs === candidate.timestampMs
+                          ? "border-brand-to"
+                          : "border-stroke"
+                      }`}
+                      onClick={() =>
+                        updateContent((current) => ({
+                          ...current,
+                          cover: {
+                            ...current.cover,
+                            selectedFrameMs: candidate.timestampMs,
+                          },
+                        }))
+                      }
+                    >
+                      <img
+                        src={candidate.imageUrl}
+                        alt={`${(candidate.timestampMs / 1000).toFixed(1)}s 封面`}
+                        className="aspect-video w-full bg-black object-cover"
+                      />
+                      <span className="block px-2 py-1 text-xs text-text-3">
+                        选择 {(candidate.timestampMs / 1000).toFixed(1)}s 封面
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* 操作条 */}
               <div className="glass flex flex-wrap items-center gap-3 p-4">
                 {error && <span className="text-sm text-danger">{error}</span>}
                 {msg && <span className="text-sm text-success">{msg}</span>}
                 <div className="flex-1" />
                 <button
                   className="btn-ghost text-xs"
-                  disabled
-                  title="V1.1 剪映草稿导出"
+                  disabled={saving || !dirty}
+                  onClick={() => setSaveTick((value) => value + 1)}
                 >
-                  导出剪映草稿
+                  {saving ? "保存中…" : "保存草稿"}
                 </button>
-                {videoUrl ? (
-                  <a className="btn-ghost text-xs" href={videoUrl} download>
-                    导出 MP4
-                  </a>
-                ) : (
-                  <button className="btn-ghost text-xs" disabled>
-                    导出 MP4
-                  </button>
-                )}
                 <button
                   className="btn-primary px-5"
-                  disabled={busy || rerunning || !dirty || !activeRender}
-                  onClick={save}
+                  disabled={
+                    saving ||
+                    finalizing ||
+                    isRendering ||
+                    !content.title.trim() ||
+                    (currentRevision?.status === "finalized" && !dirty)
+                  }
+                  onClick={() => void finalize()}
                 >
-                  {busy ? "合成中…" : "保存并重新合成"}
+                  {finalizing ? "定稿中…" : "定稿发布内容"}
                 </button>
-                {inflightRender?.status === "pending" && (
-                  <button
+                {currentRevision?.status === "finalized" && (
+                  <Link
+                    to={`/publish/jobs?task=${detail.id}&revision=${currentRevision.id}`}
                     className="btn-ghost text-xs"
-                    disabled={busy}
-                    onClick={async () => {
-                      setBusy(true);
-                      setError("");
-                      try {
-                        await pipelineApi.cancelRender(
-                          detail.id,
-                          inflightRender.id,
-                        );
-                        setSubmittedRenderId("");
-                        idempotencyKey.current = "";
-                        setDirty(true);
-                        setMsg(
-                          "已取消本次重合成，当前成片保持不变，可再次提交",
-                        );
-                        await refetchRenders();
-                      } catch (e) {
-                        setError(
-                          e instanceof HttpError
-                            ? e.body.message
-                            : "取消失败，请重试",
-                        );
-                      } finally {
-                        setBusy(false);
-                      }
-                    }}
                   >
-                    取消本次重合成
-                  </button>
+                    去发布 →
+                  </Link>
                 )}
-                {inflightRender?.status === "running" && (
-                  <span className="text-xs text-text-3">
-                    已开始合成，当前不可取消
-                  </span>
-                )}
-                <Link
-                  to={`/publish/jobs?task=${detail.id}`}
-                  className="btn-ghost text-xs"
-                >
-                  去发布 →
-                </Link>
               </div>
             </div>
           </div>
-
-          {/* 字幕校对 */}
-          {subtitleLines.length > 0 && (
-            <div className="glass p-5">
-              <div className="mb-3 flex items-center gap-2">
-                <h2 className="font-medium">字幕校对</h2>
-                <span className="chip border-success/40 text-[11px] text-success">
-                  ASR 对齐完成
-                </span>
-                <span className="ml-auto text-xs text-text-3">
-                  口播文案分行预览
-                </span>
-              </div>
-              <div className="space-y-1">
-                {subtitleLines.map((line, i) => (
-                  <div
-                    key={i}
-                    className={`rounded-lg px-3 py-1.5 text-sm ${i === 2 ? "bg-brand-from/10 text-text-1" : "text-text-2 hover:bg-white/5"}`}
-                  >
-                    {line}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>

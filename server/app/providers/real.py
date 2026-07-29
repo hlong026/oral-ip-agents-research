@@ -265,7 +265,8 @@ class FFmpegCompose:
             subtitle_path = workdir / "subtitles.ass"
             if inp.subtitle_words:
                 subtitle_path.write_text(
-                    _build_ass(inp.subtitle_words, width, height, inp.subtitle_style), encoding="utf-8"
+                    _build_ass(inp.subtitle_words, width, height, inp.subtitle_style, exact=inp.subtitle_exact),
+                    encoding="utf-8",
                 )
 
             output_path = workdir / "final.mp4"
@@ -282,17 +283,16 @@ class FFmpegCompose:
                 bgm_volume=inp.bgm_volume,
             )
             await _run_ffmpeg(command, limit_seconds=300)
-            await _extract_cover_frame(output_path, cover_path)
+            await _extract_cover_frame(video_path, cover_path, inp.cover_frame_ms)
             cover_bytes = cover_path.read_bytes()
-            if inp.cover_template != "none" and inp.cover_text.strip():
-                # 封面自动生成（14 号方案 §3.5）：帧底图 + 模板槽位 + 标题自动排版
-                try:
-                    cover_bytes = await asyncio.to_thread(
-                        render_cover, cover_bytes, inp.cover_text, inp.cover_template, width, height
-                    )
-                except Exception:
-                    # 模板渲染失败不阻断成片，回退原始帧封面
-                    logger.warning("cover_render_failed", exc_info=True, extra={"template": inp.cover_template})
+            # 即使选择原图模板，也统一输出目标视频比例，避免横版源帧直接成为竖版封面。
+            try:
+                cover_bytes = await asyncio.to_thread(
+                    render_cover, cover_bytes, inp.cover_text, inp.cover_template, width, height
+                )
+            except Exception:
+                # 模板渲染失败不阻断成片，回退原始帧封面。
+                logger.warning("cover_render_failed", exc_info=True, extra={"template": inp.cover_template})
             video_key = await save_bytes("compose", "final.mp4", output_path.read_bytes())
             cover_key = await save_bytes("compose", "cover.jpg", cover_bytes)
 
@@ -308,6 +308,16 @@ class FFmpegCompose:
             duration=report.duration,
             quality=report.to_dict(),
         )
+
+
+async def extract_cover_candidate_frame(video_key: str, timestamp_ms: int) -> str:
+    """从 clean 视频源按毫秒提取候选封面帧并保存，调用方负责缓存返回 key。"""
+    with tempfile.TemporaryDirectory(prefix="oral-cover-candidate-") as directory:
+        workdir = Path(directory)
+        video_path = await _materialize(video_key, workdir, "video")
+        cover_path = workdir / "candidate.jpg"
+        await _extract_cover_frame(video_path, cover_path, timestamp_ms)
+        return await save_bytes("cover-candidates", f"{timestamp_ms}.jpg", cover_path.read_bytes())
 
 
 class ThirdPartyParser:
@@ -363,11 +373,12 @@ def _file_nonempty(path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-async def _extract_cover_frame(video: Path, cover: Path) -> None:
-    """封面底图：优先取 1s 处帧（口播开场站定后更稳），过短视频回退首帧"""
+async def _extract_cover_frame(video: Path, cover: Path, timestamp_ms: int = 1000) -> None:
+    """封面底图：按用户选择时间抽帧，过短视频回退首帧。"""
+    seconds = max(0.0, min(float(timestamp_ms) / 1000, 3.0))
     try:
         await _run_ffmpeg(
-            ["ffmpeg", "-y", "-ss", "1", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
+            ["ffmpeg", "-y", "-ss", f"{seconds:g}", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(cover)],
             limit_seconds=60,
         )
         if await asyncio.to_thread(_file_nonempty, cover):
@@ -500,7 +511,7 @@ def _ass_color(hex_color: str) -> str:
 
 
 def _ass_style_line(width: int, height: int, style: dict | None) -> str:
-    """剪辑台字幕配置 → ASS Style 行（字号按 1080 基准短边缩放，位置映射九宫格）"""
+    """剪辑台字幕配置 → ASS Style 行（字号按 1080 基准短边缩放，支持全局 x/y）"""
     style = style or {}
     scale = min(width, height) / 1080
     try:
@@ -509,9 +520,14 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         base_size = 54.0
     font_size = round(max(24.0, min(120.0, base_size)) * scale)
     primary = _ass_color(str(style.get("color") or "#FFFFFF"))
-    position = str(style.get("position") or "bottom")
-    alignment = {"top": 8, "middle": 5}.get(position, 2)
-    margin_v = {"top": round(80 * scale), "middle": 0}.get(position, round(120 * scale))
+    font_family = str(style.get("fontFamily") or "Arial")
+    position = str(style.get("position") or "")
+    if "yPercent" in style:
+        alignment = 5
+        margin_v = 0
+    else:
+        alignment = {"top": 8, "middle": 5}.get(position, 2)
+        margin_v = {"top": round(80 * scale), "middle": 0}.get(position, round(120 * scale))
     stroke = style.get("stroke", 3)
     if isinstance(stroke, bool):
         stroke = 3 if stroke else 0
@@ -519,7 +535,7 @@ def _ass_style_line(width: int, height: int, style: dict | None) -> str:
         outline = max(0, min(8, round(float(stroke))))
     except (TypeError, ValueError):
         outline = 3
-    return f"Style: Default,Arial,{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
+    return f"Style: Default,{font_family},{font_size},{primary},&H00000000,1,{outline},0,{alignment},60,60,{margin_v},1"
 
 
 # 字幕分行：硬断句标点立即换行；软断句标点行长达标后换行；停顿间隙/行长上限兜底
@@ -552,7 +568,7 @@ def _split_subtitle_groups(words: list) -> list[list]:
     return groups
 
 
-def _build_ass(words: list, width: int, height: int, style: dict | None = None) -> str:
+def _build_ass(words: list, width: int, height: int, style: dict | None = None, *, exact: bool = False) -> str:
     header = (
         "[Script Info]\nScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -563,9 +579,22 @@ def _build_ass(words: list, width: int, height: int, style: dict | None = None) 
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
     events: list[str] = []
-    for group in _split_subtitle_groups(words):
+    style = style or {}
+    override = ""
+    if "xPercent" in style or "yPercent" in style:
+        try:
+            x = round(width * max(0, min(100, float(style.get("xPercent", 50)))) / 100)
+            y = round(height * max(0, min(100, float(style.get("yPercent", 82)))) / 100)
+            override = "{\\pos(" + f"{x},{y}" + ")}"
+        except (TypeError, ValueError):
+            override = ""
+    groups = [[word] for word in words] if exact else _split_subtitle_groups(words)
+    for group in groups:
         text = "".join(word.word for word in group).replace("\n", " ").replace("{", "（").replace("}", "）")
-        events.append(f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},Default,,0,0,0,,{text}")
+        events.append(
+            f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},"
+            f"Default,,0,0,0,,{override}{text}"
+        )
     return header + "\n".join(events) + "\n"
 
 

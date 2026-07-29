@@ -54,6 +54,7 @@ class PublishJob(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     user_id: Mapped[str] = mapped_column(String(32), index=True)
     task_id: Mapped[str] = mapped_column(String(32), index=True, default="")
+    publication_revision_id: Mapped[str] = mapped_column(String(32), index=True, default="")
     render_version_id: Mapped[str] = mapped_column(String(32), index=True, default="")
     render_version: Mapped[int] = mapped_column(Integer, default=0)
     account_id: Mapped[str] = mapped_column(String(32), default="")

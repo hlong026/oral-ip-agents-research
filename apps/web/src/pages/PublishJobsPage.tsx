@@ -3,11 +3,12 @@ import {
   PLATFORM_NAMES,
   PUBLISH_PLATFORMS,
   type Platform,
+  type PublicationRevision,
   type PublishJob,
 } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { TriangleAlert } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import PlatformIcon from "../components/PlatformIcon";
@@ -162,12 +163,13 @@ export default function PublishJobsPage({
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [error, setError] = useState("");
-  const [publishTitle, setPublishTitle] = useState("");
   const [publishAt, setPublishAt] = useState("");
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
+  const [accountIds, setAccountIds] = useState<Record<string, string>>({});
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState(false);
   const taskFilter = params.get("task") ?? "";
+  const revisionFilter = params.get("revision") ?? "";
 
   const { data: targetTask, isLoading: taskLoading } = useQuery({
     queryKey: ["task", taskFilter],
@@ -177,6 +179,11 @@ export default function PublishJobsPage({
   const { data: accounts } = useQuery({
     queryKey: ["publish-accounts"],
     queryFn: () => publishApi.accounts(),
+  });
+  const { data: publicationRevisions, isLoading: revisionsLoading } = useQuery({
+    queryKey: ["publication-revisions", taskFilter],
+    queryFn: () => pipelineApi.publicationRevisions(taskFilter),
+    enabled: Boolean(taskFilter),
   });
   const { data: capabilities } = useQuery({
     queryKey: ["publish-capabilities"],
@@ -196,12 +203,19 @@ export default function PublishJobsPage({
     refetchInterval: 10_000,
   });
 
-  useEffect(() => {
-    if (targetTask) setPublishTitle(targetTask.title);
-  }, [targetTask]);
-
   const expired = (accounts ?? []).filter((a) => a.status === "expired");
   const items = data?.items ?? [];
+  const selectedRevision = useMemo(() => {
+    const finalized = (publicationRevisions ?? []).filter(
+      (revision) => revision.status === "finalized",
+    );
+    if (revisionFilter) {
+      return (
+        finalized.find((revision) => revision.id === revisionFilter) ?? null
+      );
+    }
+    return finalized.sort((a, b) => b.revision - a.revision)[0] ?? null;
+  }, [publicationRevisions, revisionFilter]);
 
   const refresh = () => {
     void refetch();
@@ -219,24 +233,48 @@ export default function PublishJobsPage({
   };
 
   const togglePlatform = (platform: Platform) => {
-    setSelectedPlatforms((current) =>
-      current.includes(platform)
-        ? current.filter((item) => item !== platform)
-        : [...current, platform],
-    );
+    setSelectedPlatforms((current) => {
+      if (current.includes(platform)) {
+        setAccountIds((ids) => {
+          const next = { ...ids };
+          delete next[platform];
+          return next;
+        });
+        return current.filter((item) => item !== platform);
+      }
+      const activeAccounts = accountsFor(platform);
+      if (requiresAccount(platform) && activeAccounts.length === 1) {
+        setAccountIds((ids) => ({ ...ids, [platform]: activeAccounts[0]!.id }));
+      }
+      return [...current, platform];
+    });
   };
 
+  const accountsFor = (platform: Platform) =>
+    (accounts ?? []).filter(
+      (account) => account.platform === platform && account.status === "active",
+    );
+
+  const requiresAccount = (platform: Platform) =>
+    (capabilities ?? []).find((item) => item.platform === platform)
+      ?.automaticEnabled !== false;
+
+  const missingAccount = selectedPlatforms.some(
+    (platform) => requiresAccount(platform) && !accountIds[platform],
+  );
+
   const createPublishJobs = async () => {
-    if (!targetTask || targetTask.status !== "done") return;
-    if (!publishTitle.trim() || selectedPlatforms.length === 0) return;
+    if (!selectedRevision || selectedPlatforms.length === 0 || missingAccount) {
+      return;
+    }
     setCreating(true);
     setCreated(false);
     setError("");
     try {
       await publishApi.createJobs({
-        taskId: targetTask.id,
+        publicationRevisionId: selectedRevision.id,
         platforms: selectedPlatforms,
-        title: publishTitle.trim().slice(0, 30),
+        accountIds,
         publishAt: publishAt ? new Date(publishAt).toISOString() : undefined,
       });
       setCreated(true);
@@ -337,12 +375,28 @@ export default function PublishJobsPage({
               正在读取成片…
             </div>
           )}
+          {(taskLoading || revisionsLoading) && (
+            <div className="py-6 text-center text-sm text-text-3">
+              正在读取定稿版本…
+            </div>
+          )}
           {targetTask && targetTask.status !== "done" && (
             <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
               当前任务尚未完成，暂不能创建发布任务。
             </div>
           )}
-          {targetTask?.status === "done" && (
+          {targetTask?.status === "done" && !selectedRevision && (
+            <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+              当前内容尚未定稿，暂不能创建发布任务。
+              <Link
+                to={`/editor?task=${targetTask.id}`}
+                className="ml-2 text-brand-to hover:underline"
+              >
+                返回剪辑页
+              </Link>
+            </div>
+          )}
+          {targetTask?.status === "done" && selectedRevision && (
             <>
               {typeof targetTask.artifacts?.final_video_url === "string" && (
                 <video
@@ -354,17 +408,27 @@ export default function PublishJobsPage({
                   aria-label="待发布活动成片"
                 />
               )}
-              <div>
-                <label className="label" htmlFor="publish-title">
-                  视频标题
-                </label>
-                <input
-                  id="publish-title"
-                  className="input"
-                  value={publishTitle}
-                  onChange={(event) => setPublishTitle(event.target.value)}
-                  maxLength={30}
-                />
+              <div className="rounded-xl border border-stroke bg-white/[0.03] p-3">
+                <div className="text-sm font-medium">
+                  {selectedRevision.content.title}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedRevision.content.topics.map((topic) => (
+                    <span
+                      key={topic}
+                      className="chip border-brand-to/40 px-2 py-1 text-xs text-brand-to"
+                    >
+                      #{topic}
+                    </span>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-text-3">
+                  封面{" "}
+                  {(
+                    selectedRevision.content.cover.selectedFrameMs / 1000
+                  ).toFixed(1)}
+                  s · {selectedRevision.content.cover.template}
+                </div>
               </div>
               <div>
                 <div className="label">发布平台</div>
@@ -399,6 +463,57 @@ export default function PublishJobsPage({
                   })}
                 </div>
               </div>
+              {selectedPlatforms.length > 0 && (
+                <div className="space-y-3">
+                  {selectedPlatforms.map((platform) => {
+                    const activeAccounts = accountsFor(platform);
+                    if (!requiresAccount(platform)) {
+                      return (
+                        <div key={platform} className="text-xs text-text-3">
+                          {PLATFORM_NAMES[platform]}
+                          ：生成完整人工发布包，无需选择账号
+                        </div>
+                      );
+                    }
+                    if (activeAccounts.length <= 1) {
+                      return (
+                        <div key={platform} className="text-xs text-text-3">
+                          {PLATFORM_NAMES[platform]}账号：
+                          {activeAccounts[0]?.nickname ?? "未绑定可用账号"}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={platform}>
+                        <label
+                          className="label"
+                          htmlFor={`account-${platform}`}
+                        >
+                          选择{PLATFORM_NAMES[platform]}账号
+                        </label>
+                        <select
+                          id={`account-${platform}`}
+                          className="input"
+                          value={accountIds[platform] ?? ""}
+                          onChange={(event) =>
+                            setAccountIds((ids) => ({
+                              ...ids,
+                              [platform]: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">请选择账号</option>
+                          {activeAccounts.map((account) => (
+                            <option key={account.id} value={account.id}>
+                              {account.nickname}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               <div>
                 <label className="label" htmlFor="publish-at">
                   定时发布（留空立即）
@@ -418,9 +533,7 @@ export default function PublishJobsPage({
                 <button
                   className="btn-primary"
                   disabled={
-                    creating ||
-                    !publishTitle.trim() ||
-                    selectedPlatforms.length === 0
+                    creating || selectedPlatforms.length === 0 || missingAccount
                   }
                   onClick={() => void createPublishJobs()}
                 >

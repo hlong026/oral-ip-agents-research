@@ -416,6 +416,61 @@ export interface PipelineRenderVersion {
   updatedAt: string;
 }
 
+export interface SubtitleSegment {
+  id: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface PublicationContentSpec {
+  schemaVersion: 1;
+  title: string;
+  topics: string[];
+  subtitles: {
+    enabled: boolean;
+    source: "asr_aligned" | "tts_fallback" | "manual";
+    segments: SubtitleSegment[];
+    style: {
+      fontFamily: "Noto Sans CJK SC" | "Source Han Sans SC" | "PingFang SC";
+      fontSize: number;
+      color: string;
+      stroke: number;
+      xPercent: number;
+      yPercent: number;
+    };
+  };
+  cover: {
+    selectedFrameMs: number;
+    template: "bold-bottom" | "center-band" | "top-title" | "none";
+  };
+}
+
+export interface PublicationRevision {
+  id: string;
+  taskId: string;
+  revision: number;
+  status: "draft" | "rendering" | "finalized" | "superseded";
+  baseRenderVersionId: string;
+  renderVersionId?: string | null;
+  content: PublicationContentSpec;
+  draftRevision: number;
+  lastError: string;
+  finalizedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CoverCandidate {
+  timestampMs: number;
+  imageUrl: string;
+}
+
+export interface MetadataSuggestions {
+  titles: string[];
+  tags: string[];
+}
+
 export interface TaskStats {
   todayDone: number;
   todayDelta: number;

@@ -45,6 +45,19 @@ async def active_account_for(db: AsyncSession, user_id: str, platform: str) -> P
     return res.scalar_one_or_none()
 
 
+async def active_accounts_for(db: AsyncSession, user_id: str, platform: str) -> list[PublishAccount]:
+    res = await db.execute(
+        select(PublishAccount)
+        .where(
+            PublishAccount.user_id == user_id,
+            PublishAccount.platform == platform,
+            PublishAccount.status == "active",
+        )
+        .order_by(PublishAccount.created_at.desc())
+    )
+    return list(res.scalars().all())
+
+
 async def save_account(db: AsyncSession, account: PublishAccount) -> PublishAccount:
     account.session_json = encrypt_session_value(account.session_json)
     await db.commit()
