@@ -5,12 +5,15 @@
 - 日志：发布失败/账号过期（§10.6.8-A #5）
 """
 
+import asyncio
 import json
 import zipfile
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
+import aiofiles
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +23,7 @@ from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes, signed_media_path
+from app.core.storage import materialized_path, save_stream, signed_media_path
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.registry import registry
@@ -588,13 +591,32 @@ async def export_job(db: AsyncSession, user_id: str, job_id: str) -> ExportOut:
         "createdAt": j.created_at.astimezone(UTC).isoformat(),
     }
     try:
-        buffer = BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(video_name, await read_bytes(j.video_key))
-            if j.cover_key:
-                archive.writestr(cover_name, await read_bytes(j.cover_key))
-            archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
-        j.export_key = await save_bytes("publish-packages", f"{j.id}.zip", buffer.getvalue())
+        with TemporaryDirectory(prefix="oral-publish-package-") as directory:
+            package_path = Path(directory) / f"{j.id}.zip"
+            async with AsyncExitStack() as media_stack:
+                video_path = await media_stack.enter_async_context(materialized_path(j.video_key, name="video"))
+                cover_path = (
+                    await media_stack.enter_async_context(materialized_path(j.cover_key, name="cover"))
+                    if j.cover_key
+                    else None
+                )
+
+                def build_package() -> None:
+                    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                        archive.write(video_path, video_name)
+                        if cover_path:
+                            archive.write(cover_path, cover_name)
+                        archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+
+                await asyncio.to_thread(build_package)
+            package_size = package_path.stat().st_size
+            async with aiofiles.open(package_path, "rb") as package:
+                j.export_key, _ = await save_stream(
+                    "publish-packages",
+                    f"{j.id}.zip",
+                    package,
+                    max_bytes=package_size,
+                )
     except Exception as exc:  # noqa: BLE001
         logger.exception("publish_package_failed", job_id=j.id, user_id=user_id)
         raise HTTPException(

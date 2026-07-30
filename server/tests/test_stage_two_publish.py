@@ -433,6 +433,46 @@ async def test_export_package_contains_video_cover_and_metadata() -> None:
         assert metadata["platform"] == "douyin"
 
 
+async def test_export_package_streams_media_and_archive_from_disk(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    from app.core.storage import local_path
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    video_key = await save_bytes("publish-test", "large-video.mp4", b"video-bytes")
+    cover_key = await save_bytes("publish-test", "large-cover.jpg", b"cover-bytes")
+
+    @asynccontextmanager
+    async def fake_materialize(key: str, *, name: str = "media"):
+        yield local_path(key)
+
+    async def forbid_full_buffer(*_args, **_kwargs):
+        raise AssertionError("发布包不得通过 read_bytes/save_bytes 全量缓冲媒体或 ZIP")
+
+    monkeypatch.setattr(service, "materialized_path", fake_materialize)
+    monkeypatch.setattr(service, "read_bytes", forbid_full_buffer, raising=False)
+    monkeypatch.setattr(service, "save_bytes", forbid_full_buffer, raising=False)
+
+    async with SessionLocal() as db:
+        job = await publish_repo.create_job(
+            db,
+            user_id="stream-package-user",
+            task_id="pipeline-stream",
+            platform="douyin",
+            title="流式发布包",
+            video_key=video_key,
+            cover_key=cover_key,
+            status="failed",
+        )
+        result = await service.export_job(db, "stream-package-user", job.id)
+
+    package = await read_bytes(result.packageKey)
+    with zipfile.ZipFile(BytesIO(package)) as archive:
+        assert archive.read("video.mp4") == b"video-bytes"
+        assert archive.read("cover.jpg") == b"cover-bytes"
+
+
 async def test_publish_worker_never_uses_another_users_account(monkeypatch) -> None:
     from app.modules.publish import repository as publish_repo
     from app.modules.publish import service
