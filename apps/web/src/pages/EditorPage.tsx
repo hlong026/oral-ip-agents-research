@@ -40,13 +40,83 @@ function textArtifact(task: PipelineTask | undefined, key: string) {
   return typeof value === "string" && value ? value : "";
 }
 
+/** 从 ASR words 构建字幕片段（使用真实时间戳） */
+function buildSubtitlesFromAsrWords(words: Array<{word: string; start: number; end: number}>): SubtitleSegment[] {
+  if (!words || words.length === 0) return [];
+  
+  // 按时间戳排序（确保 monotonic）
+  const sorted = [...words].sort((a, b) => a.start - b.start);
+  
+  // 合并短句为完整语义段（阈值：相邻间隔 ≤300ms 视为同一句）
+  const segments: SubtitleSegment[] = [];
+  let currentStart = Math.max(0, Math.round(sorted[0].start * 1000)); // ms，四舍五入避免浮点误差
+  let currentEnd = Math.max(0, Math.round(sorted[0].end * 1000));
+  let currentText = sorted[0].word;
+  
+  for (let i = 1; i < sorted.length; i++) {
+    const word = sorted[i];
+    const wordStartMs = Math.max(0, Math.round(word.start * 1000));
+    const wordEndMs = Math.max(0, Math.round(word.end * 1000));
+    
+    // 检查与前一个词的间隔
+    const gap = wordStartMs - currentEnd;
+    
+    if (gap <= 300) {
+      // 属于同一句
+      currentEnd = wordEndMs;
+      currentText += word.word;
+    } else {
+      // 新句开始：保存当前段
+      segments.push({
+        id: `segment-${segments.length + 1}`,
+        startMs: currentStart,
+        endMs: currentEnd,
+        text: currentText,
+      });
+      // 开始新段
+      currentStart = wordStartMs;
+      currentEnd = wordEndMs;
+      currentText = word.word;
+    }
+  }
+  // 最后一段
+  if (currentText) {
+    segments.push({
+      id: `segment-${segments.length + 1}`,
+      startMs: currentStart,
+      endMs: currentEnd,
+      text: currentText,
+    });
+  }
+  
+  return segments;
+}
+
 function defaultContent(task: PipelineTask): PublicationContentSpec {
   const script = textArtifact(task, "script") || task.title;
-  const lines = script
-    .split(/[。！？!?\n]/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 8);
+  
+  // 尝试从 ASR words 构建字幕
+  const asrWords = task.artifacts?.words as Array<{word: string; start: number; end: number}> | undefined;
+  let subtitleSegments: SubtitleSegment[];
+  
+  if (asrWords && asrWords.length > 0) {
+    // 使用真实 ASR 时间戳
+    subtitleSegments = buildSubtitlesFromAsrWords(asrWords);
+  } else {
+    // 降级到伪数据
+    const lines = script
+      .split(/[。！？!?\n]/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+    
+    subtitleSegments = (lines.length ? lines : [task.title]).map((text, index) => ({
+      id: `segment-${index + 1}`,
+      startMs: index * 1800,
+      endMs: (index + 1) * 1800,
+      text,
+    }));
+  }
 
   return {
     schemaVersion: 1,
@@ -54,13 +124,8 @@ function defaultContent(task: PipelineTask): PublicationContentSpec {
     topics: [],
     subtitles: {
       enabled: true,
-      source: "asr_aligned",
-      segments: (lines.length ? lines : [task.title]).map((text, index) => ({
-        id: `segment-${index + 1}`,
-        startMs: index * 1800,
-        endMs: (index + 1) * 1800,
-        text,
-      })),
+      source: asrWords && asrWords.length > 0 ? "asr_aligned" : "manual",
+      segments: subtitleSegments.slice(0, 20), // 最多 20 句
       style: {
         fontFamily: "PingFang SC",
         fontSize: 44,
@@ -115,6 +180,10 @@ export default function EditorPage() {
     null,
   );
   const overlayBoxRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const lastScrolledIndex = useRef(-2); // 防抖标记：防止重复滚动
+  const [currentTimeMs, setCurrentTimeMs] = useState(0);
 
   const { data: doneTasks } = useQuery({
     queryKey: ["tasks", "done", "editor"],
@@ -198,6 +267,7 @@ export default function EditorPage() {
     contentVersionRef.current = 0;
     savedContentVersionRef.current = 0;
     savePromiseRef.current = null;
+    setCurrentTimeMs(0);
   }, [effectiveTaskId]);
 
   useEffect(() => {
@@ -508,8 +578,44 @@ export default function EditorPage() {
   };
 
   const videoUrl = textArtifact(detail, "final_video_url");
-  const firstSubtitle =
-    content?.subtitles.segments[0]?.text || "字幕效果实时预览";
+  const subtitleSegments = content?.subtitles.segments ?? [];
+  // 播放进度同步：取最后一个 startMs <= 当前播放时间的段；句间停顿保持上一句，与常见播放器行为一致
+  const activeSegmentIndex = useMemo(() => {
+    if (subtitleSegments.length === 0) return -1;
+    let idx = -1;
+    for (let i = 0; i < subtitleSegments.length; i++) {
+      if (currentTimeMs >= subtitleSegments[i]!.startMs) idx = i;
+      else break;
+    }
+    return idx;
+  }, [subtitleSegments, currentTimeMs]);
+  // 字幕文本生成：空数组时返回空字符串，有数据时按 activeSegmentIndex 获取，间隙显示上一句
+  const activeSubtitle = useMemo(() => {
+    if (subtitleSegments.length === 0) return "";
+    if (activeSegmentIndex < 0) return subtitleSegments[0]?.text || "";
+    return subtitleSegments[activeSegmentIndex]?.text || "";
+  }, [subtitleSegments, activeSegmentIndex]);
+  // 播放中自动滚动字幕列表，保持当前句可见；暂停时不打扰手动浏览/编辑
+  useEffect(() => {
+    if (activeSegmentIndex < 0) return;
+    
+    const video = videoRef.current;
+    if (!video || video.paused) return;
+    
+    // 防抖：同一行不重复滚动
+    if (activeSegmentIndex === lastScrolledIndex.current) return;
+    
+    const element = document.getElementById(`subtitle-segment-${activeSegmentIndex}`);
+    if (element) {
+      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      lastScrolledIndex.current = activeSegmentIndex;
+      
+      // 300ms 后清除标记，允许再次滚动到同一行
+      setTimeout(() => {
+        lastScrolledIndex.current = -2;
+      }, 300);
+    }
+  }, [activeSegmentIndex]);
   const firstThreeSeconds = (coverCandidates ?? []).filter(
     (candidate: CoverCandidate) => candidate.timestampMs <= 3000,
   );
@@ -554,11 +660,18 @@ export default function EditorPage() {
               >
                 {videoUrl ? (
                   <video
+                    ref={videoRef}
                     src={videoUrl}
                     poster={detail.coverUrl ?? undefined}
                     controls
                     playsInline
                     preload="metadata"
+                    onTimeUpdate={(event) =>
+                      setCurrentTimeMs(event.currentTarget.currentTime * 1000)
+                    }
+                    onSeeked={(event) =>
+                      setCurrentTimeMs(event.currentTarget.currentTime * 1000)
+                    }
                     className="h-full w-full bg-black object-contain"
                     aria-label="剪辑成片预览"
                   />
@@ -594,7 +707,7 @@ export default function EditorPage() {
                           : "none",
                     }}
                   >
-                    {firstSubtitle}
+                                        {activeSubtitle}
                   </span>
                 )}
               </div>
@@ -870,9 +983,18 @@ export default function EditorPage() {
                   {content.subtitles.segments.map((segment, index) => (
                     <div
                       key={segment.id}
-                      className="grid gap-2 md:grid-cols-[90px_1fr]"
+                      id={`subtitle-segment-${index}`}
+                      className={`grid gap-2 rounded-lg px-2 py-1 md:grid-cols-[90px_1fr] ${
+                        index === activeSegmentIndex
+                          ? "bg-brand-from/10 ring-1 ring-brand-from/40"
+                          : ""
+                      }`}
                     >
-                      <span className="pt-2 text-xs text-text-3">
+                      <span
+                        className={`pt-2 text-xs ${
+                          index === activeSegmentIndex ? "text-brand-to" : "text-text-3"
+                        }`}
+                      >
                         {(segment.startMs / 1000).toFixed(1)}s
                       </span>
                       <input

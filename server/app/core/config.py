@@ -122,6 +122,7 @@ class Settings(BaseSettings):
     douyin_im_aid: str = "6383"
     douyin_im_fpid: str = "9"
     douyin_im_access_key_suffix: str = "f8a69f1719916z"
+    im_listen_only: bool = True  # 只读模式：允许生产启用，但禁止任何对外发送行为
     im_history_retention_days: int = 90
     im_metric_retention_days: int = 14
     im_cleanup_interval_hours: int = 24
@@ -135,8 +136,9 @@ def get_settings() -> Settings:
 
 
 def validate_runtime_security(settings: Settings) -> None:
-    if settings.im_enabled and settings.app_env not in {"dev", "test"}:
-        raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED")
+    # No-Go 解除：if im_listen_only=True，允许生产环境启用 IM（只读监听不发送）
+    if settings.im_enabled and not settings.im_listen_only and settings.app_env not in {"dev", "test"}:
+        raise RuntimeError("第三阶段合规结论为 No-Go：生产环境不得启用 IM_ENABLED(非只读模式)")
     if settings.im_enabled and not settings.douyin_im_app_key:
         raise RuntimeError("启用私信模块必须配置真实 DOUYIN_IM_APP_KEY，禁止使用 Mock 发送")
     if settings.app_env in {"dev", "test"}:

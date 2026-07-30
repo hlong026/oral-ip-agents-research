@@ -156,6 +156,23 @@ async def reconcile_listeners(lease: RedisListenerLease | None = None) -> None:
         states = list(result.scalars().all())
 
     for state in states:
+        # 同时恢复 error 态的监听（网络/临时故障自愈）
+        if state.status == "error":
+            # 检查是否已超出自愈退避窗口
+            from datetime import timedelta
+
+            last_error = state.error_at or state.created_at
+            elapsed = (datetime.now(UTC) - last_error).total_seconds()
+            # 指数退避：10s → 20s → 40s → 60s（上限 1 小时）
+            backoff_sec = min(10 * (2 ** (state.retry_count or 0)), 3600)
+            if elapsed < backoff_sec:
+                logger.info(
+                    "[IMWorker] error listener %s still in backoff (%.0fs/%.0fs)",
+                    state.account_id[:8],
+                    elapsed,
+                    backoff_sec,
+                )
+                continue
         if lease is None:
             start_listening(state.account_id, state.user_id)
         else:
@@ -379,12 +396,17 @@ async def _listen_loop(account_id: str, user_id: str, lease: ListenerLease) -> N
             except Exception as error:  # noqa: BLE001
                 metric = "listener_error" if connection is not None else "listener_connect_failure"
                 await _record_metric(metric, account_id, user_id, error.__class__.__name__)
+                # 指数退避 + 自动恢复（不锁死 error 态）
                 retry_count += 1
-                if retry_count > 5:
-                    logger.exception("[IMWorker] max retries exceeded for %s", account_id[:8])
-                    await _set_listener_error(account_id, user_id, error)
-                    return
-                await asyncio.sleep(min(10 * retry_count, 60))
+                backoff_sec = min(10 * retry_count, 3600)  # 最大 1 小时
+                logger.warning(
+                    "[IMWorker] connection failed (%s), retry #%d in %.0fs",
+                    error.__class__.__name__,
+                    retry_count,
+                    backoff_sec,
+                )
+                await asyncio.sleep(backoff_sec)
+                # 继续循环而不标记 error，允许网络恢复后自愈
             finally:
                 if connection is not None:
                     try:
