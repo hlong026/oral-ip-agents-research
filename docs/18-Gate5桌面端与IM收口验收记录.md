@@ -1,6 +1,6 @@
 # 18 - Gate 5 桌面端与 IM 收口验收记录
 
-> 验收日期：2026-07-27
+> 验收日期：2026-07-31
 > 结论：桌面端工程构建 **Go**；桌面安装包对外分发 **No-Go**；IM 生产放量 **No-Go**
 
 ## 1. 本阶段收口范围
@@ -16,6 +16,10 @@
 6. IM 七日工具支持完全离线的退出门禁评估。
 7. 灰度账号数量上限在 PostgreSQL 中使用事务级 advisory lock 原子执行，避免并发
    管理员同时越过上限。
+8. IM 公开发送、重试和自动发送授权入口从后端路由、API Client 和前端移除。
+9. 历史 `auto` 规则在只读配置下强制降级为建议，不进入发送队列。
+10. 桌面抖音官方页面按账号使用独立、哈希化的数据目录，不共享登录态。
+11. 全局 Kill Switch 同时停止现有监听意图并阻止 Worker 恢复或创建新监听。
 
 真实签名、公证、Windows 安装、正式域名/TLS、真实 Provider 与连续七日 IM
 运行都依赖外部环境或账号，不能由本地测试替代。
@@ -66,27 +70,55 @@ Linux 和 Windows 都会失败关闭。Windows 必须另行建立受控 CI 签�
 - 重复批准已经启用的同一账号不额外占用名额；
 - 达到上限时事务回滚并返回 `IM_GRAY_LIMIT_REACHED`。
 
+### 2.5 IM 只读与多账号边界
+
+- `IM_LISTEN_ONLY=true` 是当前生产绑定，公开 OpenAPI 不包含发送、失败重试或自动发送授权路由。
+- 规则页面只能保存 `deliveryMode=suggestion`；数据库中的历史 `auto` 规则也会被服务层
+  强制写成 `suggested` 并标记 `ListenOnlyMode`。
+- 人工回复只打开抖音官方页面，不注入脚本、不代替用户点击发送。
+- 桌面窗口标签和 WebView `data_directory` 都由账号 ID 的 SHA-256 摘要派生；原始账号 ID
+  不进入路径，不同账号不会复用同一会话目录。
+- 全局急停将监听状态改为断开，`start_listener` 返回 `IM_GLOBAL_STOPPED`，独立 Worker
+  在恢复连接前再次检查开关。
+- 七日退出门禁要求每天存在在线监听和真实连接尝试，同时要求
+  `sendSuccess + sendFailure == 0`；任何服务端发送活动都判定失败。
+
+### 2.6 人工升级与回滚策略
+
+当前未引入自动更新依赖。正式分发前采用以下人工流程：
+
+1. 每个发布版本保存已签名安装包、SHA-256 校验值、版本号和对应 commit；
+2. 发布通知明确最低服务端版本、升级窗口和数据备份要求；
+3. 用户退出应用后覆盖安装，不删除应用数据目录，因此登录态和本地令牌按现有策略保留；
+4. 至少保留上一个已签名稳定版本；需要回滚时退出应用并覆盖安装该版本；
+5. 服务端 API 和数据库迁移必须在回滚窗口内向前兼容。若某次迁移无法无损回退，
+   该版本不得沿用本流程，必须单独提供数据回滚脚本和停机方案；
+6. macOS 公证、Windows 签名、干净机器安装/覆盖/回滚验证均属于外部门禁，未取得证据时
+   仍为 `EXTERNAL_BLOCKED`。
+
 ## 3. 当前验证证据
 
 ### 3.1 已通过
 
 ```text
-Web TaskSocket / API URL 定向测试：3 passed
-生产配置与 IM 灰度定向测试：50 passed
 桌面发布检查脚本：3 passed
-后端完整测试：399 passed, 1 skipped
-Web 完整测试：48 passed
-Admin 完整测试：9 passed
+后端完整测试：478 passed, 1 skipped
+Web 完整测试：62 passed
+Admin 完整测试：10 passed
 Playwright 端到端：6 passed
 Ruff / Mypy / Prettier / TypeScript：passed
+实时 OpenAPI 契约零漂移：passed
+秘密扫描：758 个受版本控制文件通过
+pnpm audit / pip-audit：无已知漏洞
 桌面 release 配置检查：passed
+cargo test --locked：2 passed
 cargo check --locked：passed
 Tauri release no-bundle 构建：passed
-独立代码复审：APPROVE（0 个未关闭问题）
 ```
 
 Tauri release 二进制已在本地生成，证明 Rust 壳、生产 Web 资源和当前配置能够完成
-工程编译。该二进制不是签名、公证后的交付安装包。
+工程编译。本次结构门禁使用合成 HTTPS API 地址，只验证地址和构建约束，不证明该域名、
+DNS、TLS 或远端 API 可用。该二进制也不是签名、公证后的交付安装包。
 
 ### 3.2 按设计拒绝
 
@@ -96,10 +128,10 @@ Tauri release 二进制已在本地生成，证明 Rust 壳、生产 Web 资源�
 macOS 分发必须配置正式 APPLE_SIGNING_IDENTITY，禁止临时签名
 ```
 
-2026-07-27 对现有 IM 证据执行离线退出门禁时：
+2026-07-31 对现有 IM 证据执行离线退出门禁时：
 
 ```text
-requiredDates: 2026-07-21 ... 2026-07-27
+requiredDates: 2026-07-25 ... 2026-07-31
 availableDates: []
 exitReady: false
 reason: 连续证据不足 7 天
@@ -115,8 +147,8 @@ exit code: 3
 | Web/API/Worker | 本地发布工程已收口   | 条件 Go      | 远程 CI、正式域名/TLS、真实 Provider 和 staging 全链路 |
 | macOS 桌面端   | release 工程编译通过 | No-Go        | 正式 API、开发者签名、公证、干净机器安装与运行验收     |
 | Windows 桌面端 | 配置门禁已收口       | No-Go        | Windows CI 构建、代码签名、安装/卸载和远程链路验收     |
-| 自动更新       | 未实现               | No-Go        | 更新服务、Tauri updater 依赖、离线私钥、公钥和回滚策略 |
-| 抖音 IM        | 代码门禁已收口       | No-Go        | 授权真实账号、S3-03 实证、连续七天指标与负责人签署     |
+| 自动更新       | 人工升级/回滚流程已定义，自动更新未实现 | No-Go | 更新服务、Tauri updater 依赖、离线私钥和公钥 |
+| 抖音 IM        | 只读代码门禁已收口   | No-Go        | 授权真实账号、监听实证、连续七天指标与负责人签署       |
 
 ## 5. 外部收口顺序
 
