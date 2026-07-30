@@ -22,6 +22,7 @@ TERMINAL_TASK = {"done", "failed", "canceled"}
 TERMINAL_JOB = {"success", "failed", "export_ready"}
 PIPELINE_MODULES = {"script_generation", "tts", "digital_human", "hd_export"}
 SECRET_KEYS = {"accessToken", "refreshToken", "session", "cookie", "authorization"}
+EXTERNAL_BLOCKED = "EXTERNAL_BLOCKED"
 
 
 def redact(value: Any) -> Any:
@@ -30,6 +31,78 @@ def redact(value: Any) -> Any:
     if isinstance(value, list):
         return [redact(item) for item in value]
     return value
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def current_commit_sha(repo_root: Path) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
+def response_trace_id(headers: Any) -> str:
+    return str(headers.get("X-Trace-Id") or headers.get("x-trace-id") or "")
+
+
+def elapsed_ms_since(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)
+
+
+def package_evidence(job: dict, package_path: Path, files: list[str]) -> dict:
+    return {
+        "job": job,
+        "path": str(package_path),
+        "sha256": sha256_file(package_path),
+        "files": files,
+        "publicationRevisionId": str(job.get("publicationRevisionId") or ""),
+        "postId": str(job.get("postId") or ""),
+        "postIdSource": str(job.get("postIdSource") or ""),
+        "providerTaskId": str(job.get("providerTaskId") or job.get("providerJobId") or ""),
+    }
+
+
+def collect_provider_task_ids(task: dict) -> list[dict[str, str]]:
+    evidence = []
+    for step in task.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        for key in ("providerTaskId", "provider_task_id", "providerJobId", "provider_job_id"):
+            task_id = str(step.get(key) or "")
+            if task_id:
+                evidence.append(
+                    {
+                        "step": str(step.get("name") or step.get("step") or ""),
+                        "provider": str(step.get("provider") or step.get("providerName") or ""),
+                        "taskId": task_id,
+                        "source": f"steps.{key}",
+                    }
+                )
+                break
+    artifacts = task.get("artifacts") or {}
+    if isinstance(artifacts, dict):
+        for key, value in artifacts.items():
+            if key.endswith("_task_id") or key.endswith("TaskId"):
+                task_id = str(value or "")
+                if task_id:
+                    evidence.append(
+                        {"step": "artifact", "provider": "", "taskId": task_id, "source": f"artifacts.{key}"}
+                    )
+    return evidence
 
 
 class ApiClient:
@@ -54,21 +127,24 @@ class ApiClient:
         try:
             with urllib.request.urlopen(request, timeout=60) as response:
                 status = response.status
+                trace_id = response_trace_id(response.headers)
                 raw = response.read()
             response_body = json.loads(raw) if raw else None
         except urllib.error.HTTPError as exc:
             status = exc.code
+            trace_id = response_trace_id(exc.headers)
             raw = exc.read()
             try:
                 response_body = json.loads(raw)
             except json.JSONDecodeError:
                 response_body = raw.decode(errors="replace")
-        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        elapsed_ms = elapsed_ms_since(started)
         exchange = {
             "method": method,
             "path": path,
             "status": status,
             "elapsedMs": elapsed_ms,
+            "responseTraceId": trace_id,
             "request": redact(body),
             "response": redact(response_body),
         }
@@ -257,7 +333,7 @@ def run_case(
     started = time.perf_counter()
     task = api.request("POST", "/pipelines", task_payload)[0]
     task = wait_for_task(api, task["id"], args.poll_seconds, args.timeout_seconds)
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    elapsed_ms = elapsed_ms_since(started)
     if task["status"] != "done":
         raise RuntimeError(f"{case_name} 第 {run_index} 次失败：{task.get('error')}")
     artifacts = task.get("artifacts") or {}
@@ -278,7 +354,7 @@ def run_case(
         exported = api.request("POST", f"/publish/jobs/{job['id']}/export")
         package_path = case_dir / f"{job['platform']}-{job['id'][:8]}.zip"
         api.download(exported["packageUrl"], package_path)
-        packages.append({"job": job, "path": str(package_path), "files": validate_package(package_path)})
+        packages.append(package_evidence(job, package_path, validate_package(package_path)))
 
     result = {
         "case": case_name,
@@ -288,8 +364,10 @@ def run_case(
         "estimatedPoints": quote["estimatedPoints"],
         "settledPoints": task["quotaCost"],
         "steps": task["steps"],
+        "providerTaskIds": collect_provider_task_ids(task),
         "quality": quality,
         "video": str(video_path),
+        "videoSha256": sha256_file(video_path),
         "ffprobe": probe,
         "packages": packages,
     }
@@ -300,8 +378,9 @@ def run_case(
 def main() -> int:
     args = parse_args()
     token = require_inputs(args)
+    repo_root = Path(__file__).resolve().parents[2]
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    output = args.output or Path(__file__).resolve().parents[2] / "evidence" / "stage2" / timestamp
+    output = args.output or repo_root / "evidence" / "stage2" / timestamp
     output.mkdir(parents=True, exist_ok=False)
     api = ApiClient(args.api_base, token, output)
     body = args.body_file.read_text(encoding="utf-8").strip()
@@ -310,6 +389,7 @@ def main() -> int:
 
     manifest = {
         "startedAt": datetime.now(UTC).isoformat(),
+        "commitSha": current_commit_sha(repo_root),
         "apiBase": args.api_base,
         "runs": args.runs,
         "platform": args.platform,
@@ -347,21 +427,45 @@ def main() -> int:
     ]
     verified_publish = selected_capability["verificationStatus"] == "verified" and bool(publish_successes)
     blockers = [] if verified_publish else ["所选平台尚无本轮真实账号发布成功证据"]
+    acceptance_status = "EXTERNALLY_ACCEPTED" if verified_publish else EXTERNAL_BLOCKED
+    exit_code = 0 if verified_publish else 2
     summary = {
         **manifest,
         "finishedAt": datetime.now(UTC).isoformat(),
         "capability": selected_capability,
         "results": results,
+        "publicationRevisionIds": sorted(
+            {
+                package["publicationRevisionId"]
+                for result in results
+                for package in result["packages"]
+                if package["publicationRevisionId"]
+            }
+        ),
+        "postIds": [
+            {
+                "postId": package["postId"],
+                "postIdSource": package["postIdSource"],
+                "platform": package["job"].get("platform", ""),
+                "jobId": package["job"].get("id", ""),
+            }
+            for result in results
+            for package in result["packages"]
+            if package["postId"]
+        ],
+        "providerTaskIds": [item for result in results for item in result["providerTaskIds"]],
         "billingBefore": before,
         "billingAfter": after,
         "verifiedRealPublish": verified_publish,
+        "acceptanceStatus": acceptance_status,
+        "exitCode": exit_code,
         "blockers": blockers,
     }
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"验收证据已保存：{output}")
     if blockers:
-        print("真实成片链路通过，但发布验收未闭环：" + "；".join(blockers), file=sys.stderr)
-        return 2
+        print(f"{EXTERNAL_BLOCKED}：真实成片链路通过，但发布验收未闭环：" + "；".join(blockers), file=sys.stderr)
+        return exit_code
     print(f"第二阶段真实链路通过：{len(results)} 个成片任务，真实发布成功 {len(publish_successes)} 次")
     return 0
 
