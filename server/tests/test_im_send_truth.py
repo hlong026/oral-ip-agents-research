@@ -19,6 +19,18 @@ from app.modules.im.schemas import SendMessageIn
 from app.modules.publish import repository as publish_repo
 
 
+def test_server_send_and_retry_are_not_exposed_as_public_http() -> None:
+    from app.modules.im.router import router
+
+    paths = {route.path for route in router.routes}
+
+    assert "/im/conversations/{conversation_id}/send" not in paths
+    assert "/im/messages/{message_id}/retry" not in paths
+    assert "/im/automation/status" not in paths
+    assert "/im/automation/authorize" not in paths
+    assert "/im/automation/{account_id}/disable" not in paths
+
+
 async def _create_conversation() -> tuple[str, IMConversation]:
     user_id = uuid.uuid4().hex
     async with SessionLocal() as db:

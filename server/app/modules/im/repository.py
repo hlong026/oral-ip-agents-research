@@ -556,6 +556,11 @@ async def set_global_kill_switch(db: AsyncSession, *, stopped: bool) -> int:
 
     canceled = 0
     if stopped:
+        await db.execute(
+            update(IMListenerState)
+            .where(IMListenerState.status == "listening")
+            .values(status="disconnected", error_msg="GlobalKillSwitch")
+        )
         result = await db.execute(
             update(IMMessage)
             .where(IMMessage.send_status == "scheduled")

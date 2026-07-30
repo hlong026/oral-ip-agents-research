@@ -433,6 +433,12 @@ async def start_listener(db: AsyncSession, user_id: str, inp: ListenerControlIn)
     """Persist listener intent; the independent supervisor owns the connection."""
     await _require_owned_account(db, user_id, inp.accountId)
     await _require_gray_account(db, inp.accountId, user_id)
+    control = await repo.get_global_control(db)
+    if control is not None and control.stopped:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "IM_GLOBAL_STOPPED", "message": "管理员已停止私信监听，请稍后再试"},
+        )
 
     await repo.upsert_listener_state(
         db, account_id=inp.accountId, user_id=user_id, status="listening", started_at=datetime.now(UTC), error_msg=""
@@ -847,7 +853,8 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
         )
         return
 
-    if matched_rule.delivery_mode != "auto":
+    listen_only = get_settings().im_listen_only
+    if listen_only or matched_rule.delivery_mode != "auto":
         await repo.create_message(
             db,
             conversation_id=conv.id,
@@ -858,6 +865,7 @@ async def _try_auto_reply(db: AsyncSession, conv: IMConversation, text: str) -> 
             auto_replied=True,
             rule_id=matched_rule.id,
             send_status="suggested",
+            send_error="ListenOnlyMode" if listen_only and matched_rule.delivery_mode == "auto" else "",
             moderation_status="approved",
         )
         return

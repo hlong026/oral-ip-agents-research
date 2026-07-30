@@ -53,6 +53,7 @@ async def test_api_only_persists_listener_intent(client: AsyncClient, monkeypatc
     monkeypatch.setattr(im_listener, "stop_listening", unexpected_runtime_call)
 
     async with SessionLocal() as db:
+        await im_repo.set_global_kill_switch(db, stopped=False)
         started = await start_listener(db, user_id, ListenerControlIn(accountId=account_id))
     assert started.status == "listening"
 

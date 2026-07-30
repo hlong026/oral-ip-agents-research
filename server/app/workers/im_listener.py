@@ -10,7 +10,7 @@ from sqlalchemy import and_, select
 
 from app.core.config import get_settings
 from app.core.db import SessionLocal
-from app.modules.im.models import IMGrayAccount, IMListenerState
+from app.modules.im.models import IMGlobalControl, IMGrayAccount, IMListenerState
 from app.modules.publish.models import PublishAccount
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,9 @@ async def reconcile_listeners(lease: ListenerLease | None = None) -> None:
     if not get_settings().im_enabled:
         return
     async with SessionLocal() as db:
+        control = await db.get(IMGlobalControl, "global")
+        if control is not None and control.stopped:
+            return
         query = (
             select(IMListenerState)
             .join(

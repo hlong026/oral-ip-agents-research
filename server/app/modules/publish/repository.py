@@ -26,6 +26,15 @@ async def get_account(db: AsyncSession, account_id: str, user_id: str | None = N
     return res.scalar_one_or_none()
 
 
+async def get_accounts_by_ids(db: AsyncSession, account_ids: set[str], user_id: str) -> dict[str, PublishAccount]:
+    if not account_ids:
+        return {}
+    res = await db.execute(
+        select(PublishAccount).where(PublishAccount.user_id == user_id, PublishAccount.id.in_(account_ids))
+    )
+    return {account.id: account for account in res.scalars().all()}
+
+
 async def list_accounts(db: AsyncSession, user_id: str) -> list[PublishAccount]:
     res = await db.execute(
         select(PublishAccount).where(PublishAccount.user_id == user_id).order_by(PublishAccount.created_at.desc())

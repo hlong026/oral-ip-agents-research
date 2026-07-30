@@ -1,6 +1,6 @@
 /**
  * 由后端 OpenAPI 契约自动生成（scripts/gen-api-types.mjs）
- * API 版本：1.0.0 · 生成时间：2026-07-30T15:24:40.183Z
+ * API 版本：1.0.0 · 生成时间：2026-07-30T16:14:48.818Z
  * 禁止手改：每次后端发版执行 pnpm gen:api 重新生成，CI 以 --check 校验零漂移。
  */
 
@@ -23,17 +23,14 @@ export interface AdminLoginIn {
   deviceId?: string | null;
 }
 
-export interface AutomationConsentIn {
-  accountId: string;
-  accepted: boolean;
-  riskVersion: string;
+export interface AdminTaskActionIn {
+  reason: string;
 }
 
-export interface AutomationStatusOut {
-  accountId: string;
-  authorized: boolean;
-  riskVersion?: string;
-  acceptedAt?: string | null;
+export interface AdminTaskRetryIn {
+  reason: string;
+  step: string;
+  quoteId?: string | null;
 }
 
 export interface AvatarOut {
@@ -894,11 +891,6 @@ export interface ScriptVersionOut {
   modelName: string;
   promptVersion: string;
   createdAt: string;
-}
-
-export interface SendMessageIn {
-  content: string;
-  msgType?: number;
 }
 
 export interface SettingsIn {

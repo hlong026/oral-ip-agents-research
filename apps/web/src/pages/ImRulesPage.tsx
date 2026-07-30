@@ -6,7 +6,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-/** 自动回复规则配置 + 监听状态面板 */
+/** 建议回复规则配置 + 监听状态面板 */
 export default function ImRulesPage() {
   const queryClient = useQueryClient();
   const [showForm, setShowForm] = useState(false);
@@ -41,9 +41,9 @@ export default function ImRulesPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold">自动回复规则</h1>
+          <h1 className="text-xl font-bold">建议回复规则</h1>
           <p className="mt-1 text-sm text-text-3">
-            配置私信自动回复策略 · 关键词/全量/LLM 三种触发模式
+            匹配私信并生成待人工确认的回复建议，不由服务端发送
           </p>
         </div>
         <button
@@ -81,9 +81,7 @@ export default function ImRulesPage() {
                   <span className="chip text-[10px]">
                     {rule.replyMode === "llm" ? "AI 生成" : "模板"}
                   </span>
-                  <span className="chip text-[10px]">
-                    {rule.deliveryMode === "auto" ? "自动发送" : "仅建议"}
-                  </span>
+                  <span className="chip text-[10px]">仅建议</span>
                 </div>
                 <div className="mt-0.5 text-xs text-text-3">
                   {rule.triggerType === "keyword" &&
@@ -235,9 +233,6 @@ function RuleForm({
     rule?.triggerPattern ?? "",
   );
   const [replyMode, setReplyMode] = useState(rule?.replyMode ?? "template");
-  const [deliveryMode, setDeliveryMode] = useState(
-    rule?.deliveryMode ?? "suggestion",
-  );
   const [replyTemplate, setReplyTemplate] = useState(rule?.replyTemplate ?? "");
   const [llmPrompt, setLlmPrompt] = useState(rule?.llmPrompt ?? "");
   const [dailyLimit, setDailyLimit] = useState(rule?.dailyLimit ?? 50);
@@ -253,7 +248,7 @@ function RuleForm({
         triggerType,
         triggerPattern,
         replyMode,
-        deliveryMode,
+        deliveryMode: "suggestion" as const,
         replyTemplate,
         llmPrompt,
         dailyLimit,
@@ -289,7 +284,7 @@ function RuleForm({
               className="input"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="如：价格咨询自动回复"
+              placeholder="如：价格咨询建议"
             />
           </Field>
           <Field label="触发方式">
@@ -324,16 +319,9 @@ function RuleForm({
             </select>
           </Field>
           <Field label="交付方式">
-            <select
-              className="input"
-              value={deliveryMode}
-              onChange={(e) =>
-                setDeliveryMode(e.target.value as "suggestion" | "auto")
-              }
-            >
-              <option value="suggestion">仅生成建议（默认，不自动发送）</option>
-              <option value="auto">审核通过后自动发送</option>
-            </select>
+            <p className="rounded-lg border border-stroke bg-white/5 px-3 py-2 text-sm text-text-2">
+              仅生成建议，由用户在抖音官方页面人工发送
+            </p>
           </Field>
           {replyMode === "template" && (
             <Field label="回复模板">

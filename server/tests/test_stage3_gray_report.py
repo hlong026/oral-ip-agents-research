@@ -16,12 +16,14 @@ def _clean_day(day: date) -> dict:
         "date": day.isoformat(),
         "summary": {
             "grayAccounts": 1,
+            "listenerAccounts": 1,
+            "listeningAccounts": 1,
             "connectionAttempts": 10,
             "connectionSuccessRate": 100.0,
             "dropoutRate": 0.0,
-            "sendSuccess": 20,
+            "sendSuccess": 0,
             "sendFailure": 0,
-            "sendSuccessRate": 100.0,
+            "sendSuccessRate": 0.0,
             "ownershipRejected": 0,
             "riskControlIncidents": 0,
         },
@@ -49,6 +51,17 @@ def test_exit_rejects_any_ownership_or_risk_control_incident() -> None:
     assert result["exitReady"] is False
     assert any("归属拒绝" in reason for reason in result["reasons"])
     assert any("风控事故" in reason for reason in result["reasons"])
+
+
+def test_exit_rejects_any_server_side_outbound_activity() -> None:
+    today = date(2026, 7, 21)
+    seven_days = [_clean_day(today - timedelta(days=offset)) for offset in range(6, -1, -1)]
+    seven_days[3]["summary"]["sendSuccess"] = 1
+
+    result = evaluate_exit(seven_days, today=today)
+
+    assert result["exitReady"] is False
+    assert any("服务端发送活动" in reason for reason in result["reasons"])
 
 
 def test_exit_accepts_seven_clean_consecutive_days() -> None:

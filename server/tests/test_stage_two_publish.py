@@ -29,9 +29,26 @@ async def test_unverified_platforms_are_export_only(monkeypatch) -> None:
 
     capabilities = service.publish_capabilities()
 
-    assert {item.platform for item in capabilities} == {"douyin", "xiaohongshu", "shipinhao"}
+    assert {item.platform for item in capabilities} == {"douyin", "xiaohongshu", "shipinhao", "kuaishou"}
     assert all(item.mode == "export_only" for item in capabilities)
     assert all(not item.automaticEnabled for item in capabilities)
+
+
+async def test_config_cannot_verify_platform_without_a_driver(monkeypatch) -> None:
+    from app.modules.publish import service
+
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(app_env="prod", publish_verified_platforms="kuaishou", publish_force_real=True),
+    )
+
+    kuaishou = next(item for item in service.publish_capabilities() if item.platform == "kuaishou")
+
+    assert kuaishou.mode == "export_only"
+    assert kuaishou.verificationStatus == "unverified"
+    assert kuaishou.automaticEnabled is False
+    assert "未实现" in kuaishou.reason
 
 
 async def test_development_capability_uses_explicit_mock_driver(monkeypatch) -> None:
@@ -189,6 +206,59 @@ async def test_publish_job_list_filters_by_task_before_pagination() -> None:
 
     assert result.total == 1
     assert [item.id for item in result.items] == [expected.id]
+
+
+async def test_publish_job_list_loads_account_nicknames_in_batch(monkeypatch) -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    async with SessionLocal() as db:
+        first_account = await publish_repo.create_account(
+            db,
+            user_id="batch-account-user",
+            platform="douyin",
+            nickname="抖音主号",
+            session_json="{}",
+            status="active",
+        )
+        second_account = await publish_repo.create_account(
+            db,
+            user_id="batch-account-user",
+            platform="xiaohongshu",
+            nickname="小红书主号",
+            session_json="{}",
+            status="active",
+        )
+        await publish_repo.create_job(
+            db,
+            user_id="batch-account-user",
+            account_id=first_account.id,
+            task_id="batch-task-a",
+            platform="douyin",
+            title="批量任务一",
+            status="success",
+        )
+        await publish_repo.create_job(
+            db,
+            user_id="batch-account-user",
+            account_id=second_account.id,
+            task_id="batch-task-b",
+            platform="xiaohongshu",
+            title="批量任务二",
+            status="success",
+        )
+
+        async def forbidden_get_account(*_args, **_kwargs):
+            raise AssertionError("list_jobs must not query publish accounts one-by-one")
+
+        monkeypatch.setattr(publish_repo, "get_account", forbidden_get_account)
+        result = await service.list_jobs(db, "batch-account-user", None, 1, 20)
+
+    nicknames = {item.accountId: item.accountNickname for item in result.items}
+    assert nicknames == {
+        first_account.id: "抖音主号",
+        second_account.id: "小红书主号",
+    }
 
 
 async def test_failed_publish_job_is_not_reused_after_account_is_fixed(monkeypatch) -> None:

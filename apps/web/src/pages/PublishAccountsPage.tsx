@@ -2,7 +2,6 @@ import {
   HttpError,
   imApi,
   publishApi,
-  type IMAutomationStatus,
   type IMListenerStatus,
 } from "@oral/api-client";
 import {
@@ -491,8 +490,6 @@ export default function PublishAccountsPage() {
 function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
   const queryClient = useQueryClient();
   const [busyId, setBusyId] = useState("");
-  const [consentId, setConsentId] = useState("");
-  const [riskAccepted, setRiskAccepted] = useState(false);
   const dyAccounts = accounts.filter((a) => a.platform === "douyin");
 
   const { data: listeners } = useQuery({
@@ -500,17 +497,8 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
     queryFn: () => imApi.listenerStatus(),
     refetchInterval: 15_000,
   });
-  const { data: automationStatuses } = useQuery({
-    queryKey: ["im-automation-status"],
-    queryFn: () => imApi.automationStatus(),
-  });
-
   const listenerMap = new Map<string, IMListenerStatus>();
   (listeners ?? []).forEach((l) => listenerMap.set(l.accountId, l));
-  const automationMap = new Map<string, IMAutomationStatus>();
-  (automationStatuses ?? []).forEach((item) =>
-    automationMap.set(item.accountId, item),
-  );
 
   const toggle = async (account: PublishAccount) => {
     const ls = listenerMap.get(account.id);
@@ -523,33 +511,6 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         await imApi.startListener(account.id);
       }
       await queryClient.invalidateQueries({ queryKey: ["im-listener-status"] });
-    } finally {
-      setBusyId("");
-    }
-  };
-
-  const enableAutomation = async (accountId: string) => {
-    if (!riskAccepted) return;
-    setBusyId(accountId);
-    try {
-      await imApi.authorizeAutomation(accountId);
-      setConsentId("");
-      setRiskAccepted(false);
-      await queryClient.invalidateQueries({
-        queryKey: ["im-automation-status"],
-      });
-    } finally {
-      setBusyId("");
-    }
-  };
-
-  const disableAutomation = async (accountId: string) => {
-    setBusyId(accountId);
-    try {
-      await imApi.disableAutomation(accountId);
-      await queryClient.invalidateQueries({
-        queryKey: ["im-automation-status"],
-      });
     } finally {
       setBusyId("");
     }
@@ -569,8 +530,6 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
         {dyAccounts.map((a) => {
           const ls = listenerMap.get(a.id);
           const st = ls?.status ?? "disconnected";
-          const automationAuthorized =
-            automationMap.get(a.id)?.authorized ?? false;
           return (
             <div
               key={a.id}
@@ -588,32 +547,11 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
                       {st === "error" && `异常：${ls?.errorMsg || "未知"}`}
                     </span>
                     <p className="mt-1 text-xs text-text-3">
-                      自动回复：
-                      {automationAuthorized ? "已授权" : "未授权（仅生成建议）"}
+                      只读监听；回复必须在抖音官方页面人工发送
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {automationAuthorized ? (
-                    <button
-                      className="rounded-lg border border-danger/40 px-3 py-1 text-xs text-danger hover:bg-danger/10"
-                      disabled={busyId === a.id}
-                      onClick={() => void disableAutomation(a.id)}
-                    >
-                      紧急停止自动回复
-                    </button>
-                  ) : (
-                    <button
-                      className="btn-ghost px-3 py-1 text-xs"
-                      disabled={busyId === a.id}
-                      onClick={() => {
-                        setConsentId(a.id);
-                        setRiskAccepted(false);
-                      }}
-                    >
-                      授权自动回复
-                    </button>
-                  )}
                   <span
                     className={`inline-block h-2 w-2 rounded-full ${
                       st === "listening"
@@ -640,41 +578,6 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
                   </button>
                 </div>
               </div>
-              {consentId === a.id && !automationAuthorized && (
-                <div className="mt-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-text-2">
-                  <label className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={riskAccepted}
-                      onChange={(event) =>
-                        setRiskAccepted(event.target.checked)
-                      }
-                    />
-                    <span>
-                      我确认已取得该账号的运营授权，并知悉自动回复可能触发平台风控；高风险内容仍只会生成建议。
-                    </span>
-                  </label>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <button
-                      className="btn-ghost px-3 py-1"
-                      onClick={() => {
-                        setConsentId("");
-                        setRiskAccepted(false);
-                      }}
-                    >
-                      取消
-                    </button>
-                    <button
-                      className="btn-primary px-3 py-1"
-                      disabled={!riskAccepted || busyId === a.id}
-                      onClick={() => void enableAutomation(a.id)}
-                    >
-                      确认并启用
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           );
         })}
@@ -682,7 +585,7 @@ function ImListenerPanel({ accounts }: { accounts: PublishAccount[] }) {
       <div className="mt-3 flex items-start gap-1.5 rounded-xl border border-info/30 bg-info/10 p-3 text-xs text-info">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
-          启动监听后，系统将实时接收该账号的抖音私信，可在「私信中心」查看和回复。
+          启动后仅聚合私信与生成建议；应用不会调用服务端发送接口，人工回复会打开抖音官方页面。
         </span>
       </div>
     </div>

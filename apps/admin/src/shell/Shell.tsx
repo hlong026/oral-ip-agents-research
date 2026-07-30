@@ -2,6 +2,7 @@ import {
   Calculator,
   Coins,
   LayoutDashboard,
+  ListChecks,
   type LucideIcon,
   Package,
   ServerCog,
@@ -21,7 +22,10 @@ interface NavItem {
 const navGroups: Array<{ title: string; items: NavItem[] }> = [
   {
     title: "运营看板",
-    items: [{ to: "/", label: "总览", icon: LayoutDashboard }],
+    items: [
+      { to: "/", label: "总览", icon: LayoutDashboard },
+      { to: "/tasks", label: "任务运维", icon: ListChecks },
+    ],
   },
   {
     title: "商业化",

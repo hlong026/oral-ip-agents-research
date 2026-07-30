@@ -1,4 +1,4 @@
-"""im 模块 HTTP 路由（私信中心 + 自动回复规则 + 监听控制）"""
+"""im 模块 HTTP 路由（私信中心 + 建议回复规则 + 监听控制）"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +9,6 @@ from app.core.deps import get_current_user_id, require_admin
 
 from . import service
 from .schemas import (
-    AutomationConsentIn,
-    AutomationStatusOut,
     ConversationPageOut,
     GrayAccountOut,
     KillSwitchIn,
@@ -24,7 +22,6 @@ from .schemas import (
     RuleCreateIn,
     RuleOut,
     RuleUpdateIn,
-    SendMessageIn,
 )
 
 router = APIRouter(prefix="/im", tags=["im"])
@@ -58,31 +55,12 @@ async def list_messages(
     return await service.list_messages(db, user_id, conversation_id, page, pageSize, search)
 
 
-@router.post("/conversations/{conversation_id}/send", response_model=MessageOut)
-async def send_message(
-    conversation_id: str,
-    inp: SendMessageIn,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
-):
-    return await service.send_message(db, user_id, conversation_id, inp)
-
-
 @router.put("/conversations/{conversation_id}/read")
 async def mark_read(
     conversation_id: str, db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user_id)
 ):
     await service.mark_read(db, user_id, conversation_id)
     return {"ok": True}
-
-
-@router.post("/messages/{message_id}/retry", response_model=MessageOut)
-async def retry_message(
-    message_id: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
-):
-    return await service.retry_message(db, user_id, message_id)
 
 
 @router.post("/messages/{message_id}/takeover", response_model=MessageOut)
@@ -94,7 +72,7 @@ async def take_over_message(
     return await service.take_over_message(db, user_id, message_id)
 
 
-# ---- 自动回复规则 ----
+# ---- 建议回复规则 ----
 
 
 @router.get("/rules", response_model=list[RuleOut])
@@ -147,32 +125,6 @@ async def stop_listener(
     inp: ListenerControlIn, db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user_id)
 ):
     return await service.stop_listener(db, user_id, inp)
-
-
-# ---- 自动发送授权与 Kill Switch ----
-
-
-@router.get("/automation/status", response_model=list[AutomationStatusOut])
-async def automation_status(db: AsyncSession = Depends(get_db), user_id: str = Depends(get_current_user_id)):
-    return await service.list_automation_status(db, user_id)
-
-
-@router.post("/automation/authorize", response_model=AutomationStatusOut)
-async def authorize_automation(
-    inp: AutomationConsentIn,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
-):
-    return await service.authorize_automation(db, user_id, inp)
-
-
-@router.post("/automation/{account_id}/disable", response_model=AutomationStatusOut)
-async def disable_automation(
-    account_id: str,
-    db: AsyncSession = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
-):
-    return await service.disable_automation(db, user_id, account_id)
 
 
 @admin_router.put("/kill-switch", response_model=KillSwitchOut)

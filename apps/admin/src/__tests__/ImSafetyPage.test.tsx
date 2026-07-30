@@ -38,8 +38,8 @@ describe("IM safety page", () => {
             connectionAttempts: 2,
             connectionSuccessRate: 100,
             dropoutRate: 0,
-            sendSuccessRate: 100,
-            sendSuccess: 3,
+            sendSuccessRate: 0,
+            sendSuccess: 0,
             sendFailure: 0,
             quotaRejected: 0,
             moderationBlocked: 0,
@@ -66,7 +66,8 @@ describe("IM safety page", () => {
     ).toBeInTheDocument();
     expect(await screen.findByText("灰度测试账号")).toBeInTheDocument();
     expect(screen.getByText("1/1")).toBeInTheDocument();
-    expect(screen.getAllByText("100%")).toHaveLength(2);
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.getByText("服务端发送活动")).toBeInTheDocument();
   });
 });
 

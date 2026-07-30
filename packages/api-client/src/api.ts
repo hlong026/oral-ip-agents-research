@@ -417,7 +417,7 @@ export const notifyApi = {
   markAllRead: () => http.post<void>("/notifications/read-all"),
 };
 
-// ---------- im（私信自动回复） ----------
+// ---------- im（只读监听与建议回复） ----------
 export interface IMConversation {
   id: string;
   accountId: string;
@@ -485,13 +485,6 @@ export interface IMListenerStatus {
   startedAt?: string | null;
 }
 
-export interface IMAutomationStatus {
-  accountId: string;
-  authorized: boolean;
-  riskVersion: string;
-  acceptedAt?: string | null;
-}
-
 export const imApi = {
   conversations: (page = 1, pageSize = 20, search = "", accountId = "") => {
     const params = new URLSearchParams({
@@ -520,13 +513,6 @@ export const imApi = {
       pageSize: number;
     }>(`/im/conversations/${conversationId}/messages?${params}`);
   },
-  send: (conversationId: string, content: string, msgType = 7) =>
-    http.post<IMMessage>(`/im/conversations/${conversationId}/send`, {
-      content,
-      msgType,
-    }),
-  retryMessage: (messageId: string) =>
-    http.post<IMMessage>(`/im/messages/${messageId}/retry`),
   takeOverMessage: (messageId: string) =>
     http.post<IMMessage>(`/im/messages/${messageId}/takeover`),
   markRead: (conversationId: string) =>
@@ -544,16 +530,6 @@ export const imApi = {
     http.post<IMListenerStatus>("/im/listener/start", { accountId }),
   stopListener: (accountId: string) =>
     http.post<IMListenerStatus>("/im/listener/stop", { accountId }),
-  automationStatus: () =>
-    http.get<IMAutomationStatus[]>("/im/automation/status"),
-  authorizeAutomation: (accountId: string) =>
-    http.post<IMAutomationStatus>("/im/automation/authorize", {
-      accountId,
-      accepted: true,
-      riskVersion: "im-auto-reply-v1",
-    }),
-  disableAutomation: (accountId: string) =>
-    http.post<IMAutomationStatus>(`/im/automation/${accountId}/disable`),
 };
 
 // ---------- dashboard ----------

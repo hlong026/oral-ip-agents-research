@@ -59,9 +59,9 @@ export default function ImSafetyPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-2xl font-semibold">私信自动回复安全</h1>
+        <h1 className="text-2xl font-semibold">私信监听安全</h1>
         <p className="mt-2 text-sm text-text-3">
-          全局开关优先于灰度名单和用户授权；急停会立即取消所有尚未发送的自动回复任务。
+          全局开关优先于灰度名单；急停会停止监听，并取消历史版本遗留的排队消息。
         </p>
       </div>
       <section className="glass max-w-2xl p-5">
@@ -72,8 +72,8 @@ export default function ImSafetyPage() {
               {isLoading
                 ? "正在读取当前状态…"
                 : stopped
-                  ? "已停止：所有账号均不能自动发送"
-                  : "已开放：仅灰度名单内且已签署风险协议的账号可自动发送"}
+                  ? "已停止：不能新建监听，现有监听已断开"
+                  : "已开放：仅灰度名单内账号可只读监听，服务端发送仍关闭"}
             </p>
           </div>
           <span
@@ -99,7 +99,7 @@ export default function ImSafetyPage() {
             disabled={update.isPending || !stopped}
             onClick={() => void update.mutateAsync(false)}
           >
-            恢复受控自动回复
+            恢复灰度监听
           </button>
         </div>
         {update.data?.canceledMessages ? (
@@ -138,8 +138,15 @@ export default function ImSafetyPage() {
             value={`${monitoring.data?.dropoutRate ?? 0}%`}
           />
           <Metric
-            label="发送成功率"
-            value={`${monitoring.data?.sendSuccessRate ?? 0}%`}
+            label="服务端发送活动"
+            value={String(
+              (monitoring.data?.sendSuccess ?? 0) +
+                (monitoring.data?.sendFailure ?? 0),
+            )}
+            danger={Boolean(
+              (monitoring.data?.sendSuccess ?? 0) +
+              (monitoring.data?.sendFailure ?? 0),
+            )}
           />
           <Metric
             label="限额 / 审核拦截"

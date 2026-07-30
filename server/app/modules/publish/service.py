@@ -48,6 +48,7 @@ _PLATFORM_MODES = {
     "douyin": "automatic",
     "xiaohongshu": "semi_automatic",
     "shipinhao": "semi_automatic",
+    "kuaishou": "semi_automatic",
 }
 
 # 重新授权票据绑定：ticket → (account_id, 过期时间)。与驱动登录会话同属进程内状态，扫码成功后原地更新旧账号；
@@ -107,7 +108,8 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
     verified = {item.strip() for item in settings.publish_verified_platforms.split(",") if item.strip()}
     capabilities: list[PublishCapabilityOut] = []
     for platform, platform_name in PLATFORM_NAMES.items():
-        if settings.app_env == "dev" and not settings.publish_force_real:
+        driver_available = platform in registry.publish_drivers
+        if settings.app_env == "dev" and not settings.publish_force_real and driver_available:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -118,7 +120,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                     reason="开发环境模拟发布，结果不代表真实平台可用性",
                 )
             )
-        elif platform in verified:
+        elif platform in verified and driver_available:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -130,6 +132,11 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                 )
             )
         else:
+            reason = (
+                "尚未实现该平台发布驱动，仅提供完整人工发布包"
+                if not driver_available
+                else "尚未完成真实账号验收，仅提供完整人工发布包"
+            )
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -137,7 +144,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                     mode="export_only",
                     verificationStatus="unverified",
                     automaticEnabled=False,
-                    reason="尚未完成真实账号验收，仅提供完整人工发布包",
+                    reason=reason,
                 )
             )
     return capabilities
@@ -535,10 +542,8 @@ async def list_jobs(
     task_id: str = "",
 ) -> JobPageOut:
     items, total = await repo.list_jobs(db, user_id, status_, page, page_size, task_id)
-    outs = []
-    for j in items:
-        acc = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
-        outs.append(job_to_out(j, acc))
+    accounts = await repo.get_accounts_by_ids(db, {j.account_id for j in items if j.account_id}, user_id)
+    outs = [job_to_out(j, accounts.get(j.account_id)) for j in items]
     return JobPageOut(items=outs, total=total, page=page, pageSize=page_size)
 
 

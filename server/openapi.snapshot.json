@@ -507,6 +507,40 @@
               ],
               "title": "Export"
             }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdfrom"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdto"
+            }
           }
         ],
         "responses": {
@@ -3842,61 +3876,6 @@
         }
       }
     },
-    "/api/v1/im/conversations/{conversation_id}/send": {
-      "post": {
-        "tags": ["im"],
-        "summary": "Send Message",
-        "operationId": "send_message_api_v1_im_conversations__conversation_id__send_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "conversation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Conversation Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SendMessageIn"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/im/conversations/{conversation_id}/read": {
       "put": {
         "tags": ["im"],
@@ -3924,51 +3903,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/im/messages/{message_id}/retry": {
-      "post": {
-        "tags": ["im"],
-        "summary": "Retry Message",
-        "operationId": "retry_message_api_v1_im_messages__message_id__retry_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "message_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Message Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageOut"
-                }
               }
             }
           },
@@ -4355,123 +4289,6 @@
             "HTTPBearer": []
           }
         ]
-      }
-    },
-    "/api/v1/im/automation/status": {
-      "get": {
-        "tags": ["im"],
-        "summary": "Automation Status",
-        "operationId": "automation_status_api_v1_im_automation_status_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AutomationStatusOut"
-                  },
-                  "type": "array",
-                  "title": "Response Automation Status Api V1 Im Automation Status Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/im/automation/authorize": {
-      "post": {
-        "tags": ["im"],
-        "summary": "Authorize Automation",
-        "operationId": "authorize_automation_api_v1_im_automation_authorize_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AutomationConsentIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AutomationStatusOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/api/v1/im/automation/{account_id}/disable": {
-      "post": {
-        "tags": ["im"],
-        "summary": "Disable Automation",
-        "operationId": "disable_automation_api_v1_im_automation__account_id__disable_post",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "account_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Account Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AutomationStatusOut"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
       }
     },
     "/api/admin/v1/auth/login": {
@@ -5482,6 +5299,362 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/operations/health": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "Operations Health",
+        "description": "生产健康摘要；Provider 明细最多扫描窗口内最近一万条任务。",
+        "operationId": "operations_health_api_admin_v1_operations_health_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 744,
+              "minimum": 1,
+              "default": 24,
+              "title": "Hours"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/tasks": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "List Global Tasks",
+        "description": "跨用户任务检索；只读查询不能改变业务状态。",
+        "operationId": "list_global_tasks_api_admin_v1_tasks_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Userid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "step",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Step"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdfrom"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdto"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/tasks/{task_id}/retry-quote": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Preflight Global Task Retry",
+        "operationId": "preflight_global_task_retry_api_admin_v1_tasks__task_id__retry_quote_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Cancel Global Task",
+        "operationId": "cancel_global_task_api_admin_v1_tasks__task_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTaskActionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/v1/tasks/{task_id}/retry": {
+      "post": {
+        "tags": ["admin"],
+        "summary": "Retry Global Task",
+        "operationId": "retry_global_task_api_admin_v1_tasks__task_id__retry_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminTaskRetryIn"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -6529,6 +6702,40 @@
               ],
               "title": "Step"
             }
+          },
+          {
+            "name": "createdFrom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdfrom"
+            }
+          },
+          {
+            "name": "createdTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Createdto"
+            }
           }
         ],
         "responses": {
@@ -6669,55 +6876,49 @@
         "title": "AdminLoginIn",
         "description": "管理端手机号+密码登录"
       },
-      "AutomationConsentIn": {
+      "AdminTaskActionIn": {
         "properties": {
-          "accountId": {
+          "reason": {
             "type": "string",
-            "title": "Accountid"
-          },
-          "accepted": {
-            "type": "boolean",
-            "title": "Accepted"
-          },
-          "riskVersion": {
-            "type": "string",
-            "title": "Riskversion"
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
           }
         },
         "type": "object",
-        "required": ["accountId", "accepted", "riskVersion"],
-        "title": "AutomationConsentIn"
+        "required": ["reason"],
+        "title": "AdminTaskActionIn"
       },
-      "AutomationStatusOut": {
+      "AdminTaskRetryIn": {
         "properties": {
-          "accountId": {
+          "reason": {
             "type": "string",
-            "title": "Accountid"
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
           },
-          "authorized": {
-            "type": "boolean",
-            "title": "Authorized"
-          },
-          "riskVersion": {
+          "step": {
             "type": "string",
-            "title": "Riskversion",
-            "default": ""
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Step"
           },
-          "acceptedAt": {
+          "quoteId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Acceptedat"
+            "title": "Quoteid"
           }
         },
         "type": "object",
-        "required": ["accountId", "authorized"],
-        "title": "AutomationStatusOut"
+        "required": ["reason", "step"],
+        "title": "AdminTaskRetryIn"
       },
       "AvatarOut": {
         "properties": {
@@ -10906,22 +11107,6 @@
           "createdAt"
         ],
         "title": "ScriptVersionOut"
-      },
-      "SendMessageIn": {
-        "properties": {
-          "content": {
-            "type": "string",
-            "title": "Content"
-          },
-          "msgType": {
-            "type": "integer",
-            "title": "Msgtype",
-            "default": 7
-          }
-        },
-        "type": "object",
-        "required": ["content"],
-        "title": "SendMessageIn"
       },
       "SettingsIn": {
         "properties": {

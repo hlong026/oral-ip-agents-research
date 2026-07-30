@@ -360,3 +360,37 @@ async def test_admin_export_user_usage_csv(client: AsyncClient, admin_user):
     assert "时间" in lines[0]
     assert "tts" in lines[1]
     assert "80" in lines[1]
+
+
+@pytest.mark.asyncio
+async def test_usage_exports_reject_ranges_larger_than_31_days(
+    client: AsyncClient,
+    admin_user,
+    normal_user,
+):
+    created_from = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    created_to = datetime.now(UTC).isoformat()
+
+    admin_response = await client.get(
+        "/api/admin/v1/admin/usage/export",
+        params={
+            "user_id": normal_user["user_id"],
+            "createdFrom": created_from,
+            "createdTo": created_to,
+        },
+        headers=admin_user["headers"],
+    )
+    user_response = await client.get(
+        "/api/v1/billing/usage",
+        params={
+            "export": "csv",
+            "createdFrom": created_from,
+            "createdTo": created_to,
+        },
+        headers=normal_user["headers"],
+    )
+
+    assert admin_response.status_code == 422
+    assert admin_response.json()["detail"]["code"] == "EXPORT_WINDOW_TOO_LARGE"
+    assert user_response.status_code == 422
+    assert user_response.json()["detail"]["code"] == "EXPORT_WINDOW_TOO_LARGE"

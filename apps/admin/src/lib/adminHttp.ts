@@ -130,6 +130,78 @@ export interface AdminUser {
   createdAt: string;
 }
 
+export interface AdminTask {
+  id: string;
+  userId: string;
+  userNickname: string;
+  title: string;
+  status: string;
+  step: string;
+  provider: string;
+  failureClass:
+    | "none"
+    | "network"
+    | "authentication"
+    | "platform_verification"
+    | "content"
+    | "account"
+    | "internal";
+  errorSummary: string;
+  traceId: string;
+  quotaCost: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminTaskFilters {
+  userId?: string;
+  status?: string;
+  step?: string;
+  provider?: string;
+  createdFrom?: string;
+  createdTo?: string;
+}
+
+export interface OperationsHealth {
+  hours: number;
+  generatedAt: string;
+  providerScanTruncated: boolean;
+  providers: Array<{
+    provider: string;
+    attempts: number;
+    successes: number;
+    failures: number;
+    failureRate: number;
+    quotaFailures: number;
+    quotaAlert: boolean;
+    lastSuccessAt: string | null;
+  }>;
+  publishing: {
+    succeeded: number;
+    failed: number;
+    manualFallback: number;
+    recovered: number;
+    failureClasses: Record<string, number>;
+    successRate: number;
+    manualFallbackRate: number;
+  };
+  billing: {
+    reserved: number;
+    settled: number;
+    released: number;
+    unknownOutcomes: number;
+  };
+}
+
+export interface AdminRetryPreflight {
+  required: boolean;
+  quote: {
+    quoteId: string;
+    estimatedPoints: number;
+    availablePoints: number;
+  } | null;
+}
+
 export interface UserDevice {
   id: string;
   deviceKey: string;
@@ -332,6 +404,7 @@ export class AdminApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public traceId = "",
   ) {
     super(message);
   }
@@ -349,6 +422,30 @@ export function clearAdminToken(): void {
   localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const forwardAbort = () => controller.abort(callerSignal?.reason);
+  callerSignal?.addEventListener("abort", forwardAbort, { once: true });
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (controller.signal.aborted && !callerSignal?.aborted) {
+      throw new AdminApiError(timeoutMessage, 408);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener("abort", forwardAbort);
+  }
+}
+
 async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getAdminToken();
   const headers = new Headers(init.headers);
@@ -356,16 +453,23 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  const response = await fetchWithTimeout(
+    `${baseUrl}${path}`,
+    { ...init, headers },
+    15_000,
+    "请求超时，请稍后重试",
+  );
   if (!response.ok) {
     let message = response.statusText || "请求失败";
+    const traceId = response.headers.get("X-Trace-Id") || "";
     try {
       const body = await response.json();
       message = body?.detail?.message || body?.message || message;
     } catch {
       // 非 JSON 错误体保持 HTTP 状态文本。
     }
-    throw new AdminApiError(message, response.status);
+    if (traceId) message = `${message}（追踪号：${traceId}）`;
+    throw new AdminApiError(message, response.status, traceId);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -379,16 +483,23 @@ async function adminFetchBlob(
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  const response = await fetchWithTimeout(
+    `${baseUrl}${path}`,
+    { ...init, headers },
+    60_000,
+    "文件下载超时，请缩小导出范围后重试",
+  );
   if (!response.ok) {
     let message = response.statusText || "请求失败";
+    const traceId = response.headers.get("X-Trace-Id") || "";
     try {
       const body = await response.json();
       message = body?.detail?.message || body?.message || message;
     } catch {
       // 非 JSON 错误体保持 HTTP 状态文本。
     }
-    throw new AdminApiError(message, response.status);
+    if (traceId) message = `${message}（追踪号：${traceId}）`;
+    throw new AdminApiError(message, response.status, traceId);
   }
   return response.blob();
 }
@@ -451,6 +562,34 @@ export const adminApi = {
     }),
 
   listUsers: () => adminFetch<{ items: AdminUser[]; total: number }>("/users"),
+  listTasks: (filters: AdminTaskFilters = {}) => {
+    const params = new URLSearchParams({ page: "1", pageSize: "100" });
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) params.set(key, value);
+    });
+    return adminFetch<{
+      items: AdminTask[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }>(`/tasks?${params.toString()}`);
+  },
+  operationsHealth: (hours = 24) =>
+    adminFetch<OperationsHealth>(`/operations/health?hours=${hours}`),
+  retryTaskQuote: (id: string) =>
+    adminFetch<AdminRetryPreflight>(`/tasks/${id}/retry-quote`, {
+      method: "POST",
+    }),
+  retryTask: (id: string, step: string, reason: string, quoteId?: string) =>
+    adminFetch<{ id: string; status: string }>(`/tasks/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ step, reason, quoteId }),
+    }),
+  cancelTask: (id: string, reason: string) =>
+    adminFetch<{ id: string; status: string }>(`/tasks/${id}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    }),
   updateUser: (
     id: string,
     body: { role?: "user" | "admin"; isActive?: boolean },

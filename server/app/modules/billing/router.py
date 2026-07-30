@@ -2,7 +2,8 @@
 
 import csv
 import io
-from datetime import UTC
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -30,6 +31,73 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 
 # Admin 专用路由（管理员查看用户用量）
 admin_router = APIRouter(prefix="/admin", tags=["admin-billing"])
+
+_EXPORT_MAX_DAYS = 31
+_EXPORT_MAX_ROWS = 50_000
+
+
+def _export_window(created_from: datetime | None, created_to: datetime | None) -> tuple[datetime, datetime]:
+    end = created_to or datetime.now(UTC)
+    start = created_from or end - timedelta(days=_EXPORT_MAX_DAYS)
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    if end < start:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "EXPORT_RANGE_INVALID", "message": "导出结束时间不能早于开始时间"},
+        )
+    if end - start > timedelta(days=_EXPORT_MAX_DAYS):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": "EXPORT_WINDOW_TOO_LARGE",
+                "message": f"单次最多导出 {_EXPORT_MAX_DAYS} 天，请缩小时间范围",
+            },
+        )
+    return start, end
+
+
+async def _usage_csv_stream(db: AsyncSession, query) -> AsyncIterator[bytes]:
+    yield "\ufeff时间,步骤,分辨率,点数,通道,trace_id\r\n".encode()
+    rows = await db.stream_scalars(query.execution_options(yield_per=500))
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    async for usage in rows:
+        writer.writerow(
+            [
+                usage.created_at.astimezone(UTC).isoformat(),
+                usage.step,
+                usage.resolution,
+                usage.points,
+                usage.compute,
+                usage.trace_id,
+            ]
+        )
+        if buffer.tell() >= 64 * 1024:
+            yield buffer.getvalue().encode()
+            buffer.seek(0)
+            buffer.truncate(0)
+    if buffer.tell():
+        yield buffer.getvalue().encode()
+
+
+async def _bounded_usage_export(db: AsyncSession, query, filename: str) -> StreamingResponse:
+    total = int((await db.scalar(select(func.count()).select_from(query.order_by(None).subquery()))) or 0)
+    if total > _EXPORT_MAX_ROWS:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "EXPORT_ROW_LIMIT_EXCEEDED",
+                "message": f"单次最多导出 {_EXPORT_MAX_ROWS} 条，请缩小时间范围",
+            },
+        )
+    return StreamingResponse(
+        _usage_csv_stream(db, query),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/quota", response_model=QuotaOut)
@@ -99,22 +167,23 @@ async def api_usage(
     page: int = Query(1, ge=1),
     pageSize: int = Query(20, ge=1, le=100),
     export: str | None = None,
+    created_from: datetime | None = Query(None, alias="createdFrom"),
+    created_to: datetime | None = Query(None, alias="createdTo"),
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
     if export == "csv":
-        rows = await repo.all_usage(db, user_id)
-        buf = io.StringIO()
-        writer = csv.writer(buf)
-        writer.writerow(["时间", "步骤", "分辨率", "点数", "通道", "trace_id"])
-        for u in rows:
-            writer.writerow([u.created_at.isoformat(), u.step, u.resolution, u.points, u.compute, u.trace_id])
-        buf.seek(0)
-        return StreamingResponse(
-            iter([buf.getvalue().encode("utf-8-sig")]),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=quota_usage.csv"},
+        start, end = _export_window(created_from, created_to)
+        query = (
+            select(QuotaUsage)
+            .where(
+                QuotaUsage.user_id == user_id,
+                QuotaUsage.created_at >= start,
+                QuotaUsage.created_at <= end,
+            )
+            .order_by(QuotaUsage.created_at.desc())
         )
+        return await _bounded_usage_export(db, query, "quota_usage.csv")
     items, total = await repo.list_usage(db, user_id, page, pageSize)
     return UsagePageOut(items=[usage_to_out(u) for u in items], total=total, page=page, pageSize=pageSize)
 
@@ -176,6 +245,8 @@ async def admin_get_user_usage(
 async def admin_export_user_usage_csv(
     user_id: str,
     step: str | None = None,
+    created_from: datetime | None = Query(None, alias="createdFrom"),
+    created_to: datetime | None = Query(None, alias="createdTo"),
     _admin_id: str = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -188,24 +259,16 @@ async def admin_export_user_usage_csv(
         )
 
     # 基础查询
-    query = select(QuotaUsage).where(QuotaUsage.user_id == user_id)
+    start, end = _export_window(created_from, created_to)
+    query = select(QuotaUsage).where(
+        QuotaUsage.user_id == user_id,
+        QuotaUsage.created_at >= start,
+        QuotaUsage.created_at <= end,
+    )
     if step:
         query = query.where(QuotaUsage.step == step)
-
-    rows = (await db.execute(query.order_by(QuotaUsage.created_at.desc()))).scalars().all()
-
-    # 生成 CSV
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["时间", "步骤", "分辨率", "点数", "通道", "trace_id"])
-    for u in rows:
-        writer.writerow(
-            [u.created_at.astimezone(UTC).isoformat(), u.step, u.resolution, u.points, u.compute, u.trace_id]
-        )
-    buf.seek(0)
-
-    return StreamingResponse(
-        iter([buf.getvalue().encode("utf-8-sig")]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=usage_{user_id}.csv"},
+    return await _bounded_usage_export(
+        db,
+        query.order_by(QuotaUsage.created_at.desc()),
+        f"usage_{user_id}.csv",
     )
