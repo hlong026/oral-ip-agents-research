@@ -120,13 +120,45 @@ fn session_token_clear(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 打开抖音官方消息页（嵌入 WebView）——私信发送侧方案 E。
+/// 用户在其中手动登录并回复；本应用不注入任何自动化脚本（合规底线）。
+#[tauri::command]
+async fn open_douyin_im(app: tauri::AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    // 已存在则聚焦，避免重复开窗
+    if let Some(window) = app.get_webview_window("douyin-im") {
+        window.show().map_err(|e| format!("show webview failed: {e}"))?;
+        window.set_focus().map_err(|e| format!("focus webview failed: {e}"))?;
+        return Ok(());
+    }
+    // cookie/session 持久化目录（阶段 2 改为按账号隔离）
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app_data_dir failed: {e}"))?
+        .join("douyin-webview");
+    let url = WebviewUrl::External(
+        url::Url::parse("https://www.douyin.com/")
+            .map_err(|e| format!("parse douyin url failed: {e}"))?,
+    );
+    WebviewWindowBuilder::new(&app, "douyin-im", url)
+        .title("抖音私信（官方网页）")
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(960.0, 640.0)
+        .data_directory(data_dir)
+        .build()
+        .map_err(|e| format!("build douyin webview failed: {e}"))?;
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             machine_code,
             session_token_read,
             session_token_write,
-            session_token_clear
+            session_token_clear,
+            open_douyin_im
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

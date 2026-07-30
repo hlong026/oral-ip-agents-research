@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
+import { isDesktopShell, openDouyinIM } from "../lib/douyinWebview";
 
 /** 私信中心：账号筛选 + 会话列表 + 对话气泡 */
 export default function ImCenterPage() {
@@ -145,11 +146,20 @@ export default function ImCenterPage() {
 
   return (
     <div className="space-y-5">
-      <div>
-        <h1 className="text-xl font-bold">私信中心</h1>
-        <p className="mt-1 text-sm text-text-3">
-          聚合所有绑定账号的抖音私信 · 支持手动回复与自动回复
-        </p>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-bold">私信中心</h1>
+          <p className="mt-1 text-sm text-text-3">
+            聚合所有绑定账号的抖音私信 · 支持手动回复与自动回复
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void openDouyinIM()}
+          className="shrink-0 rounded-lg bg-brand-from px-3.5 py-2 text-xs font-medium text-white transition hover:opacity-90"
+        >
+          {isDesktopShell() ? "在抖音回复（新窗口）" : "打开抖音"}
+        </button>
       </div>
 
       <div className="flex gap-4" style={{ height: "calc(100vh - 220px)" }}>

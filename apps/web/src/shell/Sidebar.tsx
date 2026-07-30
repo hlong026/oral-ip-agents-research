@@ -1,24 +1,22 @@
 import { pipelineApi, publishApi } from "@oral/api-client";
-import { useIp, useQuota } from "@oral/stores";
+import { useQuota } from "@oral/stores";
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
   ChartColumn,
-  Check,
-  ChevronDown,
   CircleUserRound,
   Cloud,
   House,
   ListChecks,
   type LucideIcon,
   Mail,
+  Mic,
   Music,
   PenLine,
   Send,
   Zap,
 } from "lucide-react";
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router";
+import { NavLink } from "react-router";
 import { ANALYTICS_PREVIEW, IM_ENABLED } from "../config/features";
 
 interface NavItem {
@@ -86,76 +84,6 @@ function buildNav(taskActive: number, publishFailed: number): NavGroup[] {
   ];
 }
 
-function IpSwitcher() {
-  const { personas, current, switch: switchIp } = useIp();
-  const [open, setOpen] = useState(false);
-  const navigate = useNavigate();
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="glass card-hover flex w-full items-center gap-3 px-3 py-2.5 text-left"
-      >
-        <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base font-bold text-white"
-          style={{
-            background:
-              current?.avatarGrad || "linear-gradient(135deg,#6366F1,#22D3EE)",
-          }}
-        >
-          {current?.avatarChar || "IP"}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium text-text-1">
-            {current?.name ?? "选择 IP"}
-          </span>
-          <span className="block truncate text-xs text-text-3">
-            {current?.domain ?? "—"}
-          </span>
-        </span>
-        <span className="text-text-3">
-          <ChevronDown className="h-4 w-4" />
-        </span>
-      </button>
-      {open && (
-        <div className="glass-strong absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden p-1">
-          {personas.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => {
-                setOpen(false);
-                void switchIp(p.id);
-              }}
-              className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-white/5 ${
-                p.id === current?.id ? "text-brand-to" : "text-text-2"
-              }`}
-            >
-              <span
-                className="flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold text-white"
-                style={{ background: p.avatarGrad }}
-              >
-                {p.avatarChar}
-              </span>
-              <span className="flex-1 truncate">{p.name}</span>
-              {p.id === current?.id && <Check className="h-4 w-4" />}
-            </button>
-          ))}
-          <button
-            onClick={() => {
-              setOpen(false);
-              navigate("/assets/personas");
-            }}
-            className="w-full rounded-lg px-3 py-2 text-left text-xs text-text-3 hover:bg-white/5 hover:text-text-1"
-          >
-            + 管理 IP 档案
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function QuotaCard() {
   const quota = useQuota((s) => s.quota);
   const balance = quota?.balance ?? 0;
@@ -220,15 +148,13 @@ export default function Sidebar() {
     <aside className="flex w-60 shrink-0 flex-col gap-4 border-r border-stroke bg-black/20 px-4 py-5">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-1">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-brand-grad text-sm font-black text-white shadow-cta">
-          口
+        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-grad text-white shadow-cta">
+          <Mic className="h-5 w-5" />
         </span>
-        <span className="text-base font-bold tracking-wide">
+        <span className="text-lg font-bold tracking-wide">
           口播<span className="text-grad">IP智能体</span>
         </span>
       </div>
-
-      <IpSwitcher />
 
       {/* 一键成片 CTA */}
       <NavLink
