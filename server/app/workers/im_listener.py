@@ -95,7 +95,7 @@ def _get_default_lease() -> RedisListenerLease:
     return _default_lease
 
 
-def start_listening(account_id: str, user_id: str, lease: RedisListenerLease | None = None) -> bool:
+def start_listening(account_id: str, user_id: str, lease: ListenerLease | None = None) -> bool:
     """Start one worker-local task; the Redis lease prevents cross-worker duplication."""
     existing = _active_listeners.get(account_id)
     if existing and not existing.done():
@@ -127,7 +127,7 @@ async def shutdown_all() -> None:
     _connections.clear()
 
 
-async def reconcile_listeners(lease: RedisListenerLease | None = None) -> None:
+async def reconcile_listeners(lease: ListenerLease | None = None) -> None:
     """Ensure every valid durable listening intent has a worker-local task."""
     if not get_settings().im_enabled:
         return
@@ -156,23 +156,6 @@ async def reconcile_listeners(lease: RedisListenerLease | None = None) -> None:
         states = list(result.scalars().all())
 
     for state in states:
-        # 同时恢复 error 态的监听（网络/临时故障自愈）
-        if state.status == "error":
-            # 检查是否已超出自愈退避窗口
-            from datetime import timedelta
-
-            last_error = state.error_at or state.created_at
-            elapsed = (datetime.now(UTC) - last_error).total_seconds()
-            # 指数退避：10s → 20s → 40s → 60s（上限 1 小时）
-            backoff_sec = min(10 * (2 ** (state.retry_count or 0)), 3600)
-            if elapsed < backoff_sec:
-                logger.info(
-                    "[IMWorker] error listener %s still in backoff (%.0fs/%.0fs)",
-                    state.account_id[:8],
-                    elapsed,
-                    backoff_sec,
-                )
-                continue
         if lease is None:
             start_listening(state.account_id, state.user_id)
         else:

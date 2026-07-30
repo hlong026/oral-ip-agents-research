@@ -95,6 +95,23 @@ async def test_listener_state_cannot_be_reassigned_to_another_user(client: Async
         await db.commit()
 
 
+async def test_reconcile_does_not_restore_error_state(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    del client
+    user_id, account_id = await _create_account()
+    started: list[tuple[str, str]] = []
+
+    async with SessionLocal() as db:
+        db.add(IMListenerState(account_id=account_id, user_id=user_id, status="error"))
+        await db.commit()
+
+    monkeypatch.setattr(settings, "im_enabled", True)
+    monkeypatch.setattr(im_listener, "start_listening", lambda account, user, *_args: started.append((account, user)))
+
+    await im_listener.reconcile_listeners(_FakeLease())
+
+    assert started == []
+
+
 async def test_redis_listener_lease_has_single_token_owner() -> None:
     redis = _FakeRedis()
     first = im_listener.RedisListenerLease(redis, token="worker-a", ttl_seconds=60)

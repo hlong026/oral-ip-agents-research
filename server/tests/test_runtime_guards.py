@@ -25,7 +25,7 @@ def valid_production_settings(**overrides: object) -> Settings:
         "publish_browser_headless": True,
     }
     values.update(overrides)
-    return Settings(**values)
+    return Settings.model_validate(values)
 
 
 def test_im_feature_is_disabled_by_default() -> None:
@@ -56,18 +56,48 @@ def test_production_requires_webhook_signature_secret() -> None:
         validate_runtime_security(settings)
 
 
-def test_production_rejects_im_until_compliance_go() -> None:
-    settings = valid_production_settings(im_enabled=True)
+def test_production_allows_im_listen_only_with_real_provider_key() -> None:
+    settings = valid_production_settings(im_enabled=True, im_listen_only=True, douyin_im_app_key="real-app-key")
+
+    validate_runtime_security(settings)
+
+
+def test_production_rejects_im_when_not_listen_only() -> None:
+    settings = valid_production_settings(
+        im_enabled=True,
+        im_listen_only=False,
+        douyin_im_app_key="real-app-key",
+    )
 
     with pytest.raises(RuntimeError, match="第三阶段合规结论为 No-Go"):
         validate_runtime_security(settings)
 
 
-def test_enabled_im_requires_real_provider_key_even_in_test() -> None:
-    settings = Settings(app_env="test", im_enabled=True, douyin_im_app_key="")
+@pytest.mark.parametrize("app_env", ["test", "prod"])
+def test_enabled_im_requires_real_provider_key(app_env: str) -> None:
+    settings = (
+        Settings(app_env="test", im_enabled=True, douyin_im_app_key="")
+        if app_env == "test"
+        else valid_production_settings(im_enabled=True, im_listen_only=True, douyin_im_app_key="")
+    )
 
     with pytest.raises(RuntimeError, match="DOUYIN_IM_APP_KEY"):
         validate_runtime_security(settings)
+
+
+async def test_douyin_im_send_remains_fail_closed() -> None:
+    from app.providers.im.douyin_im import DouyinIMProvider, DouyinIMUnsupportedError
+
+    provider = DouyinIMProvider()
+
+    with pytest.raises(DouyinIMUnsupportedError, match="fail-closed"):
+        await provider.send_message(
+            session={"cookie_str": "sessionid=test", "device_id": "1234567890123456789"},
+            conversation_id="conversation-1",
+            conversation_short_id="1001",
+            ticket="ticket-1",
+            content="只读生产 guard 不应打开发送",
+        )
 
 
 def test_valid_production_configuration_passes_runtime_guard() -> None:
