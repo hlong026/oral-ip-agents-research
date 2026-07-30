@@ -64,5 +64,26 @@ async def api_me(user_id: str = Depends(get_current_user_id_ignore_plan), db: As
 
 
 @admin_router.post("/login", response_model=TokensOut)
-async def api_admin_login(body: AdminLoginIn, db: AsyncSession = Depends(get_db)):
-    return await admin_login(db, body.phone, body.password, body.deviceId)
+async def api_admin_login(body: AdminLoginIn, request: Request, db: AsyncSession = Depends(get_db)):
+    from app.modules.activation.rate_limit import enforce_rate_limit, record_attempt
+
+    ip_address = request.client.host if request.client else "unknown"
+    await enforce_rate_limit("admin_login", ip_address=ip_address, account=body.phone)
+    try:
+        result = await admin_login(db, body.phone, body.password, body.deviceId)
+    except HTTPException:
+        await db.rollback()
+        await record_attempt(
+            "admin_login",
+            success=False,
+            ip_address=ip_address,
+            account=body.phone,
+        )
+        raise
+    await record_attempt(
+        "admin_login",
+        success=True,
+        ip_address=ip_address,
+        account=body.phone,
+    )
+    return result
