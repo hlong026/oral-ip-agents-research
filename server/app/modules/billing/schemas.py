@@ -58,3 +58,13 @@ class ReservationStateOut(BaseModel):
     reservedPoints: int
     actualPoints: int
     availablePoints: float
+
+
+class AdminUsageItemOut(BaseModel):
+    """管理员视角的用量记录（不含 traceId/taskId 等内部字段）"""
+    id: str
+    step: str
+    resolution: str
+    points: float
+    compute: str
+    createdAt: str

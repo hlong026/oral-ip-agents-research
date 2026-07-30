@@ -188,6 +188,7 @@ from app.modules.admin.router import router as admin_router  # noqa: E402
 from app.modules.auth.router import admin_router as auth_admin_router  # noqa: E402
 from app.modules.auth.router import router as auth_router  # noqa: E402
 from app.modules.avatar.router import router as avatar_router  # noqa: E402
+from app.modules.billing.router import admin_router as billing_admin_router  # noqa: E402
 from app.modules.billing.router import router as billing_router  # noqa: E402
 from app.modules.catalog.router import admin_router as catalog_admin_router  # noqa: E402
 from app.modules.catalog.router import router as catalog_router  # noqa: E402
@@ -231,6 +232,7 @@ admin_routers = (
     provider_router,
     admin_router,
     im_admin_router,
+    billing_admin_router,
 )
 for r in admin_routers:
     app.include_router(r, prefix="/api/admin/v1")
