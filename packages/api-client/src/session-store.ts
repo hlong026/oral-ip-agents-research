@@ -11,10 +11,7 @@ interface TauriInternals {
 
 function tauriInternals(): TauriInternals | null {
   const candidate = (globalThis as Record<string, unknown>).__TAURI_INTERNALS__;
-  if (
-    candidate &&
-    typeof (candidate as TauriInternals).invoke === "function"
-  ) {
+  if (candidate && typeof (candidate as TauriInternals).invoke === "function") {
     return candidate as TauriInternals;
   }
   return null;

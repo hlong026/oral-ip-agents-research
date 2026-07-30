@@ -40,7 +40,12 @@ async def test_development_capability_uses_explicit_mock_driver(monkeypatch) -> 
     monkeypatch.setattr(
         registry_module,
         "get_settings",
-        lambda: SimpleNamespace(app_env="dev", im_enabled=False, douyin_im_app_key=""),
+        lambda: SimpleNamespace(
+            app_env="dev",
+            im_enabled=False,
+            douyin_im_app_key="",
+            publish_force_real=False,
+        ),
     )
 
     dev_registry = registry_module.ProviderRegistry()

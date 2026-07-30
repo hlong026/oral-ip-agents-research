@@ -17,10 +17,14 @@ export default defineConfig({
   timeout: 30_000,
   retries: 0,
   workers: 1,
-  reporter: [["list"]],
+  reporter: process.env.CI
+    ? [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]]
+    : [["list"]],
   use: {
     baseURL: e2eWebOrigin,
     viewport: { width: 1440, height: 900 },
+    screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
   webServer: [
     {

@@ -300,6 +300,7 @@ async def test_render_success_finalizes_revision_and_supersedes_old(monkeypatch)
         await db.flush()
         new.render_version_id = rv.id
         await db.commit()
+
     async def fake_settle(*_args, **_kwargs):
         return 1
 

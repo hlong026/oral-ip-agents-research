@@ -78,7 +78,7 @@ def _resolve_font_face() -> tuple[str, int] | None:
                 face = ImageFont.truetype(str(path), 24, index=index)
             except OSError:
                 break
-            name = " ".join(face.getname()).lower()
+            name = " ".join(part for part in face.getname() if part).lower()
             if name.startswith("."):
                 continue  # 跳过系统隐藏 Interface 字体
             for rank, hint in enumerate(_BOLD_HINTS):
@@ -255,10 +255,10 @@ def render_cover(
     stroke = max(2, font_size // 16)
 
     # 真实行高：用字体度量而非字号，避免行间叠压/基线偏移
-    try:
+    if isinstance(font, ImageFont.FreeTypeFont):
         ascent, descent = font.getmetrics()
         line_height = ascent + descent
-    except AttributeError:
+    else:
         line_height = round(font_size * 1.3)
     line_gap = round(font_size * 0.14)
     total_h = len(lines) * line_height + (len(lines) - 1) * line_gap
