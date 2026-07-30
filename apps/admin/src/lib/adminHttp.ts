@@ -371,6 +371,25 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function adminFetchBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+  const token = getAdminToken();
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+  if (!response.ok) {
+    let message = response.statusText || "请求失败";
+    try {
+      const body = await response.json();
+      message = body?.detail?.message || body?.message || message;
+    } catch {
+      // 非 JSON 错误体保持 HTTP 状态文本。
+    }
+    throw new AdminApiError(message, response.status);
+  }
+  return response.blob();
+}
+
 export const adminApi = {
   async login(phone: string, password: string): Promise<TokensOut> {
     const tokens = await adminFetch<TokensOut>("/auth/login", {
@@ -580,4 +599,40 @@ export const adminApi = {
     adminFetch<ProviderReadiness>(
       `/providers/readiness${probe ? "?probe=true" : ""}`,
     ),
+
+  // ============ 新增：用户调用记录查询 ============
+  getUserUsage: (
+    userId: string,
+    page = 1,
+    pageSize = 20,
+    step?: string,
+  ) => {
+    const params = new URLSearchParams({
+      user_id: userId,
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (step) params.append("step", step);
+    return adminFetch<{
+      items: Array<{
+        id: string;
+        step: string;
+        resolution: string;
+        points: number;
+        compute: string;
+        createdAt: string;
+      }>;
+      total: number;
+      page: number;
+      pageSize: number;
+      hasMore: boolean;
+    }>(`/admin/usage?${params.toString()}`);
+  },
+  downloadUserUsageCsv: (userId: string, step?: string) => {
+    const params = new URLSearchParams({ user_id: userId });
+    if (step) params.append("step", step);
+    return adminFetchBlob(`/admin/usage/export?${params.toString()}`, {
+      headers: { Accept: "text/csv" },
+    });
+  },
 };

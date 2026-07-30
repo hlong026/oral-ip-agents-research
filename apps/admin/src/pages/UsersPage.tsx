@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { adminApi } from "../lib/adminHttp";
+import UserUsageDrawer from "./users/UsageDrawer";
 
 const SOURCE_LABEL: Record<string, string> = {
   "desktop-hw": "桌面端（硬件码）",
@@ -196,6 +197,13 @@ export default function UsersPage() {
     userId: string;
     nickname: string;
   } | null>(null);
+  const [usageDrawer, setUsageDrawer] = useState<{
+    userId: string;
+    userName: string;
+    userPhone: string | null;
+    activationCodeMasked: string | null;
+    balance: number;
+  } | null>(null);
 
   return (
     <div className="space-y-5">
@@ -280,6 +288,7 @@ export default function UsersPage() {
                 <th className="px-4 py-3">套餐</th>
                 <th className="px-4 py-3 text-right">积分</th>
                 <th className="px-4 py-3">权限</th>
+                <th className="px-4 py-3">调用记录</th>
                 <th className="px-4 py-3">设备</th>
                 <th className="px-4 py-3">状态</th>
               </tr>
@@ -319,6 +328,22 @@ export default function UsersPage() {
                       <option value="user">user</option>
                       <option value="admin">admin</option>
                     </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      className="btn-ghost text-xs"
+                      onClick={() =>
+                        setUsageDrawer({
+                          userId: user.id,
+                          userName: user.nickname,
+                          userPhone: user.phone,
+                          activationCodeMasked: user.activationCodeMasked ?? null,
+                          balance: user.balance,
+                        })
+                      }
+                    >
+                      查看
+                    </button>
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
@@ -379,6 +404,16 @@ export default function UsersPage() {
           userId={deviceDrawer.userId}
           nickname={deviceDrawer.nickname}
           onClose={() => setDeviceDrawer(null)}
+        />
+      )}
+      {usageDrawer && (
+        <UserUsageDrawer
+          userId={usageDrawer.userId}
+          userName={usageDrawer.userName}
+          userPhone={usageDrawer.userPhone}
+          activationCodeMasked={usageDrawer.activationCodeMasked}
+          balance={usageDrawer.balance}
+          onClose={() => setUsageDrawer(null)}
         />
       )}
     </div>
