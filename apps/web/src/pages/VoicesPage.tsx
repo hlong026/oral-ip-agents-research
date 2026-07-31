@@ -19,7 +19,11 @@ const SAMPLE_MAX_SECONDS = 180;
 
 // 声音来源标签（import = 历史导入的存量声音）
 const sourceLabel = (source: Voice["source"]) =>
-  source === "clone" ? "克隆音色" : source === "import" ? "导入音色" : "内置音色";
+  source === "clone"
+    ? "克隆音色"
+    : source === "import"
+      ? "导入音色"
+      : "内置音色";
 
 /** 克隆新声音表单（录音优先，上传为可选；合规红线：强制 consent 授权勾选） */
 function CloneForm({
@@ -291,11 +295,7 @@ function CloneForm({
           {error}
         </div>
       )}
-      <button
-        className="btn-primary w-full"
-        disabled={busy}
-        onClick={submit}
-      >
+      <button className="btn-primary w-full" disabled={busy} onClick={submit}>
         {busy ? "克隆任务创建中…" : "开始克隆"}
       </button>
     </div>

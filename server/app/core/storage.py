@@ -4,9 +4,11 @@ import asyncio
 import hashlib
 import hmac
 import os
+import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Protocol
 from urllib.parse import quote
@@ -54,6 +56,10 @@ def _s3_client():
         aws_secret_access_key=settings.s3_secret_key,
         config=Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2}),
     )
+
+
+def _is_missing_object_error(exc: ClientError) -> bool:
+    return exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}
 
 
 async def save_bytes(prefix: str, filename: str, data: bytes) -> str:
@@ -152,9 +158,45 @@ async def read_bytes(key: str) -> bytes:
         obj = await asyncio.to_thread(client.get_object, Bucket=settings.s3_bucket, Key=key)
         return await asyncio.to_thread(obj["Body"].read)
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+        if _is_missing_object_error(exc):
             raise FileNotFoundError(key) from exc
         raise
+
+
+async def download_to_path(key: str, target: Path) -> None:
+    """把对象存储中的大文件下载到目标路径，不把完整内容载入内存。"""
+    key = _validated_key(key)
+    if settings.storage_driver == "local":
+        raise StorageConfigurationError("local 存储无需 download_to_path")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    client = _s3_client()
+    try:
+        await asyncio.to_thread(client.download_file, settings.s3_bucket, key, str(target))
+    except ClientError as exc:
+        if _is_missing_object_error(exc):
+            raise FileNotFoundError(key) from exc
+        raise
+    await asyncio.to_thread(target.chmod, 0o600)
+
+
+@asynccontextmanager
+async def materialized_path(key: str, *, name: str = "media") -> AsyncIterator[Path]:
+    """为只能读取本地文件的调用方提供临时本地路径。
+
+    local 后端直接返回现有存储路径；S3 后端下载到私有临时目录，退出上下文后自动清理。
+    """
+    key = _validated_key(key)
+    if settings.storage_driver == "local":
+        yield local_path(key)
+        return
+
+    with tempfile.TemporaryDirectory(prefix="oral-media-") as directory:
+        temp_dir = Path(directory)
+        await asyncio.to_thread(temp_dir.chmod, 0o700)
+        suffix = Path(key).suffix or ".bin"
+        target = temp_dir / f"{name}{suffix}"
+        await download_to_path(key, target)
+        yield target
 
 
 async def size(key: str) -> int:
@@ -169,7 +211,7 @@ async def size(key: str) -> int:
         head = await asyncio.to_thread(client.head_object, Bucket=settings.s3_bucket, Key=key)
         return int(head["ContentLength"])
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+        if _is_missing_object_error(exc):
             raise FileNotFoundError(key) from exc
         raise
 
@@ -195,7 +237,7 @@ async def stream_range(key: str, start: int, end: int, chunk_size: int = 1024 * 
             client.get_object, Bucket=settings.s3_bucket, Key=key, Range=f"bytes={start}-{end}"
         )
     except ClientError as exc:
-        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+        if _is_missing_object_error(exc):
             raise FileNotFoundError(key) from exc
         raise
     body = obj["Body"]

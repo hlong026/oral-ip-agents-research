@@ -26,6 +26,7 @@ async def test_listener_requires_gray_account_approval(client: AsyncClient) -> N
         with pytest.raises(HTTPException) as error:
             await im_service.start_listener(db, user_id, ListenerControlIn(accountId=account_id))
         await im_repo.approve_gray_account(db, account_id, approved_by="admin-test")
+        await im_service.set_global_kill_switch(db, stopped=False)
         started = await im_service.start_listener(db, user_id, ListenerControlIn(accountId=account_id))
 
     assert error.value.status_code == 403
@@ -140,13 +141,13 @@ async def test_removing_gray_account_cancels_scheduled_reply_before_provider(
         await db.commit()
         await db.refresh(conversation)
         await im_repo.approve_gray_account(db, account_id, approved_by="admin-test")
+        await im_service.set_global_kill_switch(db, stopped=False)
         await im_service.start_listener(db, user_id, ListenerControlIn(accountId=account_id))
         await im_service.authorize_automation(
             db,
             user_id,
             AutomationConsentIn(accountId=account_id, accepted=True, riskVersion="im-auto-reply-v1"),
         )
-        await im_service.set_global_kill_switch(db, stopped=False)
         message = await im_repo.create_message(
             db,
             conversation_id=conversation.id,

@@ -15,11 +15,12 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   shipinhao: "视频号",
 };
 
-/** 支持账号绑定与发布的平台（快手仅支持链接解析去水印，不可绑定发布） */
+/** 可选择发布或生成完整人工发布包的平台；是否可自动绑定由后端能力接口决定。 */
 export const PUBLISH_PLATFORMS: Platform[] = [
   "douyin",
   "xiaohongshu",
   "shipinhao",
+  "kuaishou",
 ];
 
 /** 算力通道（MVP 恒为 cloud；V1.5+ 本地引擎开放后出现 local） */

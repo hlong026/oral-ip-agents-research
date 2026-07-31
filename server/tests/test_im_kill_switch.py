@@ -1,6 +1,7 @@
 """S3-11 explicit automation consent and emergency kill switches."""
 
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -13,7 +14,7 @@ from app.modules.auth.models import User
 from app.modules.im import repository as im_repo
 from app.modules.im import service
 from app.modules.im.models import IMAutoReplyRule, IMConversation, IMMessage
-from app.modules.im.schemas import AutomationConsentIn
+from app.modules.im.schemas import AutomationConsentIn, ListenerControlIn
 from app.modules.publish import repository as publish_repo
 
 
@@ -23,6 +24,7 @@ async def test_auto_mode_without_consent_remains_a_suggestion(
     del client
     user_id, account_id = await _create_user_account()
     conversation, _rule = await _create_auto_rule(user_id, account_id)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(im_listen_only=False))
     monkeypatch.setattr(service, "_get_reply_limiter", lambda: _AllowLimiter())
     monkeypatch.setattr(
         service,
@@ -38,12 +40,34 @@ async def test_auto_mode_without_consent_remains_a_suggestion(
     assert message.send_error == "AutomationNotAuthorized"
 
 
+async def test_listen_only_mode_never_queues_legacy_auto_rule(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    del client
+    user_id, account_id = await _create_user_account()
+    conversation, _rule = await _create_auto_rule(user_id, account_id)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(im_listen_only=True))
+    monkeypatch.setattr(
+        service,
+        "_schedule_auto_reply",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("listen-only mode must not queue outbound messages")),
+    )
+
+    async with SessionLocal() as db:
+        await service._try_auto_reply(db, conversation, "你好")
+        message = (await db.execute(select(IMMessage).where(IMMessage.conversation_id == conversation.id))).scalar_one()
+
+    assert message.send_status == "suggested"
+    assert message.send_error == "ListenOnlyMode"
+
+
 async def test_authorized_account_can_queue_only_when_global_switch_is_open(
     client: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     del client
     user_id, account_id = await _create_user_account()
     conversation, _rule = await _create_auto_rule(user_id, account_id)
+    monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(im_listen_only=False))
     monkeypatch.setattr(service, "_get_reply_limiter", lambda: _AllowLimiter())
     monkeypatch.setattr(service, "_schedule_auto_reply", lambda _message_id, _delay: "queue-1")
 
@@ -174,6 +198,25 @@ async def test_global_kill_switch_requires_admin_audience(client: AsyncClient) -
     assert user_response.status_code == 403
     assert admin_response.status_code == 200
     assert admin_response.json()["stopped"] is True
+
+
+async def test_global_kill_switch_stops_listeners_and_blocks_new_intent(client: AsyncClient) -> None:
+    del client
+    user_id, account_id = await _create_user_account()
+    async with SessionLocal() as db:
+        await service.set_global_kill_switch(db, stopped=False)
+        started = await service.start_listener(db, user_id, ListenerControlIn(accountId=account_id))
+        assert started.status == "listening"
+
+        await service.set_global_kill_switch(db, stopped=True)
+        state = await im_repo.get_listener_state(db, account_id, user_id)
+        with pytest.raises(HTTPException) as error:
+            await service.start_listener(db, user_id, ListenerControlIn(accountId=account_id))
+
+    assert state is not None and state.status == "disconnected"
+    assert state.error_msg == "GlobalKillSwitch"
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "IM_GLOBAL_STOPPED"
 
 
 async def _create_user_account() -> tuple[str, str]:

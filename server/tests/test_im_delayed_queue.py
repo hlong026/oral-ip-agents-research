@@ -37,6 +37,7 @@ async def test_auto_reply_is_persisted_before_dramatiq_delay(
         await db.refresh(conversation)
 
         monkeypatch.setattr(service, "_get_reply_limiter", lambda: _AllowLimiter())
+        monkeypatch.setattr(service, "get_settings", lambda: SimpleNamespace(im_listen_only=False))
         monkeypatch.setattr(service.repo, "automation_block_reason", AsyncMock(return_value=None))
         scheduled: list[tuple[str, int]] = []
 

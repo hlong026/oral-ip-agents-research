@@ -13,6 +13,18 @@ const MACHINE_CODE_SALT: &str = "oral-ip-device-v1";
 /// 持久化会话令牌文件名（存于应用数据目录，webview 清缓存/重装应用不丢）
 const SESSION_TOKEN_FILE: &str = "session.token";
 
+fn douyin_session_scope(account_id: &str) -> Result<String, String> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() {
+        return Err("account_id is required for isolated douyin session".to_string());
+    }
+    let digest = Sha256::digest(account_id.as_bytes());
+    Ok(digest[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 /// 读取各平台稳定机器码原始值（清缓存/重装应用不变）
 fn raw_machine_id() -> Result<String, String> {
     #[cfg(target_os = "macos")]
@@ -123,25 +135,40 @@ fn session_token_clear(app: tauri::AppHandle) -> Result<(), String> {
 /// 打开抖音官方消息页（嵌入 WebView）——私信发送侧方案 E。
 /// 用户在其中手动登录并回复；本应用不注入任何自动化脚本（合规底线）。
 #[tauri::command]
-async fn open_douyin_im(app: tauri::AppHandle) -> Result<(), String> {
+async fn open_douyin_im(app: tauri::AppHandle, account_id: String) -> Result<(), String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+    let session_scope = douyin_session_scope(&account_id)?;
+    let window_label = format!("douyin-im-{session_scope}");
+
     // 已存在则聚焦，避免重复开窗
-    if let Some(window) = app.get_webview_window("douyin-im") {
-        window.show().map_err(|e| format!("show webview failed: {e}"))?;
-        window.set_focus().map_err(|e| format!("focus webview failed: {e}"))?;
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window
+            .show()
+            .map_err(|e| format!("show webview failed: {e}"))?;
+        window
+            .set_focus()
+            .map_err(|e| format!("focus webview failed: {e}"))?;
         return Ok(());
     }
+
     // cookie/session 持久化目录（阶段 2 改为按账号隔离）
     let data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("app_data_dir failed: {e}"))?
-        .join("douyin-webview");
+        .join("douyin-webview")
+        .join(session_scope);
+
+    if let Err(error) = fs::create_dir_all(&data_dir) {
+        return Err(format!("create douyin webview data dir failed: {error}"));
+    }
+
     let url = WebviewUrl::External(
         url::Url::parse("https://www.douyin.com/")
             .map_err(|e| format!("parse douyin url failed: {e}"))?,
     );
-    WebviewWindowBuilder::new(&app, "douyin-im", url)
+    WebviewWindowBuilder::new(&app, window_label, url)
         .title("抖音私信（官方网页）")
         .inner_size(1280.0, 860.0)
         .min_inner_size(960.0, 640.0)
@@ -162,4 +189,31 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::douyin_session_scope;
+
+    #[test]
+    fn douyin_session_scope_is_stable_and_path_safe() {
+        let scope = douyin_session_scope("../account/一").expect("valid account id");
+
+        assert_eq!(
+            scope,
+            douyin_session_scope("../account/一").expect("same valid account id")
+        );
+        assert_eq!(scope.len(), 16);
+        assert!(scope.chars().all(|character| character.is_ascii_hexdigit()));
+        assert!(!scope.contains('/'));
+    }
+
+    #[test]
+    fn douyin_accounts_use_different_webview_sessions() {
+        assert_ne!(
+            douyin_session_scope("account-one").expect("valid first account"),
+            douyin_session_scope("account-two").expect("valid second account")
+        );
+        assert!(douyin_session_scope("").is_err());
+    }
 }

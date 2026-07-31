@@ -21,11 +21,12 @@ def _subject_hash(scope: str, value: str) -> str:
     return hmac.new(secret, f"{scope}:{value}".encode(), hashlib.sha256).hexdigest()
 
 
-def _subjects(ip_address: str, device_fingerprint: str, code: str) -> list[tuple[str, str]]:
+def _subjects(ip_address: str, device_fingerprint: str, code: str, account: str) -> list[tuple[str, str]]:
     raw = (
         ("ip", ip_address.strip()),
         ("device", device_fingerprint.strip()),
         ("code", code.strip().upper()),
+        ("account", account.strip().lower()),
     )
     return [(scope, _subject_hash(scope, value)) for scope, value in raw if value]
 
@@ -36,9 +37,16 @@ def _as_utc(value: datetime | None) -> datetime | None:
     return value.replace(tzinfo=UTC)
 
 
-async def enforce_rate_limit(action: str, *, ip_address: str, device_fingerprint: str = "", code: str = "") -> None:
+async def enforce_rate_limit(
+    action: str,
+    *,
+    ip_address: str,
+    device_fingerprint: str = "",
+    code: str = "",
+    account: str = "",
+) -> None:
     now = datetime.now(UTC)
-    subjects = _subjects(ip_address, device_fingerprint, code)
+    subjects = _subjects(ip_address, device_fingerprint, code, account)
     blocked_scope = ""
     async with SessionLocal() as db:
         for scope, subject_hash in subjects:
@@ -56,10 +64,17 @@ async def enforce_rate_limit(action: str, *, ip_address: str, device_fingerprint
                 blocked_scope = scope
                 break
     if blocked_scope:
-        await write_audit("activation_rate_limited", detail=f"action={action},scope={blocked_scope}")
+        is_admin_login = action == "admin_login"
+        await write_audit(
+            "admin_login_rate_limited" if is_admin_login else "activation_rate_limited",
+            detail=f"action={action},scope={blocked_scope}",
+        )
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
-            detail={"code": "ACTIVATION_RATE_LIMITED", "message": "尝试次数过多，请稍后再试"},
+            detail={
+                "code": "ADMIN_LOGIN_RATE_LIMITED" if is_admin_login else "ACTIVATION_RATE_LIMITED",
+                "message": "尝试次数过多，请稍后再试",
+            },
         )
 
 
@@ -70,8 +85,9 @@ async def record_attempt(
     ip_address: str,
     device_fingerprint: str = "",
     code: str = "",
+    account: str = "",
 ) -> None:
-    subjects = _subjects(ip_address, device_fingerprint, code)
+    subjects = _subjects(ip_address, device_fingerprint, code, account)
     if success:
         if not subjects:
             return
@@ -91,7 +107,7 @@ async def record_attempt(
     for scope, subject_hash in subjects:
         await _record_failure(action, scope, subject_hash)
     await write_audit(
-        "activation_attempt_failed",
+        "admin_login_attempt_failed" if action == "admin_login" else "activation_attempt_failed",
         detail=f"action={action},scopes={','.join(scope for scope, _ in subjects)}",
     )
 

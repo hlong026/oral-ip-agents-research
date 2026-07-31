@@ -53,9 +53,7 @@ export default function LoginPage() {
       if (err instanceof HttpError) {
         if (err.body.code === "DEVICE_LIMIT_REACHED") {
           // 后端 message 带当前绑定数，直接展示；申请已自动提交
-          setError(
-            `${err.body.message}。审批通过后在本设备重新登录即可。`,
-          );
+          setError(`${err.body.message}。审批通过后在本设备重新登录即可。`);
           return;
         }
         const messages: Record<string, string> = {
@@ -114,9 +112,10 @@ export default function LoginPage() {
 
           {codeInfo?.valid && (
             <div className="rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
-              新激活码可用：{PLAN_TYPE_LABELS[codeInfo.planType] ?? codeInfo.planType}
-              套餐 · {codeInfo.durationDays}{" "}
-              天 · {codeInfo.quotaAmount.toLocaleString()} 点算力
+              新激活码可用：
+              {PLAN_TYPE_LABELS[codeInfo.planType] ?? codeInfo.planType}
+              套餐 · {codeInfo.durationDays} 天 ·{" "}
+              {codeInfo.quotaAmount.toLocaleString()} 点算力
             </div>
           )}
 

@@ -9,6 +9,7 @@ import OverviewPage from "./pages/OverviewPage";
 import PlansPage from "./pages/PlansPage";
 import PriceVersionsPage from "./pages/PriceVersionsPage";
 import ProvidersPage from "./pages/ProvidersPage";
+import TasksPage from "./pages/TasksPage";
 import UsersPage from "./pages/UsersPage";
 import Shell from "./shell/Shell";
 
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/prices" element={<PriceVersionsPage />} />
         <Route path="/activation" element={<ActivationPage />} />
         <Route path="/providers" element={<ProvidersPage />} />
+        <Route path="/tasks" element={<TasksPage />} />
         <Route path="/users" element={<UsersPage />} />
         <Route path="/cost-audit" element={<CostAuditPage />} />
         <Route path="/im-safety" element={<ImSafetyPage />} />

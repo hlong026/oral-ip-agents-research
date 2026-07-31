@@ -53,6 +53,7 @@ async def test_api_only_persists_listener_intent(client: AsyncClient, monkeypatc
     monkeypatch.setattr(im_listener, "stop_listening", unexpected_runtime_call)
 
     async with SessionLocal() as db:
+        await im_repo.set_global_kill_switch(db, stopped=False)
         started = await start_listener(db, user_id, ListenerControlIn(accountId=account_id))
     assert started.status == "listening"
 
@@ -93,6 +94,23 @@ async def test_listener_state_cannot_be_reassigned_to_another_user(client: Async
         assert state.status == "listening"
         state.status = "disconnected"
         await db.commit()
+
+
+async def test_reconcile_does_not_restore_error_state(client: AsyncClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    del client
+    user_id, account_id = await _create_account()
+    started: list[tuple[str, str]] = []
+
+    async with SessionLocal() as db:
+        db.add(IMListenerState(account_id=account_id, user_id=user_id, status="error"))
+        await db.commit()
+
+    monkeypatch.setattr(settings, "im_enabled", True)
+    monkeypatch.setattr(im_listener, "start_listening", lambda account, user, *_args: started.append((account, user)))
+
+    await im_listener.reconcile_listeners(_FakeLease())
+
+    assert started == []
 
 
 async def test_redis_listener_lease_has_single_token_owner() -> None:

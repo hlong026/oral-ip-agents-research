@@ -34,7 +34,7 @@ uv run python -m app.workers.im_listener
 私信监听意图保存在数据库，实际 WebSocket 连接只由独立监听 Worker 持有；
 Redis 租约保证同一账号不会被多个 Worker 重复监听。生产环境仍受第三阶段
 Go/No-Go 门禁约束，不得仅通过设置 `IM_ENABLED=true` 绕过授权与灰度验收。
-`IM_GRAY_ENFORCED=true` 默认为开启；管理员必须先把账号加入灰度名单，监听、手动发送和自动回复才会进入 Provider 链路。管理端“私信自动回复安全”页面提供灰度名单、24 小时监控和风控事件登记。
+`IM_GRAY_ENFORCED=true` 默认为开启；只有灰度账号可启动只读监听。服务端发送、重试和自动发送授权 API 不开放，建议回复只在客户端展示，人工回复通过按账号隔离的抖音官方页面完成。管理端“私信监听安全”页面提供灰度名单、24 小时监控和风控事件登记。
 启用 IM 时必须提供真实 `DOUYIN_IM_APP_KEY`，缺失即拒绝启动，不会降级为 Mock 并写入伪成功。灰度账号默认最多 20 个（`IM_GRAY_MAX_ACCOUNTS`）；原始监控事件默认保留 14 天（`IM_METRIC_RETENTION_DAYS`），七日聚合证据由验收脚本单独保存。
 `IM_HISTORY_RETENTION_DAYS` 默认为 90 天，监听 Worker 每
 `IM_CLEANUP_INTERVAL_HOURS` 小时分批清理终态历史；待发送、发送中和失败可重试消息不会被自动清理。

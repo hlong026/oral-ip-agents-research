@@ -22,6 +22,24 @@ async def test_pipeline_schedule_uses_dramatiq_message() -> None:
     assert len(message_id) >= 16
 
 
+def test_production_side_effect_actors_do_not_use_broker_auto_retry() -> None:
+    from app.workers import tasks
+
+    actors = (
+        tasks.run_pipeline_task,
+        tasks.run_pipeline_render,
+        tasks.run_content_job,
+        tasks.run_publish_job,
+    )
+
+    assert {actor.actor_name: actor.options.get("max_retries") for actor in actors} == {
+        "run_pipeline_task": 0,
+        "run_pipeline_render": 0,
+        "run_content_job": 0,
+        "run_publish_job": 0,
+    }
+
+
 async def test_pipeline_enqueue_failure_marks_task_failed_and_releases_points(monkeypatch) -> None:
     from app.modules.pipeline import repository as pipeline_repo
     from app.modules.pipeline import service
@@ -102,11 +120,11 @@ async def test_pipeline_gate_failure_does_not_leave_an_accepted_task_stuck(monke
     await engine.run_task(task_id)
 
     async with SessionLocal() as db:
-        task = await pipeline_repo.get(db, task_id)
-    assert task is not None
-    assert task.status == "failed"
-    assert task.queue_message_id == ""
-    assert "并发调度" in task.error
+        recovered_task = await pipeline_repo.get(db, task_id)
+    assert recovered_task is not None
+    assert recovered_task.status == "failed"
+    assert recovered_task.queue_message_id == ""
+    assert "并发调度" in recovered_task.error
     assert released == [("pipeline-gate-reservation", "pipeline-gate-failure-user")]
 
 
@@ -127,7 +145,9 @@ async def test_scheduled_publish_uses_broker_delay_without_sleep(monkeypatch) ->
 
     assert message_id == "publish-message"
     assert captured["args"] == ("publish-job",)
-    assert 295_000 <= int(captured["delay"] or 0) <= 300_000
+    delay = captured["delay"]
+    assert isinstance(delay, int)
+    assert 295_000 <= delay <= 300_000
 
 
 async def test_pipeline_rewrite_similarity_receives_source_reference(monkeypatch) -> None:
@@ -233,10 +253,15 @@ async def test_fresh_running_pipeline_is_not_requeued_during_api_restart(monkeyp
     from app.modules.pipeline import service
 
     scheduled: list[tuple[str, str | None]] = []
+
+    def fake_schedule(task_id: str, from_step: str | None = None) -> str:
+        scheduled.append((task_id, from_step))
+        return "unexpected"
+
     monkeypatch.setattr(
         service,
         "schedule_run",
-        lambda task_id, from_step=None: scheduled.append((task_id, from_step)) or "unexpected",
+        fake_schedule,
     )
 
     async with SessionLocal() as db:
@@ -262,10 +287,15 @@ async def test_running_voice_is_not_replayed_after_restart(monkeypatch) -> None:
     from app.modules.pipeline import service
 
     scheduled: list[tuple[str, str | None]] = []
+
+    def fake_schedule(task_id: str, from_step: str | None = None) -> str:
+        scheduled.append((task_id, from_step))
+        return "unexpected"
+
     monkeypatch.setattr(
         service,
         "schedule_run",
-        lambda task_id, from_step=None: scheduled.append((task_id, from_step)) or "unexpected",
+        fake_schedule,
     )
 
     async with SessionLocal() as db:
@@ -291,10 +321,15 @@ async def test_running_avatar_without_provider_task_id_is_not_replayed(monkeypat
     from app.modules.pipeline import service
 
     scheduled: list[tuple[str, str | None]] = []
+
+    def fake_schedule(task_id: str, from_step: str | None = None) -> str:
+        scheduled.append((task_id, from_step))
+        return "unexpected"
+
     monkeypatch.setattr(
         service,
         "schedule_run",
-        lambda task_id, from_step=None: scheduled.append((task_id, from_step)) or "unexpected",
+        fake_schedule,
     )
 
     async with SessionLocal() as db:

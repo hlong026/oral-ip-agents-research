@@ -30,10 +30,10 @@ const DOUYIN_URL = "https://www.douyin.com/";
  * - 桌面壳：拉起嵌入 WebView 窗口（cookie 持久化，重开免登录）
  * - 纯 Web：新标签页打开
  */
-export async function openDouyinIM(): Promise<void> {
+export async function openDouyinIM(accountId?: string): Promise<void> {
   const tauri = tauriInternals();
   if (tauri) {
-    await tauri.invoke("open_douyin_im");
+    await tauri.invoke("open_douyin_im", { accountId: accountId ?? "" });
     return;
   }
   window.open(DOUYIN_URL, "_blank", "noopener,noreferrer");

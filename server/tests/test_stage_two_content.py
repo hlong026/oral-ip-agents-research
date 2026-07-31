@@ -307,7 +307,12 @@ async def test_production_provider_chains_never_include_mock(monkeypatch) -> Non
 
     from app.providers import registry as registry_module
 
-    production = SimpleNamespace(app_env="prod", im_enabled=False, douyin_im_app_key="")
+    production = SimpleNamespace(
+        app_env="prod",
+        im_enabled=False,
+        douyin_im_app_key="",
+        publish_force_real=True,
+    )
     monkeypatch.setattr(registry_module, "get_settings", lambda: production)
 
     production_registry = registry_module.ProviderRegistry()
@@ -334,6 +339,7 @@ async def test_acceptance_mode_removes_mock_provider_fallback(monkeypatch) -> No
         provider_mock_fallback_enabled=False,
         im_enabled=False,
         douyin_im_app_key="",
+        publish_force_real=True,
     )
     monkeypatch.setattr(registry_module, "get_settings", lambda: acceptance)
 

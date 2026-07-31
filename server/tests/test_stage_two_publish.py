@@ -29,9 +29,26 @@ async def test_unverified_platforms_are_export_only(monkeypatch) -> None:
 
     capabilities = service.publish_capabilities()
 
-    assert {item.platform for item in capabilities} == {"douyin", "xiaohongshu", "shipinhao"}
+    assert {item.platform for item in capabilities} == {"douyin", "xiaohongshu", "shipinhao", "kuaishou"}
     assert all(item.mode == "export_only" for item in capabilities)
     assert all(not item.automaticEnabled for item in capabilities)
+
+
+async def test_config_cannot_verify_platform_without_a_driver(monkeypatch) -> None:
+    from app.modules.publish import service
+
+    monkeypatch.setattr(
+        service,
+        "settings",
+        SimpleNamespace(app_env="prod", publish_verified_platforms="kuaishou", publish_force_real=True),
+    )
+
+    kuaishou = next(item for item in service.publish_capabilities() if item.platform == "kuaishou")
+
+    assert kuaishou.mode == "export_only"
+    assert kuaishou.verificationStatus == "unverified"
+    assert kuaishou.automaticEnabled is False
+    assert "未实现" in kuaishou.reason
 
 
 async def test_development_capability_uses_explicit_mock_driver(monkeypatch) -> None:
@@ -40,7 +57,12 @@ async def test_development_capability_uses_explicit_mock_driver(monkeypatch) -> 
     monkeypatch.setattr(
         registry_module,
         "get_settings",
-        lambda: SimpleNamespace(app_env="dev", im_enabled=False, douyin_im_app_key=""),
+        lambda: SimpleNamespace(
+            app_env="dev",
+            im_enabled=False,
+            douyin_im_app_key="",
+            publish_force_real=False,
+        ),
     )
 
     dev_registry = registry_module.ProviderRegistry()
@@ -184,6 +206,59 @@ async def test_publish_job_list_filters_by_task_before_pagination() -> None:
 
     assert result.total == 1
     assert [item.id for item in result.items] == [expected.id]
+
+
+async def test_publish_job_list_loads_account_nicknames_in_batch(monkeypatch) -> None:
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    async with SessionLocal() as db:
+        first_account = await publish_repo.create_account(
+            db,
+            user_id="batch-account-user",
+            platform="douyin",
+            nickname="抖音主号",
+            session_json="{}",
+            status="active",
+        )
+        second_account = await publish_repo.create_account(
+            db,
+            user_id="batch-account-user",
+            platform="xiaohongshu",
+            nickname="小红书主号",
+            session_json="{}",
+            status="active",
+        )
+        await publish_repo.create_job(
+            db,
+            user_id="batch-account-user",
+            account_id=first_account.id,
+            task_id="batch-task-a",
+            platform="douyin",
+            title="批量任务一",
+            status="success",
+        )
+        await publish_repo.create_job(
+            db,
+            user_id="batch-account-user",
+            account_id=second_account.id,
+            task_id="batch-task-b",
+            platform="xiaohongshu",
+            title="批量任务二",
+            status="success",
+        )
+
+        async def forbidden_get_account(*_args, **_kwargs):
+            raise AssertionError("list_jobs must not query publish accounts one-by-one")
+
+        monkeypatch.setattr(publish_repo, "get_account", forbidden_get_account)
+        result = await service.list_jobs(db, "batch-account-user", None, 1, 20)
+
+    nicknames = {item.accountId: item.accountNickname for item in result.items}
+    assert nicknames == {
+        first_account.id: "抖音主号",
+        second_account.id: "小红书主号",
+    }
 
 
 async def test_failed_publish_job_is_not_reused_after_account_is_fixed(monkeypatch) -> None:
@@ -426,6 +501,46 @@ async def test_export_package_contains_video_cover_and_metadata() -> None:
         assert metadata["title"] == "完整发布包"
         assert metadata["topics"] == ["口播", "测试"]
         assert metadata["platform"] == "douyin"
+
+
+async def test_export_package_streams_media_and_archive_from_disk(monkeypatch) -> None:
+    from contextlib import asynccontextmanager
+
+    from app.core.storage import local_path
+    from app.modules.publish import repository as publish_repo
+    from app.modules.publish import service
+
+    video_key = await save_bytes("publish-test", "large-video.mp4", b"video-bytes")
+    cover_key = await save_bytes("publish-test", "large-cover.jpg", b"cover-bytes")
+
+    @asynccontextmanager
+    async def fake_materialize(key: str, *, name: str = "media"):
+        yield local_path(key)
+
+    async def forbid_full_buffer(*_args, **_kwargs):
+        raise AssertionError("发布包不得通过 read_bytes/save_bytes 全量缓冲媒体或 ZIP")
+
+    monkeypatch.setattr(service, "materialized_path", fake_materialize)
+    monkeypatch.setattr(service, "read_bytes", forbid_full_buffer, raising=False)
+    monkeypatch.setattr(service, "save_bytes", forbid_full_buffer, raising=False)
+
+    async with SessionLocal() as db:
+        job = await publish_repo.create_job(
+            db,
+            user_id="stream-package-user",
+            task_id="pipeline-stream",
+            platform="douyin",
+            title="流式发布包",
+            video_key=video_key,
+            cover_key=cover_key,
+            status="failed",
+        )
+        result = await service.export_job(db, "stream-package-user", job.id)
+
+    package = await read_bytes(result.packageKey)
+    with zipfile.ZipFile(BytesIO(package)) as archive:
+        assert archive.read("video.mp4") == b"video-bytes"
+        assert archive.read("cover.jpg") == b"cover-bytes"
 
 
 async def test_publish_worker_never_uses_another_users_account(monkeypatch) -> None:

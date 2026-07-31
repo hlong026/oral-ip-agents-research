@@ -41,6 +41,7 @@ jobs:
           uv lock --check --directory server
           uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
       - name: 2. 数据库迁移链
         working-directory: server
         env:
@@ -53,20 +54,10 @@ jobs:
           uv run alembic upgrade head
           uv run alembic downgrade f2b3c4d5e6f7
           uv run alembic upgrade head
-      - name: 3. Ruff
-        working-directory: server
-        run: uv run ruff check .
-      - name: 4. Ruff 格式
-        working-directory: server
-        run: uv run ruff format --check .
-      - name: 5. Mypy
-        working-directory: server
-        run: uv run mypy app
-      - name: 6. Pytest
-        working-directory: server
+      - name: 3. 后端质量门禁
         env:
           APP_ENV: test
-        run: uv run pytest -q
+        run: pnpm verify:backend
       - name: 7. OpenAPI 契约零漂移
         env:
           APP_ENV: test
@@ -82,22 +73,27 @@ jobs:
           done
           curl -sf http://127.0.0.1:8000/healthz
           node scripts/gen-api-types.mjs --check
-      - name: 8. 前端格式
-        run: pnpm lint
-      - name: 9. 前端类型检查
-        run: pnpm typecheck
-      - name: 10. 前端测试
-        run: pnpm test
-      - name: 11. 前端构建
-        run: pnpm build
-      - name: 12. 生产依赖安全审计
+      - name: 8. 前端质量门禁
+        run: pnpm verify:frontend
+      - name: 9. 业务流程 E2E
+        run: pnpm verify:e2e
+      - name: 10. 上传 E2E 证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-evidence
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+      - name: 11. 生产依赖安全审计
         run: |
           uv run --directory server --with pip-audit==2.10.0 pip-audit --local
           pnpm audit --prod --audit-level high
-      - name: 13. 容器部署契约
+      - name: 12. 容器部署契约
         run: |
           cp server/.env.example server/.env
           docker compose config --quiet
           docker build -f server/Dockerfile -t oral-ip-server:ci .
-      - name: 14. 秘密扫描
+      - name: 13. 秘密扫描
         run: node scripts/scan-secrets.mjs

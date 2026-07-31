@@ -34,15 +34,9 @@ async def admin_user(client: AsyncClient):
         await db.commit()
         user_id = user.id
 
-    response = await client.post(
-        "/api/admin/v1/auth/login",
-        json={"phone": phone, "password": password}
-    )
+    response = await client.post("/api/admin/v1/auth/login", json={"phone": phone, "password": password})
     assert response.status_code == 200
-    return {
-        "user_id": user_id,
-        "headers": {"Authorization": f"Bearer {response.json()['accessToken']}"}
-    }
+    return {"user_id": user_id, "headers": {"Authorization": f"Bearer {response.json()['accessToken']}"}}
 
 
 @pytest.fixture
@@ -68,10 +62,7 @@ async def normal_user(client: AsyncClient):
     # 普通用户通过激活码登录
     raw = await bind_used_code(user_id)
     tokens = await code_login(client, raw)
-    return {
-        "user_id": user_id,
-        "headers": {"Authorization": f"Bearer {tokens['accessToken']}"}
-    }
+    return {"user_id": user_id, "headers": {"Authorization": f"Bearer {tokens['accessToken']}"}}
 
 
 async def bind_used_code(user_id: str) -> str:
@@ -79,6 +70,7 @@ async def bind_used_code(user_id: str) -> str:
     from datetime import UTC, datetime
 
     from app.modules.activation import code_generator
+
     raw = code_generator.generate_batch(1)[0]
     async with SessionLocal() as db:
         db.add(
@@ -155,8 +147,7 @@ async def test_admin_get_user_usage_success(client: AsyncClient, admin_user):
 
     # 管理员请求调用记录
     response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={user_id}&page=1&pageSize=20",
-        headers=admin_user["headers"]
+        f"/api/admin/v1/admin/usage?user_id={user_id}&page=1&pageSize=20", headers=admin_user["headers"]
     )
 
     assert response.status_code == 200
@@ -218,10 +209,7 @@ async def test_admin_get_user_usage_with_step_filter(client: AsyncClient, admin_
         await db.commit()
 
     # 筛选 tts 步骤
-    response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={user_id}&step=tts",
-        headers=admin_user["headers"]
-    )
+    response = await client.get(f"/api/admin/v1/admin/usage?user_id={user_id}&step=tts", headers=admin_user["headers"])
 
     assert response.status_code == 200
     data = response.json()
@@ -265,8 +253,7 @@ async def test_admin_get_user_usage_pagination(client: AsyncClient, admin_user):
 
     # 第一页
     response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={user_id}&page=1&pageSize=10",
-        headers=admin_user["headers"]
+        f"/api/admin/v1/admin/usage?user_id={user_id}&page=1&pageSize=10", headers=admin_user["headers"]
     )
     assert response.status_code == 200
     data = response.json()
@@ -278,8 +265,7 @@ async def test_admin_get_user_usage_pagination(client: AsyncClient, admin_user):
 
     # 第二页
     response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={user_id}&page=2&pageSize=10",
-        headers=admin_user["headers"]
+        f"/api/admin/v1/admin/usage?user_id={user_id}&page=2&pageSize=10", headers=admin_user["headers"]
     )
     assert response.status_code == 200
     data = response.json()
@@ -288,8 +274,7 @@ async def test_admin_get_user_usage_pagination(client: AsyncClient, admin_user):
 
     # 第三页（最后）
     response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={user_id}&page=3&pageSize=10",
-        headers=admin_user["headers"]
+        f"/api/admin/v1/admin/usage?user_id={user_id}&page=3&pageSize=10", headers=admin_user["headers"]
     )
     assert response.status_code == 200
     data = response.json()
@@ -299,10 +284,7 @@ async def test_admin_get_user_usage_pagination(client: AsyncClient, admin_user):
 @pytest.mark.asyncio
 async def test_admin_get_user_usage_user_not_found(client: AsyncClient, admin_user):
     """管理员查询不存在的用户时返回 404"""
-    response = await client.get(
-        "/api/admin/v1/admin/usage?user_id=non-existent-user",
-        headers=admin_user["headers"]
-    )
+    response = await client.get("/api/admin/v1/admin/usage?user_id=non-existent-user", headers=admin_user["headers"])
     assert response.status_code == 404
     data = response.json()
     assert data["detail"]["code"] == "USER_NOT_FOUND"
@@ -327,10 +309,7 @@ async def test_admin_get_user_usage_unauthorized(client: AsyncClient, normal_use
         target_user_id = target_user.id
 
     # 普通用户尝试访问
-    response = await client.get(
-        f"/api/admin/v1/admin/usage?user_id={target_user_id}",
-        headers=normal_user["headers"]
-    )
+    response = await client.get(f"/api/admin/v1/admin/usage?user_id={target_user_id}", headers=normal_user["headers"])
     assert response.status_code == 403
 
 
@@ -368,10 +347,7 @@ async def test_admin_export_user_usage_csv(client: AsyncClient, admin_user):
         await db.commit()
 
     # 导出 CSV
-    response = await client.get(
-        f"/api/admin/v1/admin/usage/export?user_id={user_id}",
-        headers=admin_user["headers"]
-    )
+    response = await client.get(f"/api/admin/v1/admin/usage/export?user_id={user_id}", headers=admin_user["headers"])
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "text/csv; charset=utf-8"
@@ -384,3 +360,37 @@ async def test_admin_export_user_usage_csv(client: AsyncClient, admin_user):
     assert "时间" in lines[0]
     assert "tts" in lines[1]
     assert "80" in lines[1]
+
+
+@pytest.mark.asyncio
+async def test_usage_exports_reject_ranges_larger_than_31_days(
+    client: AsyncClient,
+    admin_user,
+    normal_user,
+):
+    created_from = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+    created_to = datetime.now(UTC).isoformat()
+
+    admin_response = await client.get(
+        "/api/admin/v1/admin/usage/export",
+        params={
+            "user_id": normal_user["user_id"],
+            "createdFrom": created_from,
+            "createdTo": created_to,
+        },
+        headers=admin_user["headers"],
+    )
+    user_response = await client.get(
+        "/api/v1/billing/usage",
+        params={
+            "export": "csv",
+            "createdFrom": created_from,
+            "createdTo": created_to,
+        },
+        headers=normal_user["headers"],
+    )
+
+    assert admin_response.status_code == 422
+    assert admin_response.json()["detail"]["code"] == "EXPORT_WINDOW_TOO_LARGE"
+    assert user_response.status_code == 422
+    assert user_response.json()["detail"]["code"] == "EXPORT_WINDOW_TOO_LARGE"

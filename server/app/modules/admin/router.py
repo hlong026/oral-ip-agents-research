@@ -1,6 +1,7 @@
 """管理员用户、成本、审计与设备绑定治理。"""
 
-from datetime import UTC, datetime
+import json
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,11 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit import AuditLog, write_audit
 from app.core.db import get_db
 from app.core.deps import require_admin
+from app.core.logging import sanitize_text
 from app.modules.admin.dashboard import build_dashboard
 from app.modules.auth.devices import get_device_bind_limit, list_user_devices
 from app.modules.auth.models import DeviceBindRequest, RefreshSession, User, UserDevice, device_key_of
-from app.modules.billing.models import QuotaAccount
+from app.modules.billing.models import CreditReservation, QuotaAccount
 from app.modules.catalog import repository as catalog_repo
+from app.modules.pipeline.models import PipelineTask
+from app.modules.publish.models import PublishJob
 
 router = APIRouter(tags=["admin"])
 
@@ -29,6 +33,374 @@ async def dashboard(
 ):
     """运营总览驾驶舱：六大业务块按天时间序列，一次请求全量返回"""
     return await build_dashboard(db, days)
+
+
+def _percentage(numerator: int, denominator: int) -> float:
+    return round(numerator * 100 / denominator, 2) if denominator else 0.0
+
+
+def _is_quota_failure(error: str) -> bool:
+    normalized = error.lower()
+    return any(marker in normalized for marker in ("quota", "rate limit", "429", "配额", "限流"))
+
+
+@router.get("/operations/health")
+async def operations_health(
+    hours: int = Query(24, ge=1, le=24 * 31),
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """生产健康摘要；Provider 明细最多扫描窗口内最近一万条任务。"""
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    tasks = list(
+        (
+            await db.execute(
+                select(PipelineTask)
+                .where(PipelineTask.created_at >= cutoff)
+                .order_by(PipelineTask.created_at.desc())
+                .limit(10_000)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    provider_metrics: dict[str, dict[str, Any]] = {}
+    for task in tasks:
+        try:
+            steps = json.loads(task.steps_json or "[]")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            provider = str(step.get("provider") or "")
+            if not provider:
+                continue
+            metric = provider_metrics.setdefault(
+                provider,
+                {
+                    "provider": provider,
+                    "attempts": 0,
+                    "successes": 0,
+                    "failures": 0,
+                    "quotaFailures": 0,
+                    "quotaAlert": False,
+                    "lastSuccessAt": None,
+                },
+            )
+            metric["attempts"] += 1
+            if step.get("status") == "done":
+                metric["successes"] += 1
+                success_at = step.get("finishedAt") or task.updated_at.astimezone(UTC).isoformat()
+                if not metric["lastSuccessAt"] or success_at > metric["lastSuccessAt"]:
+                    metric["lastSuccessAt"] = success_at
+            elif step.get("status") == "failed":
+                metric["failures"] += 1
+                if _is_quota_failure(str(step.get("error") or "")):
+                    metric["quotaFailures"] += 1
+                    metric["quotaAlert"] = True
+    providers = []
+    for metric in provider_metrics.values():
+        metric["failureRate"] = _percentage(metric["failures"], metric["attempts"])
+        providers.append(metric)
+
+    publish_rows = (
+        await db.execute(
+            select(PublishJob.status, func.count(PublishJob.id))
+            .where(PublishJob.created_at >= cutoff)
+            .group_by(PublishJob.status)
+        )
+    ).all()
+    publish_counts = {row_status: int(count) for row_status, count in publish_rows}
+    publish_succeeded = publish_counts.get("success", 0)
+    publish_failed = publish_counts.get("failed", 0)
+    manual_fallback = publish_counts.get("export_ready", 0)
+    publish_errors = list(
+        (
+            await db.execute(
+                select(PublishJob.error)
+                .where(
+                    PublishJob.created_at >= cutoff,
+                    PublishJob.status == "failed",
+                )
+                .order_by(PublishJob.created_at.desc())
+                .limit(10_000)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    failure_classes: dict[str, int] = {}
+    for error in publish_errors:
+        failure_class = _failure_class(error or "")
+        failure_classes[failure_class] = failure_classes.get(failure_class, 0) + 1
+    recovered = int(
+        (
+            await db.scalar(
+                select(func.count(PublishJob.id)).where(
+                    PublishJob.created_at >= cutoff,
+                    PublishJob.status == "success",
+                    PublishJob.retry_count != "0",
+                )
+            )
+        )
+        or 0
+    )
+
+    billing_rows = (
+        await db.execute(
+            select(CreditReservation.status, func.count(CreditReservation.id))
+            .where(CreditReservation.created_at >= cutoff)
+            .group_by(CreditReservation.status)
+        )
+    ).all()
+    billing_counts = {row_status: int(count) for row_status, count in billing_rows}
+    unknown_outcomes = sum(task.status == "reconciliation_required" for task in tasks)
+    return {
+        "hours": hours,
+        "generatedAt": datetime.now(UTC).isoformat(),
+        "providerScanTruncated": len(tasks) == 10_000,
+        "providers": sorted(providers, key=lambda item: (-item["failures"], item["provider"])),
+        "publishing": {
+            "succeeded": publish_succeeded,
+            "failed": publish_failed,
+            "manualFallback": manual_fallback,
+            "recovered": recovered,
+            "failureClasses": failure_classes,
+            "successRate": _percentage(publish_succeeded, publish_succeeded + publish_failed),
+            "manualFallbackRate": _percentage(
+                manual_fallback,
+                publish_succeeded + publish_failed + manual_fallback,
+            ),
+        },
+        "billing": {
+            "reserved": billing_counts.get("reserved", 0),
+            "settled": billing_counts.get("settled", 0),
+            "released": billing_counts.get("released", 0),
+            "unknownOutcomes": unknown_outcomes,
+        },
+    }
+
+
+class AdminTaskActionIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class AdminTaskRetryIn(AdminTaskActionIn):
+    step: str = Field(min_length=1, max_length=32)
+    quoteId: str | None = Field(default=None, max_length=64)
+
+
+def _failure_class(error: str) -> str:
+    normalized = error.lower()
+    if not normalized:
+        return "none"
+    if any(marker in normalized for marker in ("cookie", "登录态", "重新登录", "账号失效", "account expired")):
+        return "account"
+    if any(
+        marker in normalized for marker in ("captcha", "风控", "平台验证", "安全验证", "审核", "verification required")
+    ):
+        return "platform_verification"
+    if any(
+        marker in normalized for marker in ("unauthorized", "forbidden", "api key", "token", "签名", "鉴权", "认证失败")
+    ):
+        return "authentication"
+    if any(marker in normalized for marker in ("timeout", "timed out", "connect", "network", "dns", "网络")):
+        return "network"
+    if any(marker in normalized for marker in ("内容", "标题", "素材", "违规", "格式", "content")):
+        return "content"
+    return "internal"
+
+
+def _task_provider(task: PipelineTask) -> str:
+    try:
+        steps = json.loads(task.steps_json or "[]")
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(steps, list):
+        return ""
+    current = next(
+        (
+            str(item.get("provider") or "")
+            for item in steps
+            if isinstance(item, dict) and item.get("step") == task.current_step
+        ),
+        "",
+    )
+    if current:
+        return current
+    return next(
+        (
+            str(item.get("provider") or "")
+            for item in reversed(steps)
+            if isinstance(item, dict) and item.get("provider")
+        ),
+        "",
+    )
+
+
+@router.get("/tasks")
+async def list_global_tasks(
+    user_id: str | None = Query(None, alias="userId", max_length=32),
+    status_filter: str | None = Query(None, alias="status", max_length=32),
+    step: str | None = Query(None, max_length=32),
+    provider: str | None = Query(None, max_length=64),
+    created_from: datetime | None = Query(None, alias="createdFrom"),
+    created_to: datetime | None = Query(None, alias="createdTo"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, alias="pageSize", ge=1, le=100),
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """跨用户任务检索；只读查询不能改变业务状态。"""
+    conditions = []
+    if user_id:
+        conditions.append(PipelineTask.user_id == user_id)
+    if status_filter:
+        conditions.append(PipelineTask.status == status_filter)
+    if step:
+        conditions.append(PipelineTask.current_step == step)
+    if provider:
+        conditions.append(PipelineTask.steps_json.contains(f'"provider": "{provider}"'))
+    if created_from:
+        conditions.append(PipelineTask.created_at >= created_from)
+    if created_to:
+        conditions.append(PipelineTask.created_at <= created_to)
+
+    total = int((await db.scalar(select(func.count(PipelineTask.id)).where(*conditions))) or 0)
+    rows = (
+        await db.execute(
+            select(PipelineTask, User.nickname)
+            .outerjoin(User, User.id == PipelineTask.user_id)
+            .where(*conditions)
+            .order_by(PipelineTask.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
+    return {
+        "items": [
+            {
+                "id": task.id,
+                "userId": task.user_id,
+                "userNickname": nickname or "",
+                "title": task.title,
+                "status": task.status,
+                "step": task.current_step,
+                "provider": _task_provider(task),
+                "failureClass": _failure_class(task.error),
+                "errorSummary": sanitize_text(task.error)[:500],
+                "traceId": task.trace_id,
+                "quotaCost": task.quota_cost,
+                "createdAt": task.created_at.astimezone(UTC).isoformat(),
+                "updatedAt": task.updated_at.astimezone(UTC).isoformat(),
+            }
+            for task, nickname in rows
+        ],
+        "total": total,
+        "page": page,
+        "pageSize": page_size,
+    }
+
+
+async def _admin_task(db: AsyncSession, task_id: str) -> PipelineTask:
+    task = await db.get(PipelineTask, task_id)
+    if task is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            detail={"code": "TASK_NOT_FOUND", "message": "任务不存在"},
+        )
+    return task
+
+
+@router.post("/tasks/{task_id}/retry-quote")
+async def preflight_global_task_retry(
+    task_id: str,
+    _admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.pipeline import service as pipeline_service
+
+    task = await _admin_task(db, task_id)
+    if task.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部结果未知，请先完成对账"},
+        )
+    if task.status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ADMIN_RETRY_NOT_ALLOWED", "message": "仅失败任务允许管理员受控重试"},
+        )
+    reservation = await db.get(CreditReservation, task.reservation_id) if task.reservation_id else None
+    if reservation is not None and reservation.status == "reserved":
+        return {"required": False, "quote": None}
+    quote = await pipeline_service.create_retry_quote(db, task.id, task.user_id)
+    return {"required": True, "quote": quote}
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_global_task(
+    task_id: str,
+    body: AdminTaskActionIn,
+    admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.pipeline import service as pipeline_service
+
+    task = await _admin_task(db, task_id)
+    if task.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部结果未知，请先完成对账"},
+        )
+    if task.status not in {"pending", "running", "waiting_confirm"}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ADMIN_CANCEL_NOT_ALLOWED", "message": "当前任务状态不允许管理员取消"},
+        )
+    result = await pipeline_service.cancel(db, task.id, task.user_id)
+    await write_audit(
+        "admin_pipeline_canceled",
+        user_id=admin_id,
+        trace_id=task.trace_id,
+        task_id=task.id,
+        detail=f"target_user={task.user_id},reason={body.reason}",
+    )
+    return result
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_global_task(
+    task_id: str,
+    body: AdminTaskRetryIn,
+    admin_id: str = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.modules.pipeline import service as pipeline_service
+
+    task = await _admin_task(db, task_id)
+    if task.status == "reconciliation_required":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "RECONCILIATION_REQUIRED", "message": "外部结果未知，请先完成对账"},
+        )
+    if task.status != "failed":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "ADMIN_RETRY_NOT_ALLOWED", "message": "仅失败任务允许管理员受控重试"},
+        )
+    result = await pipeline_service.retry_step(db, task.id, body.step, task.user_id, body.quoteId)
+    await write_audit(
+        "admin_pipeline_retried",
+        user_id=admin_id,
+        trace_id=task.trace_id,
+        task_id=task.id,
+        detail=f"target_user={task.user_id},step={body.step},reason={body.reason}",
+    )
+    return result
 
 
 class UserUpdateIn(BaseModel):
@@ -302,9 +674,7 @@ async def approve_device_request(
     if req is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "REQUEST_NOT_FOUND", "message": "申请不存在"})
     if req.status != "pending":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"}
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"})
     if body.unbindDeviceId:
         device = await db.get(UserDevice, body.unbindDeviceId)
         if device is None or device.user_id != req.user_id:
@@ -341,9 +711,7 @@ async def reject_device_request(
     if req is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "REQUEST_NOT_FOUND", "message": "申请不存在"})
     if req.status != "pending":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"}
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"})
     req.status = "rejected"
     req.resolved_at = datetime.now(UTC)
     req.resolved_by = admin_id

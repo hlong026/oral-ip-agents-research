@@ -6,7 +6,7 @@ import {
 } from "@oral/api-client";
 import type { PublishAccount } from "@oral/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Zap } from "lucide-react";
+import { BellRing, EyeOff, Zap } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import PlatformIcon from "../components/PlatformIcon";
 import { isDesktopShell, openDouyinIM } from "../lib/douyinWebview";
@@ -15,8 +15,6 @@ import { isDesktopShell, openDouyinIM } from "../lib/douyinWebview";
 export default function ImCenterPage() {
   const queryClient = useQueryClient();
   const [activeConv, setActiveConv] = useState<IMConversation | null>(null);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
   const [filterAccountId, setFilterAccountId] = useState<string>("");
   const [searchInput, setSearchInput] = useState("");
@@ -77,61 +75,13 @@ export default function ImCenterPage() {
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || !activeConv) return;
-    setSending(true);
-    setSendError("");
-    try {
-      await imApi.send(activeConv.id, input.trim());
-      setInput("");
-      await queryClient.invalidateQueries({
-        queryKey: ["im-messages", activeConv.id],
-      });
-    } catch {
-      setSendError(
-        "平台未确认发送成功，失败记录已保留，可在消息气泡中重试或转人工。",
-      );
-      await queryClient.invalidateQueries({
-        queryKey: ["im-messages", activeConv.id],
-      });
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const refreshMessages = async () => {
-    if (!activeConv) return;
-    await queryClient.invalidateQueries({
-      queryKey: ["im-messages", activeConv.id],
-    });
-  };
-
-  const handleRetry = async (messageId: string) => {
-    setSendError("");
-    try {
-      await imApi.retryMessage(messageId);
-    } catch {
-      setSendError("重试仍未得到平台成功确认，可继续重试或转人工。");
-    } finally {
-      await refreshMessages();
-    }
-  };
-
-  const handleTakeover = async (messageId: string) => {
-    setSendError("");
-    await imApi.takeOverMessage(messageId);
-    await refreshMessages();
-  };
-
-  const handleSendSuggestion = async (message: IMMessage) => {
+  const handleManualReply = async () => {
     if (!activeConv) return;
     setSendError("");
     try {
-      await imApi.send(activeConv.id, parseContent(message.content));
+      await openDouyinIM(activeConv.accountId);
     } catch {
-      setSendError("建议回复未能得到平台成功确认，失败记录已保留。");
-    } finally {
-      await refreshMessages();
+      setSendError("抖音官方页面打开失败，请稍后重试。");
     }
   };
 
@@ -150,15 +100,26 @@ export default function ImCenterPage() {
         <div>
           <h1 className="text-xl font-bold">私信中心</h1>
           <p className="mt-1 text-sm text-text-3">
-            聚合所有绑定账号的抖音私信 · 支持手动回复与自动回复
+            聚合抖音私信 · 当前为“监听 + 人工网页版回复”模式（方案 E）
           </p>
         </div>
         <button
           type="button"
-          onClick={() => void openDouyinIM()}
+          disabled={isDesktopShell() && !activeConv}
+          onClick={() => {
+            if (activeConv) {
+              void openDouyinIM(activeConv.accountId);
+            } else if (!isDesktopShell()) {
+              void openDouyinIM();
+            }
+          }}
           className="shrink-0 rounded-lg bg-brand-from px-3.5 py-2 text-xs font-medium text-white transition hover:opacity-90"
         >
-          {isDesktopShell() ? "在抖音回复（新窗口）" : "打开抖音"}
+          {isDesktopShell()
+            ? activeConv
+              ? "在抖音回复（新窗口）"
+              : "选择会话后回复"
+            : "打开抖音"}
         </button>
       </div>
 
@@ -322,9 +283,7 @@ export default function ImCenterPage() {
                     key={msg.id}
                     msg={msg}
                     parseContent={parseContent}
-                    onRetry={handleRetry}
-                    onTakeover={handleTakeover}
-                    onSendSuggestion={handleSendSuggestion}
+                    onManualReply={handleManualReply}
                   />
                 ))}
                 <div ref={bottomRef} />
@@ -334,23 +293,10 @@ export default function ImCenterPage() {
                   {sendError}
                 </div>
               )}
-              <div className="flex items-center gap-2 border-t border-stroke px-4 py-3">
-                <input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) =>
-                    e.key === "Enter" && !e.shiftKey && void handleSend()
-                  }
-                  placeholder="输入消息…"
-                  className="min-w-0 flex-1 rounded-xl border border-stroke bg-white/5 px-3 py-2 text-sm outline-none focus:border-brand-from/50"
-                />
-                <button
-                  className="btn-primary px-4 py-2 text-sm"
-                  disabled={sending || !input.trim()}
-                  onClick={() => void handleSend()}
-                >
-                  发送
-                </button>
+              <div className="border-t border-stroke bg-black/20 px-4 py-3 text-xs text-text-3 flex items-center gap-2">
+                <EyeOff className="h-3.5 w-3.5" />
+                仅监听与 WebView
+                辅助，发送动作已改为官方页面手动执行。可点击左侧消息“建议回复”快速打开抖音。
               </div>
             </>
           ) : (
@@ -367,15 +313,11 @@ export default function ImCenterPage() {
 function MessageBubble({
   msg,
   parseContent,
-  onRetry,
-  onTakeover,
-  onSendSuggestion,
+  onManualReply,
 }: {
   msg: IMMessage;
   parseContent: (c: string) => string;
-  onRetry: (messageId: string) => Promise<void>;
-  onTakeover: (messageId: string) => Promise<void>;
-  onSendSuggestion: (message: IMMessage) => Promise<void>;
+  onManualReply: () => Promise<void>;
 }) {
   const isOut = msg.direction === "out";
   const text = parseContent(msg.content);
@@ -396,7 +338,7 @@ function MessageBubble({
           </span>
           {msg.autoReplied && (
             <span className="inline-flex items-center gap-0.5 text-brand-to">
-              <Zap className="h-2.5 w-2.5" /> 自动回复
+              <Zap className="h-2.5 w-2.5" /> 规则建议
             </span>
           )}
           {isOut && msg.sendStatus === "pending" && <span>发送中</span>}
@@ -423,15 +365,9 @@ function MessageBubble({
           <div className="mt-2 flex justify-end gap-2 text-[11px]">
             <button
               className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
-              onClick={() => void onRetry(msg.id)}
+              onClick={() => void onManualReply()}
             >
-              重试{msg.retryCount > 0 ? `（${msg.retryCount}）` : ""}
-            </button>
-            <button
-              className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
-              onClick={() => void onTakeover(msg.id)}
-            >
-              转人工
+              <BellRing className="mr-1 inline h-3 w-3" /> 打开抖音回复
             </button>
           </div>
         )}
@@ -439,9 +375,9 @@ function MessageBubble({
           <div className="mt-2 flex justify-end text-[11px]">
             <button
               className="rounded border border-stroke px-2 py-1 hover:bg-white/5"
-              onClick={() => void onSendSuggestion(msg)}
+              onClick={() => void onManualReply()}
             >
-              人工确认并发送
+              打开抖音，人工确认并发送
             </button>
           </div>
         )}

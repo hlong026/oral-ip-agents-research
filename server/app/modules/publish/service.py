@@ -5,12 +5,15 @@
 - 日志：发布失败/账号过期（§10.6.8-A #5）
 """
 
+import asyncio
 import json
 import zipfile
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime, timedelta
-from io import BytesIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
+import aiofiles
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +23,7 @@ from app.core.db import SessionLocal
 from app.core.events import CHANNEL_FEED, CHANNEL_TASKS
 from app.core.events import publish as emit
 from app.core.logging import get_logger
-from app.core.storage import read_bytes, save_bytes, signed_media_path
+from app.core.storage import materialized_path, save_stream, signed_media_path
 from app.core.white_label import public_error_message
 from app.modules.notify.service import notify_user
 from app.providers.registry import registry
@@ -45,6 +48,7 @@ _PLATFORM_MODES = {
     "douyin": "automatic",
     "xiaohongshu": "semi_automatic",
     "shipinhao": "semi_automatic",
+    "kuaishou": "semi_automatic",
 }
 
 # 重新授权票据绑定：ticket → (account_id, 过期时间)。与驱动登录会话同属进程内状态，扫码成功后原地更新旧账号；
@@ -104,7 +108,8 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
     verified = {item.strip() for item in settings.publish_verified_platforms.split(",") if item.strip()}
     capabilities: list[PublishCapabilityOut] = []
     for platform, platform_name in PLATFORM_NAMES.items():
-        if settings.app_env == "dev" and not settings.publish_force_real:
+        driver_available = platform in registry.publish_drivers
+        if settings.app_env == "dev" and not settings.publish_force_real and driver_available:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -115,7 +120,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                     reason="开发环境模拟发布，结果不代表真实平台可用性",
                 )
             )
-        elif platform in verified:
+        elif platform in verified and driver_available:
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -127,6 +132,11 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                 )
             )
         else:
+            reason = (
+                "尚未实现该平台发布驱动，仅提供完整人工发布包"
+                if not driver_available
+                else "尚未完成真实账号验收，仅提供完整人工发布包"
+            )
             capabilities.append(
                 PublishCapabilityOut(
                     platform=platform,
@@ -134,7 +144,7 @@ def publish_capabilities() -> list[PublishCapabilityOut]:
                     mode="export_only",
                     verificationStatus="unverified",
                     automaticEnabled=False,
-                    reason="尚未完成真实账号验收，仅提供完整人工发布包",
+                    reason=reason,
                 )
             )
     return capabilities
@@ -532,10 +542,8 @@ async def list_jobs(
     task_id: str = "",
 ) -> JobPageOut:
     items, total = await repo.list_jobs(db, user_id, status_, page, page_size, task_id)
-    outs = []
-    for j in items:
-        acc = await repo.get_account(db, j.account_id, user_id) if j.account_id else None
-        outs.append(job_to_out(j, acc))
+    accounts = await repo.get_accounts_by_ids(db, {j.account_id for j in items if j.account_id}, user_id)
+    outs = [job_to_out(j, accounts.get(j.account_id)) for j in items]
     return JobPageOut(items=outs, total=total, page=page, pageSize=page_size)
 
 
@@ -588,13 +596,32 @@ async def export_job(db: AsyncSession, user_id: str, job_id: str) -> ExportOut:
         "createdAt": j.created_at.astimezone(UTC).isoformat(),
     }
     try:
-        buffer = BytesIO()
-        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr(video_name, await read_bytes(j.video_key))
-            if j.cover_key:
-                archive.writestr(cover_name, await read_bytes(j.cover_key))
-            archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
-        j.export_key = await save_bytes("publish-packages", f"{j.id}.zip", buffer.getvalue())
+        with TemporaryDirectory(prefix="oral-publish-package-") as directory:
+            package_path = Path(directory) / f"{j.id}.zip"
+            async with AsyncExitStack() as media_stack:
+                video_path = await media_stack.enter_async_context(materialized_path(j.video_key, name="video"))
+                cover_path = (
+                    await media_stack.enter_async_context(materialized_path(j.cover_key, name="cover"))
+                    if j.cover_key
+                    else None
+                )
+
+                def build_package() -> None:
+                    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                        archive.write(video_path, video_name)
+                        if cover_path:
+                            archive.write(cover_path, cover_name)
+                        archive.writestr("metadata.json", json.dumps(metadata, ensure_ascii=False, indent=2))
+
+                await asyncio.to_thread(build_package)
+            package_size = package_path.stat().st_size
+            async with aiofiles.open(package_path, "rb") as package:
+                j.export_key, _ = await save_stream(
+                    "publish-packages",
+                    f"{j.id}.zip",
+                    package,
+                    max_bytes=package_size,
+                )
     except Exception as exc:  # noqa: BLE001
         logger.exception("publish_package_failed", job_id=j.id, user_id=user_id)
         raise HTTPException(

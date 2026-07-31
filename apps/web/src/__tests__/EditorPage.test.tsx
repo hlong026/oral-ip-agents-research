@@ -162,6 +162,48 @@ describe("EditorPage publication draft", () => {
     vi.useRealTimers();
   });
 
+  it("无草稿时用 ASR words 构建字幕并按真实时间定位", async () => {
+    const asrTask: PipelineTask = {
+      ...task,
+      artifacts: {
+        ...task.artifacts,
+        words: [
+          { word: "第一", start: 0.1, end: 0.45 },
+          { word: "句", start: 0.5, end: 0.7 },
+          { word: "第二", start: 1.3, end: 1.6 },
+          { word: "句", start: 1.65, end: 1.9 },
+        ],
+      },
+    };
+    vi.mocked(pipelineApi.list).mockResolvedValue({
+      items: [asrTask],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+    vi.mocked(pipelineApi.get).mockResolvedValue(asrTask);
+    vi.mocked(pipelineApi.publicationDraft).mockResolvedValue(
+      null as unknown as PublicationRevision,
+    );
+
+    renderEditor();
+
+    expect(await screen.findByDisplayValue("第一句")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("第二句")).toBeInTheDocument();
+    expect(screen.getByText("0.1s")).toBeInTheDocument();
+    expect(screen.getByText("1.3s")).toBeInTheDocument();
+
+    const video = screen.getByLabelText("剪辑成片预览");
+    Object.defineProperty(video, "currentTime", { value: 1.4 });
+    fireEvent.timeUpdate(video);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("subtitle-overlay")).toHaveTextContent(
+        "第二句",
+      );
+    });
+  });
+
   it("编辑字幕、字体和拖动坐标后用 CAS 自动保存", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();

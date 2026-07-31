@@ -15,7 +15,6 @@ from typing import Any
 
 MIN_CONNECTION_SUCCESS_RATE = 90.0
 MAX_DROPOUT_RATE = 10.0
-MIN_SEND_SUCCESS_RATE = 90.0
 REQUIRED_DAYS = 7
 
 
@@ -25,6 +24,8 @@ def _day_reasons(sample: dict[str, Any]) -> list[str]:
     reasons: list[str] = []
     if int(summary.get("grayAccounts", 0)) < 1:
         reasons.append(f"{day} 没有灰度账号")
+    if int(summary.get("listeningAccounts", 0)) < 1:
+        reasons.append(f"{day} 没有在线监听账号")
     if int(summary.get("connectionAttempts", 0)) < 1:
         reasons.append(f"{day} 没有真实连接尝试")
     if float(summary.get("connectionSuccessRate", 0)) < MIN_CONNECTION_SUCCESS_RATE:
@@ -32,10 +33,8 @@ def _day_reasons(sample: dict[str, Any]) -> list[str]:
     if float(summary.get("dropoutRate", 0)) > MAX_DROPOUT_RATE:
         reasons.append(f"{day} 掉线率高于 {MAX_DROPOUT_RATE}%")
     sends = int(summary.get("sendSuccess", 0)) + int(summary.get("sendFailure", 0))
-    if sends < 1:
-        reasons.append(f"{day} 没有真实发送尝试")
-    if float(summary.get("sendSuccessRate", 0)) < MIN_SEND_SUCCESS_RATE:
-        reasons.append(f"{day} 发送成功率低于 {MIN_SEND_SUCCESS_RATE}%")
+    if sends > 0:
+        reasons.append(f"{day} 出现服务端发送活动，违反只读监听门禁")
     if int(summary.get("ownershipRejected", 0)) > 0:
         reasons.append(f"{day} 出现消息归属拒绝")
     if int(summary.get("riskControlIncidents", 0)) > 0:
@@ -70,6 +69,8 @@ def _aggregate_captures(captures: list[dict[str, Any]]) -> dict[str, Any]:
     first = summaries[0]
     result = dict(first)
     result["grayAccounts"] = min(int(item.get("grayAccounts", 0)) for item in summaries)
+    result["listenerAccounts"] = min(int(item.get("listenerAccounts", 0)) for item in summaries)
+    result["listeningAccounts"] = min(int(item.get("listeningAccounts", 0)) for item in summaries)
     for field in (
         "connectionAttempts",
         "sendSuccess",
