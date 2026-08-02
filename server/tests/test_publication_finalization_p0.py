@@ -194,7 +194,10 @@ async def test_metadata_suggestions_fallback_and_cover_candidates(monkeypatch) -
 
     monkeypatch.setattr(service, "_extract_cover_candidate_frame", fake_extract)
     # 测试任务的 clean key 为虚构路径，绕过源文件存在性校验
-    monkeypatch.setattr(service, "storage_exists", lambda _key: True)
+    async def fake_exists(_key: str) -> bool:
+        return True
+
+    monkeypatch.setattr(service, "storage_exists", fake_exists)
     async with SessionLocal() as db:
         suggestions = await service.metadata_suggestions(db, task_id, user_id)
         candidates = await service.cover_candidates(db, task_id, user_id)

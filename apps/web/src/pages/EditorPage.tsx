@@ -40,83 +40,17 @@ function textArtifact(task: PipelineTask | undefined, key: string) {
   return typeof value === "string" && value ? value : "";
 }
 
-/** 从 ASR words 构建字幕片段（使用真实时间戳） */
-function buildSubtitlesFromAsrWords(words: Array<{word: string; start: number; end: number}>): SubtitleSegment[] {
-  if (!words || words.length === 0) return [];
-  
-  // 按时间戳排序（确保 monotonic）
-  const sorted = [...words].sort((a, b) => a.start - b.start);
-  
-  // 合并短句为完整语义段（阈值：相邻间隔 ≤300ms 视为同一句）
-  const segments: SubtitleSegment[] = [];
-  let currentStart = Math.max(0, Math.round(sorted[0].start * 1000)); // ms，四舍五入避免浮点误差
-  let currentEnd = Math.max(0, Math.round(sorted[0].end * 1000));
-  let currentText = sorted[0].word;
-  
-  for (let i = 1; i < sorted.length; i++) {
-    const word = sorted[i];
-    const wordStartMs = Math.max(0, Math.round(word.start * 1000));
-    const wordEndMs = Math.max(0, Math.round(word.end * 1000));
-    
-    // 检查与前一个词的间隔
-    const gap = wordStartMs - currentEnd;
-    
-    if (gap <= 300) {
-      // 属于同一句
-      currentEnd = wordEndMs;
-      currentText += word.word;
-    } else {
-      // 新句开始：保存当前段
-      segments.push({
-        id: `segment-${segments.length + 1}`,
-        startMs: currentStart,
-        endMs: currentEnd,
-        text: currentText,
-      });
-      // 开始新段
-      currentStart = wordStartMs;
-      currentEnd = wordEndMs;
-      currentText = word.word;
-    }
-  }
-  // 最后一段
-  if (currentText) {
-    segments.push({
-      id: `segment-${segments.length + 1}`,
-      startMs: currentStart,
-      endMs: currentEnd,
-      text: currentText,
-    });
-  }
-  
-  return segments;
-}
-
+/**
+ * 草稿接口返回前的占位内容。真实分段一律由服务端 GET publication-draft 按 ASR/TTS
+ * 词级时间戳切好后下发，前端不复制切句规则，避免两套规则切出不一致的字幕。
+ * 这里的时间戳是等分占位值，故 source 记为 manual。
+ */
 function defaultContent(task: PipelineTask): PublicationContentSpec {
   const script = textArtifact(task, "script") || task.title;
-  
-  // 尝试从 ASR words 构建字幕
-  const asrWords = task.artifacts?.words as Array<{word: string; start: number; end: number}> | undefined;
-  let subtitleSegments: SubtitleSegment[];
-  
-  if (asrWords && asrWords.length > 0) {
-    // 使用真实 ASR 时间戳
-    subtitleSegments = buildSubtitlesFromAsrWords(asrWords);
-  } else {
-    // 降级到伪数据
-    const lines = script
-      .split(/[。！？!?\n]/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .slice(0, 8);
-    
-    subtitleSegments = (lines.length ? lines : [task.title]).map((text, index) => ({
-      id: `segment-${index + 1}`,
-      startMs: index * 1800,
-      endMs: (index + 1) * 1800,
-      text,
-    }));
-  }
+  const lines = script
+    .split(/[。！？!?\n]/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 
   return {
     schemaVersion: 1,
@@ -124,8 +58,13 @@ function defaultContent(task: PipelineTask): PublicationContentSpec {
     topics: [],
     subtitles: {
       enabled: true,
-      source: asrWords && asrWords.length > 0 ? "asr_aligned" : "manual",
-      segments: subtitleSegments.slice(0, 20), // 最多 20 句
+      source: "manual",
+      segments: (lines.length ? lines : [task.title]).map((text, index) => ({
+        id: `segment-${index + 1}`,
+        startMs: index * 1800,
+        endMs: (index + 1) * 1800,
+        text,
+      })),
       style: {
         fontFamily: "PingFang SC",
         fontSize: 44,
@@ -182,7 +121,6 @@ export default function EditorPage() {
   const overlayBoxRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const lastScrolledIndex = useRef(-2); // 防抖标记：防止重复滚动
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
 
   const { data: doneTasks } = useQuery({
@@ -579,9 +517,26 @@ export default function EditorPage() {
 
   const videoUrl = textArtifact(detail, "final_video_url");
   const subtitleSegments = content?.subtitles.segments ?? [];
-  // 播放进度同步：取最后一个 startMs <= 当前播放时间的段；句间停顿保持上一句，与常见播放器行为一致
-  const activeSegmentIndex = useMemo(() => {
-    if (subtitleSegments.length === 0) return -1;
+  // 定稿成片已把字幕烧进画面，此时再叠 HTML 字幕就会双重显示。
+  // superseded 表示该版本曾经定稿过，活动成片同样是烧录版本。
+  const previewHasBurnedSubtitles = Boolean(
+    revisions?.some(
+      (revision) =>
+        revision.status === "finalized" || revision.status === "superseded",
+    ),
+  );
+  // overlay 取当前时间落在 [startMs, endMs) 内的段，与 ASS 烧录的显示区间保持一致；
+  // 句间停顿留空，不再滞留上一句。
+  const activeSegmentIndex = useMemo(
+    () =>
+      subtitleSegments.findIndex(
+        (segment) =>
+          currentTimeMs >= segment.startMs && currentTimeMs < segment.endMs,
+      ),
+    [subtitleSegments, currentTimeMs],
+  );
+  // 列表高亮与自动滚动用“最后一个已开始的段”，停顿时保持上一句选中，避免高亮闪烁
+  const highlightedSegmentIndex = useMemo(() => {
     let idx = -1;
     for (let i = 0; i < subtitleSegments.length; i++) {
       if (currentTimeMs >= subtitleSegments[i]!.startMs) idx = i;
@@ -589,33 +544,24 @@ export default function EditorPage() {
     }
     return idx;
   }, [subtitleSegments, currentTimeMs]);
-  // 字幕文本生成：空数组时返回空字符串，有数据时按 activeSegmentIndex 获取，间隙显示上一句
   const activeSubtitle = useMemo(() => {
-    if (subtitleSegments.length === 0) return "";
-    if (activeSegmentIndex < 0) return subtitleSegments[0]?.text || "";
-    return subtitleSegments[activeSegmentIndex]?.text || "";
-  }, [subtitleSegments, activeSegmentIndex]);
-  // 播放中自动滚动字幕列表，保持当前句可见；暂停时不打扰手动浏览/编辑
+    if (activeSegmentIndex >= 0) {
+      return subtitleSegments[activeSegmentIndex]?.text ?? "";
+    }
+    // 尚未起播时用首句给样式取样，方便调字号/描边/位置；起播后严格跟随区间
+    if (currentTimeMs === 0) return subtitleSegments[0]?.text ?? "";
+    return "";
+  }, [subtitleSegments, activeSegmentIndex, currentTimeMs]);
+  // 播放中自动滚动字幕列表，保持当前句可见；暂停时不打扰手动浏览/编辑。
+  // 依赖只有下标，下标不变不会重跑，无需额外的防重滚动标记。
   useEffect(() => {
-    if (activeSegmentIndex < 0) return;
-    
+    if (highlightedSegmentIndex < 0) return;
     const video = videoRef.current;
     if (!video || video.paused) return;
-    
-    // 防抖：同一行不重复滚动
-    if (activeSegmentIndex === lastScrolledIndex.current) return;
-    
-    const element = document.getElementById(`subtitle-segment-${activeSegmentIndex}`);
-    if (element) {
-      element.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      lastScrolledIndex.current = activeSegmentIndex;
-      
-      // 300ms 后清除标记，允许再次滚动到同一行
-      setTimeout(() => {
-        lastScrolledIndex.current = -2;
-      }, 300);
-    }
-  }, [activeSegmentIndex]);
+    document
+      .getElementById(`subtitle-segment-${highlightedSegmentIndex}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [highlightedSegmentIndex]);
   const firstThreeSeconds = (coverCandidates ?? []).filter(
     (candidate: CoverCandidate) => candidate.timestampMs <= 3000,
   );
@@ -687,27 +633,42 @@ export default function EditorPage() {
                 {content.subtitles.enabled && (
                   <span
                     data-testid="subtitle-overlay"
+                    data-burned={previewHasBurnedSubtitles ? "true" : "false"}
                     onPointerDown={startDrag}
-                    className="absolute cursor-move select-none px-4 text-center font-bold leading-snug"
+                    title={
+                      previewHasBurnedSubtitles
+                        ? "成片已烧录字幕，此处仅标示下次合成的字幕位置"
+                        : "拖动可调整字幕位置"
+                    }
+                    className={
+                      previewHasBurnedSubtitles
+                        ? "absolute cursor-move select-none rounded border border-dashed border-white/60 bg-black/50 px-2 py-0.5 text-[11px] text-white/85"
+                        : "absolute cursor-move select-none px-4 text-center font-bold leading-snug"
+                    }
                     style={{
                       left: `${content.subtitles.style.xPercent}%`,
                       top: `${content.subtitles.style.yPercent}%`,
                       transform: "translate(-50%, -50%)",
                       // 不换行才能保证 translate(-50%) 是真居中，贴边时不被容器挤压折行
                       whiteSpace: "nowrap",
-                      color: content.subtitles.style.color,
-                      fontFamily: content.subtitles.style.fontFamily,
-                      fontSize: Math.max(
-                        12,
-                        content.subtitles.style.fontSize / 2.2,
-                      ),
-                      textShadow:
-                        content.subtitles.style.stroke > 0
-                          ? `0 0 ${content.subtitles.style.stroke * 2}px rgba(0,0,0,.9)`
-                          : "none",
+                      // 烧录版本只画位置框，不再套字幕样式，避免与画面里的字叠成两层
+                      ...(previewHasBurnedSubtitles
+                        ? null
+                        : {
+                            color: content.subtitles.style.color,
+                            fontFamily: content.subtitles.style.fontFamily,
+                            fontSize: Math.max(
+                              12,
+                              content.subtitles.style.fontSize / 2.2,
+                            ),
+                            textShadow:
+                              content.subtitles.style.stroke > 0
+                                ? `0 0 ${content.subtitles.style.stroke * 2}px rgba(0,0,0,.9)`
+                                : "none",
+                          }),
                     }}
                   >
-                                        {activeSubtitle}
+                    {previewHasBurnedSubtitles ? "字幕位置" : activeSubtitle}
                   </span>
                 )}
               </div>
@@ -985,14 +946,14 @@ export default function EditorPage() {
                       key={segment.id}
                       id={`subtitle-segment-${index}`}
                       className={`grid gap-2 rounded-lg px-2 py-1 md:grid-cols-[90px_1fr] ${
-                        index === activeSegmentIndex
+                        index === highlightedSegmentIndex
                           ? "bg-brand-from/10 ring-1 ring-brand-from/40"
                           : ""
                       }`}
                     >
                       <span
                         className={`pt-2 text-xs ${
-                          index === activeSegmentIndex ? "text-brand-to" : "text-text-3"
+                          index === highlightedSegmentIndex ? "text-brand-to" : "text-text-3"
                         }`}
                       >
                         {(segment.startMs / 1000).toFixed(1)}s

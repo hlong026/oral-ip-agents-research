@@ -384,3 +384,56 @@ async def test_startup_marks_interrupted_asset_submissions_for_reconciliation() 
 
     assert voice.id == voice_id and voice.status == "reconciliation_required"
     assert avatar.id == avatar_id and avatar.status == "reconciliation_required"
+
+
+async def test_exists_reports_missing_local_file() -> None:
+    from app.core import storage
+
+    key = await save_bytes("stage-two", "present.bin", b"x")
+
+    assert await storage.exists(key) is True
+    assert await storage.exists("stage-two/never-written.bin") is False
+
+
+async def test_exists_queries_s3_instead_of_assuming_present(monkeypatch) -> None:
+    """S3 驱动必须真查 head_object：默认返回存在会让源文件校验在生产上形同虚设。"""
+    from botocore.exceptions import ClientError
+
+    from app.core import storage
+
+    heads: list[tuple[str, str]] = []
+
+    class FakeS3:
+        def head_object(self, Bucket: str, Key: str):  # noqa: N803 - boto3 关键字参数
+            heads.append((Bucket, Key))
+            if Key == "compose/missing.mp4":
+                raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+            return {"ContentLength": 10}
+
+    monkeypatch.setattr(storage.settings, "storage_driver", "s3")
+    monkeypatch.setattr(storage.settings, "s3_bucket", "media")
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    assert await storage.exists("compose/present.mp4") is True
+    assert await storage.exists("compose/missing.mp4") is False
+    assert heads == [
+        ("media", "compose/present.mp4"),
+        ("media", "compose/missing.mp4"),
+    ]
+
+
+async def test_exists_propagates_unexpected_s3_errors(monkeypatch) -> None:
+    """权限或网络类错误不能被吞成“文件不存在”，否则会误报成片源丢失。"""
+    from botocore.exceptions import ClientError
+
+    from app.core import storage
+
+    class FakeS3:
+        def head_object(self, **_kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
+
+    monkeypatch.setattr(storage.settings, "storage_driver", "s3")
+    monkeypatch.setattr(storage, "_s3_client", lambda: FakeS3())
+
+    with pytest.raises(ClientError):
+        await storage.exists("compose/forbidden.mp4")

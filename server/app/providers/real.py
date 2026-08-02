@@ -453,7 +453,7 @@ def _target_size(ratio: str) -> tuple[int, int]:
 
 
 async def _materialize(key: str, directory: Path, name: str) -> Path:
-    if settings.storage_driver == "local" and exists(key):
+    if settings.storage_driver == "local" and await exists(key):
         return local_path(key)
     try:
         data = await read_bytes(key)
