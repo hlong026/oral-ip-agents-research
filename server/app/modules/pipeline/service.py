@@ -573,7 +573,7 @@ async def put_publication_draft(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "PUBLICATION_DRAFT_CONFLICT", "message": "草稿已被更新，请刷新后再保存"},
-    )
+        )
     await db.commit()
     await db.refresh(draft)
     return publication_revision_to_out(draft)
@@ -601,8 +601,7 @@ def _normalize_suggestion_groups(raw_groups: list) -> list[MetadataSuggestionGro
             continue
         tags_raw = raw.get("tags")
         tags = [
-            _clean_suggestion_text(item, 20).lstrip("#")
-            for item in (tags_raw if isinstance(tags_raw, list) else [])
+            _clean_suggestion_text(item, 20).lstrip("#") for item in (tags_raw if isinstance(tags_raw, list) else [])
         ]
         tags = [item for item in tags if item][:6]
         cover_text = _clean_suggestion_text(raw.get("coverText"), 20)

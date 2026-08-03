@@ -113,10 +113,14 @@ async def test_new_device_auto_binds_within_limit(client: AsyncClient):
         assert len(devices) == 2
         async with SessionLocal() as db:
             audit = (
-                await db.execute(
-                    select(AuditLog).where(AuditLog.event == "device_auto_bound", AuditLog.user_id == uid)
+                (
+                    await db.execute(
+                        select(AuditLog).where(AuditLog.event == "device_auto_bound", AuditLog.user_id == uid)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         assert len(audit) == 1
     finally:
         assert await _set_limit(client, admin, "1") == 200
@@ -173,9 +177,7 @@ async def test_admin_approve_unbinds_old_device_and_allows_rebind(client: AsyncC
     assert refreshed.status_code == 401
 
     # 已处理申请不可重复处理
-    again = await client.post(
-        f"/api/admin/v1/device-requests/{request['id']}/approve", headers=admin, json={}
-    )
+    again = await client.post(f"/api/admin/v1/device-requests/{request['id']}/approve", headers=admin, json={})
     assert again.status_code == 409
     assert again.json()["detail"]["code"] == "REQUEST_RESOLVED"
 
@@ -326,12 +328,8 @@ def test_migration_moves_legacy_fingerprint(tmp_path: Path):
 
     conn = sqlite3.connect(db_path)
     try:
-        rows = conn.execute(
-            "SELECT user_id, fingerprint, device_key, source FROM user_devices"
-        ).fetchall()
+        rows = conn.execute("SELECT user_id, fingerprint, device_key, source FROM user_devices").fetchall()
     finally:
         conn.close()
     # 空指纹用户不搬迁，硬件码前缀判定 source=desktop-hw
-    assert rows == [
-        ("legacy-user-1", "hw-legacymachine0001.featurehash01", "hw-legacymachine0001", "desktop-hw")
-    ]
+    assert rows == [("legacy-user-1", "hw-legacymachine0001.featurehash01", "hw-legacymachine0001", "desktop-hw")]

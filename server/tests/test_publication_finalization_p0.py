@@ -193,6 +193,7 @@ async def test_metadata_suggestions_fallback_and_cover_candidates(monkeypatch) -
         return f"cover-candidates/{timestamp_ms}.jpg"
 
     monkeypatch.setattr(service, "_extract_cover_candidate_frame", fake_extract)
+
     # 测试任务的 clean key 为虚构路径，绕过源文件存在性校验
     async def fake_exists(_key: str) -> bool:
         return True
@@ -303,6 +304,7 @@ async def test_render_success_finalizes_revision_and_supersedes_old(monkeypatch)
         await db.flush()
         new.render_version_id = rv.id
         await db.commit()
+
     async def fake_settle(*_args, **_kwargs):
         return 1
 

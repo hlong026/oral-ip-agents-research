@@ -135,7 +135,7 @@ class DeepSeekLLM:
             "你是短视频爆款运营专家，只输出严格 JSON，不输出任何解释文字。",
             (
                 f"为以下口播稿生成 {count} 组适配{platform}的发布方案，每组包含：\n"
-                '1. title：吸睛标题，20 字内，不带引号、序号或“标题：”前缀\n'
+                "1. title：吸睛标题，20 字内，不带引号、序号或“标题：”前缀\n"
                 "2. tags：4~6 个话题标签，不带 # 号\n"
                 "3. coverText：封面大字文案，12 字内，制造悬念/冲突/数字对比，可用【】标出 1 个爆点词\n"
                 '只输出 JSON 数组：[{"title":"...","tags":["..."],"coverText":"..."}]\n'
@@ -720,8 +720,7 @@ def _build_ass(words: list, width: int, height: int, style: dict | None = None, 
     for group in groups:
         text = "".join(word.word for word in group).replace("\n", " ").replace("{", "（").replace("}", "）")
         events.append(
-            f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},"
-            f"Default,,0,0,0,,{override}{text}"
+            f"Dialogue: 0,{_ass_time(group[0].start)},{_ass_time(group[-1].end)},Default,,0,0,0,,{override}{text}"
         )
     return header + "\n".join(events) + "\n"
 
