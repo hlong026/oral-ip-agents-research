@@ -18,12 +18,15 @@
     "test": "node --test scripts/check-desktop-release.test.mjs && turbo run test",
     "gen:api": "node scripts/gen-api-types.mjs",
     "e2e": "playwright test",
-    "clean": "turbo run clean"
+    "clean": "turbo run clean",
+    "prepare": "husky || true"
   },
   "devDependencies": {
     "@playwright/test": "^1.45.3",
-    "turbo": "^2.3.3",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.3.0",
     "prettier": "3.9.5",
+    "turbo": "^2.3.3",
     "typescript": "^5.7.2"
   }
 }

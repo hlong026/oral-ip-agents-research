@@ -1,0 +1,13 @@
+# 第三方 vendored 项目，保持上游原样，不参与本仓格式化
+vendor/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+test-results/
+playwright-report/
+
+pnpm-lock.yaml
