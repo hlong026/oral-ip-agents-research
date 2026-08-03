@@ -83,9 +83,7 @@ function DeviceDrawer({
               disabled={unbindOne.isPending}
               onClick={() => {
                 if (
-                  window.confirm(
-                    `确认解绑该设备？解绑后该设备登录态立即失效。`,
-                  )
+                  window.confirm(`确认解绑该设备？解绑后该设备登录态立即失效。`)
                 ) {
                   unbindOne.mutate(device.id);
                 }
@@ -142,7 +140,11 @@ function SecurityPolicyCard() {
       <button
         className="btn-primary"
         disabled={
-          save.isPending || draft === null || !Number.isInteger(draft) || draft < 1 || draft > 10
+          save.isPending ||
+          draft === null ||
+          !Number.isInteger(draft) ||
+          draft < 1 ||
+          draft > 10
         }
         onClick={() => draft !== null && save.mutate(draft)}
       >
@@ -337,7 +339,8 @@ export default function UsersPage() {
                           userId: user.id,
                           userName: user.nickname,
                           userPhone: user.phone,
-                          activationCodeMasked: user.activationCodeMasked ?? null,
+                          activationCodeMasked:
+                            user.activationCodeMasked ?? null,
                           balance: user.balance,
                         })
                       }
