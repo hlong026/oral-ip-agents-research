@@ -276,7 +276,11 @@ export default function EditorPage() {
   const coverTemplate = content?.cover.template;
   const coverText = content?.cover.text ?? "";
   useEffect(() => {
-    if (!effectiveTaskId || coverSelectedFrameMs === undefined || !coverTemplate) {
+    if (
+      !effectiveTaskId ||
+      coverSelectedFrameMs === undefined ||
+      !coverTemplate
+    ) {
       return;
     }
     let cancelled = false;
@@ -713,86 +717,86 @@ export default function EditorPage() {
                 </div>
                 {!collapsed.meta && (
                   <>
-                <label className="label" htmlFor="publication-title">
-                  标题
-                </label>
-                <input
-                  id="publication-title"
-                  className="input"
-                  value={content.title}
-                  maxLength={128}
-                  onChange={(event) =>
-                    updateContent((current) => ({
-                      ...current,
-                      title: event.target.value,
-                    }))
-                  }
-                />
-                {suggestionGroups.length > 0 && (
-                  <div className="mt-3 space-y-2">
-                    {suggestionGroups.map((group, index) => (
-                      <div
-                        key={`${group.title}-${index}`}
-                        className="flex items-start justify-between gap-3 rounded-xl border border-stroke bg-white/[0.03] p-3"
-                      >
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">
-                            {group.title}
-                          </div>
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {group.tags.map((tag) => (
-                              <span
-                                key={tag}
-                                className="chip px-2 py-0.5 text-[11px]"
-                              >
-                                #{tag}
-                              </span>
-                            ))}
-                          </div>
-                          {group.coverText && (
-                            <div className="mt-1 text-xs text-text-3">
-                              封面文字：{group.coverText}
+                    <label className="label" htmlFor="publication-title">
+                      标题
+                    </label>
+                    <input
+                      id="publication-title"
+                      className="input"
+                      value={content.title}
+                      maxLength={128}
+                      onChange={(event) =>
+                        updateContent((current) => ({
+                          ...current,
+                          title: event.target.value,
+                        }))
+                      }
+                    />
+                    {suggestionGroups.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {suggestionGroups.map((group, index) => (
+                          <div
+                            key={`${group.title}-${index}`}
+                            className="flex items-start justify-between gap-3 rounded-xl border border-stroke bg-white/[0.03] p-3"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium">
+                                {group.title}
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {group.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="chip px-2 py-0.5 text-[11px]"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                              {group.coverText && (
+                                <div className="mt-1 text-xs text-text-3">
+                                  封面文字：{group.coverText}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        <button
-                          className="btn-ghost shrink-0 px-3 py-1 text-xs"
-                          onClick={() => applyGroup(group)}
-                        >
-                          采用第 {index + 1} 组
-                        </button>
+                            <button
+                              className="btn-ghost shrink-0 px-3 py-1 text-xs"
+                              onClick={() => applyGroup(group)}
+                            >
+                              采用第 {index + 1} 组
+                            </button>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {content.topics.map((tag) => (
-                    <button
-                      key={tag}
-                      className="chip border-brand-to/40 px-2 py-1 text-xs text-brand-to"
-                      onClick={() => removeTag(tag)}
-                    >
-                      #{tag} ×
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-3 flex gap-2">
-                  <input
-                    className="input h-9 flex-1"
-                    value={tagText}
-                    onChange={(event) => setTagText(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") addTag(tagText);
-                    }}
-                    placeholder="手动添加标签"
-                  />
-                  <button
-                    className="btn-ghost px-3 py-1 text-xs"
-                    onClick={() => addTag(tagText)}
-                  >
-                    添加
-                  </button>
-                </div>
+                    )}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {content.topics.map((tag) => (
+                        <button
+                          key={tag}
+                          className="chip border-brand-to/40 px-2 py-1 text-xs text-brand-to"
+                          onClick={() => removeTag(tag)}
+                        >
+                          #{tag} ×
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <input
+                        className="input h-9 flex-1"
+                        value={tagText}
+                        onChange={(event) => setTagText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") addTag(tagText);
+                        }}
+                        placeholder="手动添加标签"
+                      />
+                      <button
+                        className="btn-ghost px-3 py-1 text-xs"
+                        onClick={() => addTag(tagText)}
+                      >
+                        添加
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
@@ -827,159 +831,161 @@ export default function EditorPage() {
                 </div>
                 {!collapsed.subtitles && (
                   <>
-                <fieldset
-                  disabled={!content.subtitles.enabled}
-                  className={`grid gap-4 md:grid-cols-2 ${
-                    content.subtitles.enabled ? "" : "opacity-40"
-                  }`}
-                >
-                  <div>
-                    <label className="label" htmlFor="subtitle-font">
-                      字幕字体
-                    </label>
-                    <select
-                      id="subtitle-font"
-                      className="input"
-                      value={content.subtitles.style.fontFamily}
-                      onChange={(event) =>
-                        updateContent((current) => ({
-                          ...current,
-                          subtitles: {
-                            ...current.subtitles,
-                            style: {
-                              ...current.subtitles.style,
-                              fontFamily: event.target
-                                .value as PublicationContentSpec["subtitles"]["style"]["fontFamily"],
-                            },
-                          },
-                        }))
-                      }
+                    <fieldset
+                      disabled={!content.subtitles.enabled}
+                      className={`grid gap-4 md:grid-cols-2 ${
+                        content.subtitles.enabled ? "" : "opacity-40"
+                      }`}
                     >
-                      {FONTS.map((font) => (
-                        <option key={font} value={font}>
-                          {font}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="label">
-                      字号（{content.subtitles.style.fontSize}px）
-                    </label>
-                    <input
-                      type="range"
-                      min={32}
-                      max={64}
-                      value={content.subtitles.style.fontSize}
-                      onChange={(event) =>
-                        updateContent((current) => ({
-                          ...current,
-                          subtitles: {
-                            ...current.subtitles,
-                            style: {
-                              ...current.subtitles.style,
-                              fontSize: Number(event.target.value),
-                            },
-                          },
-                        }))
-                      }
-                      className="w-full accent-brand-from"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">
-                      描边粗细（{content.subtitles.style.stroke}px）
-                    </label>
-                    <input
-                      type="range"
-                      min={0}
-                      max={6}
-                      value={content.subtitles.style.stroke}
-                      onChange={(event) =>
-                        updateContent((current) => ({
-                          ...current,
-                          subtitles: {
-                            ...current.subtitles,
-                            style: {
-                              ...current.subtitles.style,
-                              stroke: Number(event.target.value),
-                            },
-                          },
-                        }))
-                      }
-                      className="w-full accent-brand-from"
-                    />
-                  </div>
-                  <div>
-                    <label className="label">颜色</label>
-                    <div className="flex gap-2">
-                      {SUB_COLORS.map((color) => (
-                        <button
-                          key={color.key}
-                          title={color.label}
-                          onClick={() =>
+                      <div>
+                        <label className="label" htmlFor="subtitle-font">
+                          字幕字体
+                        </label>
+                        <select
+                          id="subtitle-font"
+                          className="input"
+                          value={content.subtitles.style.fontFamily}
+                          onChange={(event) =>
                             updateContent((current) => ({
                               ...current,
                               subtitles: {
                                 ...current.subtitles,
                                 style: {
                                   ...current.subtitles.style,
-                                  color: color.key,
+                                  fontFamily: event.target
+                                    .value as PublicationContentSpec["subtitles"]["style"]["fontFamily"],
                                 },
                               },
                             }))
                           }
-                          className={`h-8 w-8 rounded-lg border-2 ${
-                            content.subtitles.style.color === color.key
-                              ? "border-brand-to"
-                              : "border-stroke"
-                          }`}
-                          style={{ background: color.key }}
+                        >
+                          {FONTS.map((font) => (
+                            <option key={font} value={font}>
+                              {font}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label">
+                          字号（{content.subtitles.style.fontSize}px）
+                        </label>
+                        <input
+                          type="range"
+                          min={32}
+                          max={64}
+                          value={content.subtitles.style.fontSize}
+                          onChange={(event) =>
+                            updateContent((current) => ({
+                              ...current,
+                              subtitles: {
+                                ...current.subtitles,
+                                style: {
+                                  ...current.subtitles.style,
+                                  fontSize: Number(event.target.value),
+                                },
+                              },
+                            }))
+                          }
+                          className="w-full accent-brand-from"
                         />
+                      </div>
+                      <div>
+                        <label className="label">
+                          描边粗细（{content.subtitles.style.stroke}px）
+                        </label>
+                        <input
+                          type="range"
+                          min={0}
+                          max={6}
+                          value={content.subtitles.style.stroke}
+                          onChange={(event) =>
+                            updateContent((current) => ({
+                              ...current,
+                              subtitles: {
+                                ...current.subtitles,
+                                style: {
+                                  ...current.subtitles.style,
+                                  stroke: Number(event.target.value),
+                                },
+                              },
+                            }))
+                          }
+                          className="w-full accent-brand-from"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">颜色</label>
+                        <div className="flex gap-2">
+                          {SUB_COLORS.map((color) => (
+                            <button
+                              key={color.key}
+                              title={color.label}
+                              onClick={() =>
+                                updateContent((current) => ({
+                                  ...current,
+                                  subtitles: {
+                                    ...current.subtitles,
+                                    style: {
+                                      ...current.subtitles.style,
+                                      color: color.key,
+                                    },
+                                  },
+                                }))
+                              }
+                              className={`h-8 w-8 rounded-lg border-2 ${
+                                content.subtitles.style.color === color.key
+                                  ? "border-brand-to"
+                                  : "border-stroke"
+                              }`}
+                              style={{ background: color.key }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </fieldset>
+                    <div className="mt-4 space-y-2">
+                      {content.subtitles.segments.map((segment, index) => (
+                        <div
+                          key={segment.id}
+                          id={`subtitle-segment-${index}`}
+                          className={`grid gap-2 rounded-lg px-2 py-1 md:grid-cols-[90px_1fr] ${
+                            index === highlightedSegmentIndex
+                              ? "bg-brand-from/10 ring-1 ring-brand-from/40"
+                              : ""
+                          }`}
+                        >
+                          <span
+                            className={`pt-2 text-xs ${
+                              index === highlightedSegmentIndex
+                                ? "text-brand-to"
+                                : "text-text-3"
+                            }`}
+                          >
+                            {(segment.startMs / 1000).toFixed(1)}s
+                          </span>
+                          <input
+                            className="input"
+                            value={segment.text}
+                            aria-label={`字幕 ${index + 1}`}
+                            onChange={(event) =>
+                              updateContent((current) => ({
+                                ...current,
+                                subtitles: {
+                                  ...current.subtitles,
+                                  segments: current.subtitles.segments.map(
+                                    (item) =>
+                                      item.id === segment.id
+                                        ? { ...item, text: event.target.value }
+                                        : item,
+                                  ),
+                                },
+                              }))
+                            }
+                          />
+                        </div>
                       ))}
                     </div>
-                  </div>
-                </fieldset>
-                <div className="mt-4 space-y-2">
-                  {content.subtitles.segments.map((segment, index) => (
-                    <div
-                      key={segment.id}
-                      id={`subtitle-segment-${index}`}
-                      className={`grid gap-2 rounded-lg px-2 py-1 md:grid-cols-[90px_1fr] ${
-                        index === highlightedSegmentIndex
-                          ? "bg-brand-from/10 ring-1 ring-brand-from/40"
-                          : ""
-                      }`}
-                    >
-                      <span
-                        className={`pt-2 text-xs ${
-                          index === highlightedSegmentIndex ? "text-brand-to" : "text-text-3"
-                        }`}
-                      >
-                        {(segment.startMs / 1000).toFixed(1)}s
-                      </span>
-                      <input
-                        className="input"
-                        value={segment.text}
-                        aria-label={`字幕 ${index + 1}`}
-                        onChange={(event) =>
-                          updateContent((current) => ({
-                            ...current,
-                            subtitles: {
-                              ...current.subtitles,
-                              segments: current.subtitles.segments.map(
-                                (item) =>
-                                  item.id === segment.id
-                                    ? { ...item, text: event.target.value }
-                                    : item,
-                              ),
-                            },
-                          }))
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
                   </>
                 )}
               </div>
@@ -998,120 +1004,128 @@ export default function EditorPage() {
                 </div>
                 {!collapsed.cover && (
                   <>
-                <div className="mb-4">
-                  <label className="label" htmlFor="cover-text">
-                    封面文字
-                  </label>
-                  <input
-                    id="cover-text"
-                    className="input"
-                    maxLength={40}
-                    value={content.cover.text ?? ""}
-                    placeholder="12 字内爆点文案，可用【】标出 1 个爆点词"
-                    onChange={(event) =>
-                      updateContent((current) => ({
-                        ...current,
-                        cover: { ...current.cover, text: event.target.value },
-                      }))
-                    }
-                  />
-                  {content.cover.template === "none" && (
-                    <p className="mt-1 text-xs text-text-3">
-                      “原始帧”模板不叠加文字，切换其他模板后生效
-                    </p>
-                  )}
-                </div>
-                <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {COVER_TEMPLATES.map((template) => (
-                    <button
-                      key={template.key}
-                      onClick={() =>
-                        updateContent((current) => ({
-                          ...current,
-                          cover: { ...current.cover, template: template.key },
-                        }))
-                      }
-                      className={`rounded-xl border p-3.5 text-left ${
-                        content.cover.template === template.key
-                          ? "border-brand-from/60 bg-brand-from/10"
-                          : "border-stroke bg-white/[0.03]"
-                      }`}
-                    >
-                      <div className="text-sm font-medium">
-                        {template.label}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-                <div className="mb-4">
-                  <label className="label">效果预览（与成片同规格）</label>
-                  <div className="relative mx-auto flex aspect-[9/16] max-h-[360px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
-                    {coverPreviewUrl ? (
-                      <img
-                        src={coverPreviewUrl}
-                        alt="封面所见即所得预览"
-                        className="h-full w-full object-contain"
+                    <div className="mb-4">
+                      <label className="label" htmlFor="cover-text">
+                        封面文字
+                      </label>
+                      <input
+                        id="cover-text"
+                        className="input"
+                        maxLength={40}
+                        value={content.cover.text ?? ""}
+                        placeholder="12 字内爆点文案，可用【】标出 1 个爆点词"
+                        onChange={(event) =>
+                          updateContent((current) => ({
+                            ...current,
+                            cover: {
+                              ...current.cover,
+                              text: event.target.value,
+                            },
+                          }))
+                        }
                       />
+                      {content.cover.template === "none" && (
+                        <p className="mt-1 text-xs text-text-3">
+                          “原始帧”模板不叠加文字，切换其他模板后生效
+                        </p>
+                      )}
+                    </div>
+                    <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {COVER_TEMPLATES.map((template) => (
+                        <button
+                          key={template.key}
+                          onClick={() =>
+                            updateContent((current) => ({
+                              ...current,
+                              cover: {
+                                ...current.cover,
+                                template: template.key,
+                              },
+                            }))
+                          }
+                          className={`rounded-xl border p-3.5 text-left ${
+                            content.cover.template === template.key
+                              ? "border-brand-from/60 bg-brand-from/10"
+                              : "border-stroke bg-white/[0.03]"
+                          }`}
+                        >
+                          <div className="text-sm font-medium">
+                            {template.label}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mb-4">
+                      <label className="label">效果预览（与成片同规格）</label>
+                      <div className="relative mx-auto flex aspect-[9/16] max-h-[360px] items-center justify-center overflow-hidden rounded-xl border border-stroke bg-black/40">
+                        {coverPreviewUrl ? (
+                          <img
+                            src={coverPreviewUrl}
+                            alt="封面所见即所得预览"
+                            className="h-full w-full object-contain"
+                          />
+                        ) : (
+                          <span className="text-xs text-text-3">
+                            {coverPreviewError || "选择候选帧后生成预览"}
+                          </span>
+                        )}
+                        {coverPreviewLoading && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                            <LoaderCircle className="h-5 w-5 animate-spin text-white" />
+                          </div>
+                        )}
+                      </div>
+                      {coverPreviewError && coverPreviewUrl && (
+                        <p className="mt-1 text-xs text-danger">
+                          预览更新失败：{coverPreviewError}
+                        </p>
+                      )}
+                    </div>
+                    {coverError ? (
+                      <p className="text-xs text-danger">
+                        封面候选帧加载失败：
+                        {coverError instanceof HttpError
+                          ? coverError.body.message
+                          : "网络异常，请稍后重试"}
+                      </p>
+                    ) : firstThreeSeconds.length === 0 ? (
+                      <p className="text-xs text-text-3">
+                        {coverLoading ? "候选帧提取中…" : "暂无候选帧可选"}
+                      </p>
                     ) : (
-                      <span className="text-xs text-text-3">
-                        {coverPreviewError || "选择候选帧后生成预览"}
-                      </span>
-                    )}
-                    {coverPreviewLoading && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                        <LoaderCircle className="h-5 w-5 animate-spin text-white" />
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {firstThreeSeconds.map((candidate) => (
+                          <button
+                            key={candidate.timestampMs}
+                            className={`overflow-hidden rounded-xl border text-left ${
+                              content.cover.selectedFrameMs ===
+                              candidate.timestampMs
+                                ? "border-brand-to"
+                                : "border-stroke"
+                            }`}
+                            onClick={() =>
+                              updateContent((current) => ({
+                                ...current,
+                                cover: {
+                                  ...current.cover,
+                                  selectedFrameMs: candidate.timestampMs,
+                                },
+                              }))
+                            }
+                          >
+                            <img
+                              src={candidate.imageUrl}
+                              alt={`${(candidate.timestampMs / 1000).toFixed(1)}s 封面`}
+                              className="aspect-video w-full bg-black object-cover"
+                            />
+                            <span className="block px-2 py-1 text-xs text-text-3">
+                              选择 {(candidate.timestampMs / 1000).toFixed(1)}s
+                              封面
+                            </span>
+                          </button>
+                        ))}
                       </div>
                     )}
-                  </div>
-                  {coverPreviewError && coverPreviewUrl && (
-                    <p className="mt-1 text-xs text-danger">
-                      预览更新失败：{coverPreviewError}
-                    </p>
-                  )}
-                </div>
-                {coverError ? (
-                  <p className="text-xs text-danger">
-                    封面候选帧加载失败：
-                    {coverError instanceof HttpError
-                      ? coverError.body.message
-                      : "网络异常，请稍后重试"}
-                  </p>
-                ) : firstThreeSeconds.length === 0 ? (
-                  <p className="text-xs text-text-3">
-                    {coverLoading ? "候选帧提取中…" : "暂无候选帧可选"}
-                  </p>
-                ) : (
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {firstThreeSeconds.map((candidate) => (
-                    <button
-                      key={candidate.timestampMs}
-                      className={`overflow-hidden rounded-xl border text-left ${
-                        content.cover.selectedFrameMs === candidate.timestampMs
-                          ? "border-brand-to"
-                          : "border-stroke"
-                      }`}
-                      onClick={() =>
-                        updateContent((current) => ({
-                          ...current,
-                          cover: {
-                            ...current.cover,
-                            selectedFrameMs: candidate.timestampMs,
-                          },
-                        }))
-                      }
-                    >
-                      <img
-                        src={candidate.imageUrl}
-                        alt={`${(candidate.timestampMs / 1000).toFixed(1)}s 封面`}
-                        className="aspect-video w-full bg-black object-cover"
-                      />
-                      <span className="block px-2 py-1 text-xs text-text-3">
-                        选择 {(candidate.timestampMs / 1000).toFixed(1)}s 封面
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                )}
                   </>
                 )}
               </div>
