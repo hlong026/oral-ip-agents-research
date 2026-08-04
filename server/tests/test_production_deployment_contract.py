@@ -69,6 +69,8 @@ def test_production_compose_has_restart_health_and_log_guards() -> None:
     }
     assert "/tmp:size=1g,mode=1777" in services["server"]["tmpfs"]
     assert services["server"]["shm_size"] == "1gb"
+    assert services["gateway"]["read_only"] is True
+    assert "/etc/nginx/conf.d:size=1m,mode=0777" in services["gateway"]["tmpfs"]
 
 
 def test_production_files_contain_no_embedded_credentials() -> None:
@@ -118,14 +120,16 @@ def test_frontend_images_are_reproducible_and_non_root_runtime() -> None:
     assert "FROM workspace AS admin-build" in dockerfile
 
 
-def test_deploy_runs_migration_before_start_and_requires_digests() -> None:
+def test_deploy_stops_old_workers_then_migrates_before_start() -> None:
     script = (ROOT / "deploy/scripts/deploy.sh").read_text(encoding="utf-8")
 
+    stop = script.index("stop worker server")
     migration = script.index("run --rm --no-deps migration")
     startup = script.index("up -d --remove-orphans")
-    assert migration < startup
+    assert stop < migration < startup
     assert "@sha256:[0-9a-f]{64}$" in script
     assert "ORAL_GATEWAY_IMAGE" in script
+    assert "require_private_file ORAL_ENV_FILE" in script
     assert "assert payload.get(\"env\") == \"prod\"" in script
     assert "storage.get(\"driver\") == \"s3\"" in script
     assert "set -x" not in script
@@ -137,7 +141,8 @@ def test_rollback_never_downgrades_database_automatically() -> None:
     assert "ROLLBACK_SCHEMA_COMPATIBLE" in script
     assert "alembic downgrade" not in script
     assert "PREVIOUS_ORAL_SERVER_IMAGE" in script
-    assert "@sha256" in script
+    assert "@sha256:[0-9a-f]{64}$" in script
+    assert script.index("stop worker server") < script.index("up -d --remove-orphans")
     assert "set -x" not in script
 
 
