@@ -11,9 +11,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import aiofiles
+from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -51,10 +52,28 @@ def _s3_client():
 
     return boto3.client(
         "s3",
-        endpoint_url=settings.s3_endpoint,
+        endpoint_url=settings.s3_endpoint.rstrip("/"),
+        region_name=settings.s3_region or None,
         aws_access_key_id=settings.s3_access_key,
         aws_secret_access_key=settings.s3_secret_key,
-        config=Config(connect_timeout=5, read_timeout=30, retries={"max_attempts": 2}),
+        config=Config(
+            signature_version=settings.s3_signature_version,
+            s3={"addressing_style": settings.s3_addressing_style},
+            connect_timeout=settings.s3_connect_timeout_seconds,
+            read_timeout=settings.s3_read_timeout_seconds,
+            max_pool_connections=settings.s3_max_pool_connections,
+            retries={"max_attempts": settings.s3_max_attempts, "mode": "standard"},
+        ),
+    )
+
+
+def _s3_transfer_config() -> TransferConfig:
+    mebibyte = 1024 * 1024
+    return TransferConfig(
+        multipart_threshold=settings.s3_multipart_threshold_mb * mebibyte,
+        multipart_chunksize=settings.s3_multipart_chunksize_mb * mebibyte,
+        max_concurrency=max(1, min(settings.s3_max_pool_connections, 8)),
+        use_threads=True,
     )
 
 
@@ -120,7 +139,13 @@ async def save_stream(
                 await target.write(data)
         if settings.storage_driver == "s3":
             client = _s3_client()
-            await asyncio.to_thread(client.upload_file, str(path), settings.s3_bucket, key)
+            await asyncio.to_thread(
+                client.upload_file,
+                str(path),
+                settings.s3_bucket,
+                key,
+                Config=_s3_transfer_config(),
+            )
             await asyncio.to_thread(path.unlink, missing_ok=True)
         return key, total
     except BaseException:
@@ -182,7 +207,13 @@ async def download_to_path(key: str, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     client = _s3_client()
     try:
-        await asyncio.to_thread(client.download_file, settings.s3_bucket, key, str(target))
+        await asyncio.to_thread(
+            client.download_file,
+            settings.s3_bucket,
+            key,
+            str(target),
+            Config=_s3_transfer_config(),
+        )
     except ClientError as exc:
         if _is_missing_object_error(exc):
             raise FileNotFoundError(key) from exc
@@ -302,14 +333,45 @@ async def get_accessible_url(
     return f"{base_url}{signed_media_path(key, expires_in=expires_in)}"
 
 
-async def storage_ready() -> bool:
-    """检查当前存储后端是否可用，不创建探针对象。"""
+async def storage_readiness() -> dict[str, object]:
+    """返回不含密钥的对象存储就绪诊断，供 /readyz 和运维告警使用。"""
     if settings.storage_driver == "local":
         path = Path(settings.local_storage_dir)
-        return await asyncio.to_thread(lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK))
+        ok = await asyncio.to_thread(lambda: path.is_dir() and os.access(path, os.R_OK | os.W_OK))
+        return {
+            "ok": ok,
+            "driver": "local",
+            "code": "READY" if ok else "LOCAL_STORAGE_UNAVAILABLE",
+        }
+
+    endpoint_host = urlparse(settings.s3_endpoint).hostname or ""
+    base: dict[str, object] = {
+        "driver": "s3",
+        "endpointHost": endpoint_host,
+        "region": settings.s3_region,
+        "bucket": settings.s3_bucket,
+        "addressingStyle": settings.s3_addressing_style,
+        "signatureVersion": settings.s3_signature_version,
+    }
     try:
         client = _s3_client()
         await asyncio.to_thread(client.head_bucket, Bucket=settings.s3_bucket)
-        return True
-    except Exception:
-        return False
+        return {**base, "ok": True, "code": "READY"}
+    except ClientError as exc:
+        error = exc.response.get("Error", {})
+        error_code = str(error.get("Code") or "S3_CLIENT_ERROR")
+        status_code = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+        normalized = (
+            "ACCESS_DENIED"
+            if status_code == 403 or error_code in {"403", "AccessDenied"}
+            else "BUCKET_NOT_FOUND"
+            if status_code == 404 or error_code in {"404", "NoSuchBucket", "NotFound"}
+            else "S3_CLIENT_ERROR"
+        )
+        return {**base, "ok": False, "code": normalized, "providerCode": error_code}
+    except Exception as exc:  # noqa: BLE001
+        return {**base, "ok": False, "code": "S3_UNAVAILABLE", "errorType": type(exc).__name__}
+
+
+async def storage_ready() -> bool:
+    return bool((await storage_readiness()).get("ok"))

@@ -1,5 +1,6 @@
 """全局配置（pydantic-settings，.env 驱动）"""
 
+import re
 from functools import lru_cache
 from ipaddress import ip_address
 from urllib.parse import urlparse
@@ -34,6 +35,15 @@ class Settings(BaseSettings):
     s3_access_key: str = "oral"
     s3_secret_key: str = "oral_dev_minio"
     s3_bucket: str = "oral-media"
+    s3_region: str = "us-east-1"
+    s3_addressing_style: str = "virtual"
+    s3_signature_version: str = "s3"
+    s3_max_pool_connections: int = 32
+    s3_connect_timeout_seconds: float = 5.0
+    s3_read_timeout_seconds: float = 60.0
+    s3_max_attempts: int = 4
+    s3_multipart_threshold_mb: int = 64
+    s3_multipart_chunksize_mb: int = 16
 
     # JWT（F-601 / C7）
     jwt_algorithm: str = "HS256"
@@ -210,8 +220,31 @@ def validate_runtime_security(settings: Settings) -> None:
 
     if settings.storage_driver != "s3":
         errors.append("STORAGE_DRIVER 生产环境必须使用 s3")
-    if not has_url_host(settings.s3_endpoint, {"http", "https"}) or is_placeholder(settings.s3_endpoint):
-        errors.append("S3_ENDPOINT 必须是有效的非占位地址")
+    s3_url = urlparse(settings.s3_endpoint)
+    if not has_url_host(settings.s3_endpoint, {"https"}) or is_placeholder(settings.s3_endpoint):
+        errors.append("S3_ENDPOINT 生产环境必须是有效的 HTTPS 非占位地址")
+    elif not is_public_dns_hostname(s3_url.hostname):
+        errors.append("S3_ENDPOINT 生产环境不得使用 localhost、IP 或内网保留域名")
+    if not re.fullmatch(r"[a-z]{2,3}-[a-z0-9-]+", settings.s3_region.strip()):
+        errors.append("S3_REGION 必须是有效地域，例如 ap-guangzhou")
+    if settings.s3_addressing_style != "virtual":
+        errors.append("S3_ADDRESSING_STYLE 生产环境必须为 virtual")
+    if settings.s3_signature_version not in {"s3", "s3v4"}:
+        errors.append("S3_SIGNATURE_VERSION 仅支持 s3 或 s3v4")
+    if settings.s3_max_pool_connections < 1:
+        errors.append("S3_MAX_POOL_CONNECTIONS 必须大于 0")
+    if settings.s3_connect_timeout_seconds <= 0 or settings.s3_read_timeout_seconds <= 0:
+        errors.append("S3 连接与读取超时必须大于 0")
+    if settings.s3_max_attempts < 1:
+        errors.append("S3_MAX_ATTEMPTS 必须大于 0")
+    if settings.s3_multipart_threshold_mb < 5 or settings.s3_multipart_chunksize_mb < 5:
+        errors.append("S3 Multipart 阈值和分片大小不得小于 5MB")
+    if s3_url.hostname and s3_url.hostname.endswith(".myqcloud.com"):
+        expected_host = f"cos.{settings.s3_region}.myqcloud.com"
+        if s3_url.hostname != expected_host:
+            errors.append("腾讯云 COS Endpoint 必须与 S3_REGION 一致")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,49}-\d{5,}", settings.s3_bucket):
+            errors.append("腾讯云 COS 的 S3_BUCKET 必须使用 BucketName-APPID 完整名称")
     if is_placeholder(settings.s3_access_key):
         errors.append("S3_ACCESS_KEY 必须是非占位值")
     if is_placeholder(settings.s3_secret_key) or len(settings.s3_secret_key.encode("utf-8")) < 32:

@@ -154,16 +154,17 @@ async def readyz() -> Response:
     from app.providers.registry import registry
 
     has_mock = registry.has_mock_providers()
-    database_ok, redis_ok, storage_ok = await asyncio.gather(
+    database_ok, redis_ok, storage_status = await asyncio.gather(
         database_ready(),
         redis_ready(),
-        storage.storage_ready(),
+        storage.storage_readiness(),
     )
+    storage_ok = bool(storage_status.get("ok"))
     redis_required = settings.app_env not in {"dev", "test"}
     dependencies = {
         "database": {"ok": database_ok, "required": True},
         "redis": {"ok": redis_ok, "required": redis_required},
-        "storage": {"ok": storage_ok, "required": True},
+        "storage": {**storage_status, "required": True},
     }
     ok = database_ok and storage_ok and (redis_ok or not redis_required)
     payload = {
