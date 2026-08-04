@@ -135,7 +135,7 @@ async def test_s3_publish_materializes_media_to_private_temp_files_and_cleans_up
             "covers/one.jpg": b"cover-bytes",
         }
 
-        def download_file(self, bucket: str, key: str, filename: str) -> None:
+        def download_file(self, bucket: str, key: str, filename: str, **_kwargs: object) -> None:
             assert bucket == "test-bucket"
             Path(filename).write_bytes(self.objects[key])
 
@@ -197,7 +197,7 @@ async def test_s3_materialize_normalizes_no_such_key(monkeypatch) -> None:
     from app.core import storage
 
     class MissingS3Client:
-        def download_file(self, bucket: str, key: str, filename: str) -> None:
+        def download_file(self, bucket: str, key: str, filename: str, **_kwargs: object) -> None:
             raise ClientError({"Error": {"Code": "NoSuchKey"}}, "DownloadFile")
 
     monkeypatch.setattr(storage.settings, "storage_driver", "s3")

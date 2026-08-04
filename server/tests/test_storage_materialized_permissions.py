@@ -9,7 +9,7 @@ async def test_s3_materialized_path_uses_private_directory_and_file(monkeypatch)
     from app.core import storage
 
     class FakeS3Client:
-        def download_file(self, bucket: str, key: str, filename: str) -> None:
+        def download_file(self, bucket: str, key: str, filename: str, **_kwargs: object) -> None:
             assert bucket == "test-bucket"
             assert key == "videos/private.mp4"
             Path(filename).write_bytes(b"private-media")
