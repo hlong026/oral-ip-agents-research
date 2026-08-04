@@ -46,6 +46,9 @@ jobs:
       - name: Validate gateway configuration
         run: |
           docker run --rm \
+            --add-host server:127.0.0.1 \
+            --add-host web:127.0.0.1 \
+            --add-host admin:127.0.0.1 \
             -e WEB_HOST=app.example.com \
             -e ADMIN_HOST=admin.example.com \
             -v "$PWD/deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro" \
