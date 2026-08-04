@@ -66,7 +66,20 @@ jobs:
         working-directory: server
         env:
           APP_ENV: test
-        run: uv run pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q --junitxml=pytest-results.xml 2>&1 | tee pytest.log
+      - name: 上传后端测试诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-diagnostics
+          path: |
+            server/pytest.log
+            server/pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
       - name: 7. OpenAPI 契约零漂移
         env:
           APP_ENV: test
