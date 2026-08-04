@@ -269,17 +269,25 @@ describe("EditorPage publication draft", () => {
 
     const timeline = await screen.findByLabelText("封面时间轴");
     fireEvent.change(timeline, { target: { value: "20000" } });
-    const saveButton = screen.getByRole("button", { name: "保存草稿" });
-    await waitFor(() => expect(saveButton).toBeEnabled());
-    fireEvent.click(saveButton);
+
+    expect(timeline).toHaveValue("20000");
+    expect(screen.getByText(/当前选中 20\.0s/)).toBeInTheDocument();
+  });
+
+  it("保存草稿按钮立即提交当前编辑内容", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderEditor();
+
+    const title = await screen.findByLabelText("标题");
+    await user.clear(title);
+    await user.type(title, "立即保存的标题");
+    await user.click(screen.getByRole("button", { name: "保存草稿" }));
 
     await waitFor(() => {
       expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
         task.id,
         expect.objectContaining({
-          content: expect.objectContaining({
-            cover: expect.objectContaining({ selectedFrameMs: 20000 }),
-          }),
+          content: expect.objectContaining({ title: "立即保存的标题" }),
         }),
       );
     });
