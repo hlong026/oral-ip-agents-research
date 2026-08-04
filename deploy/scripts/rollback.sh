@@ -31,17 +31,18 @@ set +a
 : "${PREVIOUS_ORAL_SERVER_IMAGE:?PREVIOUS_ORAL_SERVER_IMAGE is required}"
 : "${PREVIOUS_ORAL_WEB_IMAGE:?PREVIOUS_ORAL_WEB_IMAGE is required}"
 : "${PREVIOUS_ORAL_ADMIN_IMAGE:?PREVIOUS_ORAL_ADMIN_IMAGE is required}"
-: "${ORAL_GATEWAY_IMAGE:?ORAL_GATEWAY_IMAGE is required}"
+: "${PREVIOUS_ORAL_GATEWAY_IMAGE:?PREVIOUS_ORAL_GATEWAY_IMAGE is required}"
 : "${DEPLOY_READY_URL:?DEPLOY_READY_URL is required}"
 
 require_immutable_image PREVIOUS_ORAL_SERVER_IMAGE "$PREVIOUS_ORAL_SERVER_IMAGE"
 require_immutable_image PREVIOUS_ORAL_WEB_IMAGE "$PREVIOUS_ORAL_WEB_IMAGE"
 require_immutable_image PREVIOUS_ORAL_ADMIN_IMAGE "$PREVIOUS_ORAL_ADMIN_IMAGE"
-require_immutable_image ORAL_GATEWAY_IMAGE "$ORAL_GATEWAY_IMAGE"
+require_immutable_image PREVIOUS_ORAL_GATEWAY_IMAGE "$PREVIOUS_ORAL_GATEWAY_IMAGE"
 
 export ORAL_SERVER_IMAGE=$PREVIOUS_ORAL_SERVER_IMAGE
 export ORAL_WEB_IMAGE=$PREVIOUS_ORAL_WEB_IMAGE
 export ORAL_ADMIN_IMAGE=$PREVIOUS_ORAL_ADMIN_IMAGE
+export ORAL_GATEWAY_IMAGE=$PREVIOUS_ORAL_GATEWAY_IMAGE
 
 compose() {
   docker compose --env-file "$DEPLOY_ENV" -f "$COMPOSE_FILE" "$@"
@@ -53,7 +54,7 @@ printf '%s\n' 'Confirm the previous image is compatible with the current schema 
 
 compose config --quiet
 compose pull server worker web admin gateway
-compose stop worker server || true
+compose stop worker server gateway || true
 compose up -d --remove-orphans server worker web admin gateway
 
 attempt=0
