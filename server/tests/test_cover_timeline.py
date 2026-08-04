@@ -28,6 +28,10 @@ def test_short_video_candidates_remain_in_range():
     assert timestamps[-1] > 1_800
 
 
+def test_single_frame_media_uses_zero_timestamp():
+    assert cover_timeline.candidate_timestamps(1) == [0]
+
+
 def test_cover_schemas_accept_positions_after_three_seconds():
     assert PublicationCoverIn(selectedFrameMs=15_000).selectedFrameMs == 15_000
     assert CoverPreviewIn(selectedFrameMs=15_000).selectedFrameMs == 15_000
