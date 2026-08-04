@@ -29,8 +29,8 @@ def duration_ms_from_artifacts(artifacts: dict) -> int:
     """
     raw = artifacts.get("duration")
     try:
-        seconds = float(raw)
-    except (TypeError, ValueError):
+        seconds = float(raw) if isinstance(raw, (str, int, float)) else 3.0
+    except ValueError:
         seconds = 3.0
     if not math.isfinite(seconds) or seconds <= 0:
         seconds = 3.0
