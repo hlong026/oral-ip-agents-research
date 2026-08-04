@@ -80,7 +80,7 @@ async def get_publication_draft(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> PublicationRevisionOut:
-    return await service.get_publication_draft(db, task_id, user_id)
+    return await cover_timeline.get_publication_draft(db, task_id, user_id)
 
 
 @router.put("/{task_id}/publication-draft", response_model=PublicationRevisionOut)
@@ -139,6 +139,7 @@ async def list_publication_revisions(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[PublicationRevisionOut]:
+    await _ = user_id
     return await service.list_publication_revisions(db, task_id, user_id)
 
 
