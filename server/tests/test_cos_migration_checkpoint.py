@@ -7,11 +7,7 @@ from scripts.cos_migration import Checkpoint, MigrationStats, S3Location
 
 def _location(name: str) -> S3Location:
     return S3Location(
-        endpoint_url=(
-            "http://minio.internal:9000"
-            if name == "source"
-            else "https://cos.ap-guangzhou.myqcloud.com"
-        ),
+        endpoint_url=("http://minio.internal:9000" if name == "source" else "https://cos.ap-guangzhou.myqcloud.com"),
         region="us-east-1" if name == "source" else "ap-guangzhou",
         bucket="oral-media" if name == "source" else "oral-media-1250000000",
         access_key=f"{name}-secret-id",
