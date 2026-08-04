@@ -32,6 +32,10 @@ def test_single_frame_media_uses_zero_timestamp():
     assert cover_timeline.candidate_timestamps(1) == [0]
 
 
+def test_duration_conversion_preserves_millisecond_precision():
+    assert cover_timeline.duration_ms_from_artifacts({"duration": 2.345}) == 2_345
+
+
 def test_invalid_or_missing_duration_uses_legacy_three_second_fallback():
     assert cover_timeline.duration_ms_from_artifacts({}) == 3_000
     assert cover_timeline.duration_ms_from_artifacts({"duration": "bad"}) == 3_000
