@@ -269,28 +269,30 @@ describe("EditorPage publication draft", () => {
 
     const timeline = await screen.findByLabelText("封面时间轴");
     fireEvent.change(timeline, { target: { value: "20000" } });
+    await vi.advanceTimersByTimeAsync(500);
 
-    expect(timeline).toHaveValue("20000");
-    expect(screen.getByText(/当前选中 20\.0s/)).toBeInTheDocument();
+    expect((timeline as HTMLInputElement).value).toBe("20000");
+    expect(pipelineApi.coverPreview).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({ selectedFrameMs: 20000 }),
+    );
   });
 
   it("保存草稿按钮立即提交当前编辑内容", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
     const title = await screen.findByLabelText("标题");
-    await user.clear(title);
-    await user.type(title, "立即保存的标题");
-    await user.click(screen.getByRole("button", { name: "保存草稿" }));
+    fireEvent.change(title, { target: { value: "立即保存的标题" } });
+    const saveButton = screen.getByRole("button", { name: "保存草稿" });
+    expect(saveButton).toBeEnabled();
+    fireEvent.click(saveButton);
 
-    await waitFor(() => {
-      expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
-        task.id,
-        expect.objectContaining({
-          content: expect.objectContaining({ title: "立即保存的标题" }),
-        }),
-      );
-    });
+    expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
+      task.id,
+      expect.objectContaining({
+        content: expect.objectContaining({ title: "立即保存的标题" }),
+      }),
+    );
   });
 
   it("合成前先保存草稿、报价并调用 finalize", async () => {
