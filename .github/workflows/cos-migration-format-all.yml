@@ -19,10 +19,10 @@ jobs:
       - name: Format migration code and tests
         run: |
           uv sync --directory server --extra dev --frozen
-          uv run --directory server ruff format scripts tests/test_cos_migration*.py
+          uv run --directory server ruff format tests/test_cos_migration_prefix_scope.py
           rm .github/workflows/cos-migration-format-all.yml
           git config user.name 'chatgpt-development'
           git config user.email 'actions@users.noreply.github.com'
           git add -A
-          git commit -m 'style(storage): format COS migration suite'
+          git commit -m 'style(storage): format COS migration prefix test'
           git push origin HEAD:${{ github.head_ref }}
