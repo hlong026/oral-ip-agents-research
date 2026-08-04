@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oral.example.com/schemas/release-manifest-v1.json",
+  "title": "Oral IP Production Release Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "releaseId",
+    "gitCommit",
+    "images",
+    "database",
+    "storage",
+    "domains",
+    "approvedBy",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "releaseId": {
+      "type": "string",
+      "minLength": 8
+    },
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "images": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "gateway", "web", "admin"],
+      "properties": {
+        "server": { "$ref": "#/$defs/imageDigest" },
+        "gateway": { "$ref": "#/$defs/imageDigest" },
+        "web": { "$ref": "#/$defs/imageDigest" },
+        "admin": { "$ref": "#/$defs/imageDigest" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alembicRevision", "backupId"],
+      "properties": {
+        "alembicRevision": { "type": "string", "minLength": 1 },
+        "backupId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "driver",
+        "endpointHost",
+        "region",
+        "bucket",
+        "migrationManifestSha256"
+      ],
+      "properties": {
+        "driver": { "const": "s3" },
+        "endpointHost": {
+          "type": "string",
+          "pattern": "^cos\\.[a-z0-9-]+\\.myqcloud\\.com$"
+        },
+        "region": {
+          "type": "string",
+          "pattern": "^[a-z]{2,3}-[a-z0-9-]+$"
+        },
+        "bucket": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,49}-[0-9]{5,}$"
+        },
+        "migrationManifestSha256": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "domains": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["web", "admin", "api"],
+      "properties": {
+        "web": { "type": "string", "minLength": 1 },
+        "admin": { "type": "string", "minLength": 1 },
+        "api": { "type": "string", "minLength": 1 }
+      }
+    },
+    "approvedBy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "imageDigest": {
+      "type": "string",
+      "pattern": "^.+@sha256:[0-9a-f]{64}$"
+    }
+  }
+}
