@@ -1,0 +1,25 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:HeadBucket",
+        "name/cos:GetBucket"
+      ],
+      "resource": [
+        "qcs::cos:${REGION}:uid/${APPID}:${BUCKET}-${APPID}"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:GetObject",
+        "name/cos:HeadObject"
+      ],
+      "resource": [
+        "qcs::cos:${REGION}:uid/${APPID}:${BUCKET}-${APPID}/${PREFIX}*"
+      ]
+    }
+  ]
+}
