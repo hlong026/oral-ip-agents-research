@@ -34,11 +34,7 @@ class _Target:
 
 def _location(target: bool) -> S3Location:
     return S3Location(
-        endpoint_url=(
-            "https://cos.ap-guangzhou.myqcloud.com"
-            if target
-            else "http://minio.internal:9000"
-        ),
+        endpoint_url=("https://cos.ap-guangzhou.myqcloud.com" if target else "http://minio.internal:9000"),
         region="ap-guangzhou" if target else "us-east-1",
         bucket="oral-media-1250000000" if target else "oral-media",
         access_key="non-placeholder-access-id",
