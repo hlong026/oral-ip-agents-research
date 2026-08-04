@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   quality-gates:
     name: 系统收口质量门禁
@@ -110,6 +113,26 @@ jobs:
             packages/types/src/generated.ts
           if-no-files-found: error
           retention-days: 7
+      - name: 临时同步 OpenAPI 产物到 PR 分支
+        if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if git diff --quiet -- server/openapi.snapshot.json packages/types/src/generated.ts; then
+            exit 0
+          fi
+          mkdir -p /tmp/openapi-sync
+          cp server/openapi.snapshot.json /tmp/openapi-sync/openapi.snapshot.json
+          cp packages/types/src/generated.ts /tmp/openapi-sync/generated.ts
+          git fetch origin "$HEAD_REF"
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          cp /tmp/openapi-sync/openapi.snapshot.json server/openapi.snapshot.json
+          cp /tmp/openapi-sync/generated.ts packages/types/src/generated.ts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/openapi.snapshot.json packages/types/src/generated.ts
+          git commit -m "chore(api): synchronize generated OpenAPI contracts"
+          git push origin "HEAD:$HEAD_REF"
       - name: 8. 前端格式
         run: pnpm lint
       - name: 9. 前端类型检查
