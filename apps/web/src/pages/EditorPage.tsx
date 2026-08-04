@@ -105,7 +105,6 @@ export default function EditorPage() {
     null,
   );
   const [suggesting, setSuggesting] = useState(false);
-  const [saveTick, setSaveTick] = useState(0);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [coverPreviewUrl, setCoverPreviewUrl] = useState("");
   const [coverPreviewLoading, setCoverPreviewLoading] = useState(false);
@@ -254,8 +253,7 @@ export default function EditorPage() {
       void saveNow();
     }, 700);
     return () => window.clearTimeout(timer);
-    // saveTick makes explicit save requests reuse the same save path.
-  }, [dirty, effectiveTaskId, content, saveTick]);
+  }, [dirty, effectiveTaskId, content]);
 
   const updateContent = (
     updater: (current: PublicationContentSpec) => PublicationContentSpec,
@@ -566,9 +564,35 @@ export default function EditorPage() {
       .getElementById(`subtitle-segment-${highlightedSegmentIndex}`)
       ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [highlightedSegmentIndex]);
-  const firstThreeSeconds = (coverCandidates ?? []).filter(
-    (candidate: CoverCandidate) => candidate.timestampMs <= 3000,
+  const allCoverCandidates: CoverCandidate[] = coverCandidates ?? [];
+  const artifactDurationMs = Math.round(
+    Number(detail?.artifacts?.duration ?? 0) * 1000,
   );
+  const latestCandidateMs = allCoverCandidates.reduce(
+    (latest, candidate) => Math.max(latest, candidate.timestampMs),
+    0,
+  );
+  const coverTimelineReady =
+    artifactDurationMs > 0 || allCoverCandidates.length > 0;
+  const coverTimelineMaxMs = coverTimelineReady
+    ? Math.max(
+        0,
+        artifactDurationMs > 0 ? artifactDurationMs - 1 : latestCandidateMs,
+      )
+    : 0;
+  const selectCoverFrame = (timestampMs: number) => {
+    const selectedFrameMs = Math.min(
+      coverTimelineMaxMs,
+      Math.max(0, Math.round(timestampMs)),
+    );
+    if (videoRef.current) {
+      videoRef.current.currentTime = selectedFrameMs / 1000;
+    }
+    updateContent((current) => ({
+      ...current,
+      cover: { ...current.cover, selectedFrameMs },
+    }));
+  };
   const suggestionGroups = useMemo<MetadataSuggestionGroup[]>(() => {
     if (!suggestions) return [];
     if (suggestions.groups?.length) return suggestions.groups.slice(0, 3);
@@ -1081,6 +1105,43 @@ export default function EditorPage() {
                         </p>
                       )}
                     </div>
+                    <div className="mb-4 rounded-xl border border-stroke bg-white/[0.03] p-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-text-3">
+                        <span>全视频时间轴</span>
+                        <span>
+                          0.0s – {(coverTimelineMaxMs / 1000).toFixed(1)}s
+                        </span>
+                      </div>
+                      <input
+                        aria-label="封面时间轴"
+                        type="range"
+                        min={0}
+                        max={coverTimelineMaxMs}
+                        step={100}
+                        disabled={!coverTimelineReady}
+                        value={Math.min(
+                          coverTimelineMaxMs,
+                          content.cover.selectedFrameMs,
+                        )}
+                        onChange={(event) =>
+                          selectCoverFrame(Number(event.target.value))
+                        }
+                        className="w-full accent-brand-from"
+                      />
+                      <div className="mt-2 flex items-center justify-between gap-3">
+                        <span className="text-xs text-text-3">
+                          当前播放 {(currentTimeMs / 1000).toFixed(1)}s
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-ghost px-3 py-1 text-xs"
+                          disabled={!coverTimelineReady}
+                          onClick={() => selectCoverFrame(currentTimeMs)}
+                        >
+                          使用当前播放位置
+                        </button>
+                      </div>
+                    </div>
                     {coverError ? (
                       <p className="text-xs text-danger">
                         封面候选帧加载失败：
@@ -1088,13 +1149,13 @@ export default function EditorPage() {
                           ? coverError.body.message
                           : "网络异常，请稍后重试"}
                       </p>
-                    ) : firstThreeSeconds.length === 0 ? (
+                    ) : allCoverCandidates.length === 0 ? (
                       <p className="text-xs text-text-3">
                         {coverLoading ? "候选帧提取中…" : "暂无候选帧可选"}
                       </p>
                     ) : (
                       <div className="grid gap-3 sm:grid-cols-3">
-                        {firstThreeSeconds.map((candidate) => (
+                        {allCoverCandidates.map((candidate) => (
                           <button
                             key={candidate.timestampMs}
                             className={`overflow-hidden rounded-xl border text-left ${
@@ -1104,13 +1165,7 @@ export default function EditorPage() {
                                 : "border-stroke"
                             }`}
                             onClick={() =>
-                              updateContent((current) => ({
-                                ...current,
-                                cover: {
-                                  ...current.cover,
-                                  selectedFrameMs: candidate.timestampMs,
-                                },
-                              }))
+                              selectCoverFrame(candidate.timestampMs)
                             }
                           >
                             <img
@@ -1137,7 +1192,7 @@ export default function EditorPage() {
                 <button
                   className="btn-ghost text-xs"
                   disabled={saving || !dirty}
-                  onClick={() => setSaveTick((value) => value + 1)}
+                  onClick={() => void saveNow()}
                 >
                   {saving ? "保存中…" : "保存草稿"}
                 </button>

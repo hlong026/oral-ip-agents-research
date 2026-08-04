@@ -117,7 +117,7 @@ class PublicationSubtitlesIn(BaseModel):
 
 
 class PublicationCoverIn(BaseModel):
-    selectedFrameMs: int = Field(default=1500, ge=0, le=3000)
+    selectedFrameMs: int = Field(default=1500, ge=0)
     template: Literal["bold-bottom", "center-band", "top-title", "none"] = "bold-bottom"
     text: str = Field(default="", max_length=40)
 
@@ -175,7 +175,7 @@ class CoverCandidateOut(BaseModel):
 
 
 class CoverPreviewIn(BaseModel):
-    selectedFrameMs: int = Field(default=1500, ge=0, le=3000)
+    selectedFrameMs: int = Field(default=1500, ge=0)
     template: Literal["bold-bottom", "center-band", "top-title", "none"] = "bold-bottom"
     text: str = Field(default="", max_length=40)
 
