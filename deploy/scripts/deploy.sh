@@ -17,16 +17,15 @@ require_command() {
 require_immutable_image() {
   name=$1
   value=$2
-  case "$value" in
-    *@sha256:[0-9a-f][0-9a-f]*) ;;
-    *) fail "$name must use an immutable @sha256 digest" ;;
-  esac
+  printf '%s' "$value" | grep -Eq '@sha256:[0-9a-f]{64}$' || \
+    fail "$name must use an immutable @sha256 digest"
 }
 
 [ -f "$DEPLOY_ENV" ] || fail "deployment env not found: $DEPLOY_ENV"
 require_command docker
 require_command curl
 require_command python3
+require_command grep
 
 set -a
 # shellcheck disable=SC1090
@@ -36,12 +35,14 @@ set +a
 : "${ORAL_SERVER_IMAGE:?ORAL_SERVER_IMAGE is required}"
 : "${ORAL_WEB_IMAGE:?ORAL_WEB_IMAGE is required}"
 : "${ORAL_ADMIN_IMAGE:?ORAL_ADMIN_IMAGE is required}"
+: "${ORAL_GATEWAY_IMAGE:?ORAL_GATEWAY_IMAGE is required}"
 : "${ORAL_ENV_FILE:?ORAL_ENV_FILE is required}"
 : "${DEPLOY_READY_URL:?DEPLOY_READY_URL is required}"
 
 require_immutable_image ORAL_SERVER_IMAGE "$ORAL_SERVER_IMAGE"
 require_immutable_image ORAL_WEB_IMAGE "$ORAL_WEB_IMAGE"
 require_immutable_image ORAL_ADMIN_IMAGE "$ORAL_ADMIN_IMAGE"
+require_immutable_image ORAL_GATEWAY_IMAGE "$ORAL_GATEWAY_IMAGE"
 [ -f "$ORAL_ENV_FILE" ] || fail "production application env not found: $ORAL_ENV_FILE"
 
 compose() {
