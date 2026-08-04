@@ -105,7 +105,6 @@ export default function EditorPage() {
     null,
   );
   const [suggesting, setSuggesting] = useState(false);
-  const [saveTick, setSaveTick] = useState(0);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [coverPreviewUrl, setCoverPreviewUrl] = useState("");
   const [coverPreviewLoading, setCoverPreviewLoading] = useState(false);
@@ -254,8 +253,7 @@ export default function EditorPage() {
       void saveNow();
     }, 700);
     return () => window.clearTimeout(timer);
-    // saveTick makes explicit save requests reuse the same save path.
-  }, [dirty, effectiveTaskId, content, saveTick]);
+  }, [dirty, effectiveTaskId, content]);
 
   const updateContent = (
     updater: (current: PublicationContentSpec) => PublicationContentSpec,
@@ -1188,7 +1186,7 @@ export default function EditorPage() {
                 <button
                   className="btn-ghost text-xs"
                   disabled={saving || !dirty}
-                  onClick={() => setSaveTick((value) => value + 1)}
+                  onClick={() => void saveNow()}
                 >
                   {saving ? "保存中…" : "保存草稿"}
                 </button>
