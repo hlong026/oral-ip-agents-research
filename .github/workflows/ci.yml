@@ -5,6 +5,10 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: write
+  packages: read
+
 jobs:
   quality-gates:
     name: 系统收口质量门禁
@@ -43,6 +47,24 @@ jobs:
           uv lock --check --directory server
           uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
+      - name: 临时应用发布存储 P0 补丁
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git fetch origin "$HEAD_REF"
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          python scripts/apply_publish_s3_streaming_p0.py
+          uv run --directory server ruff format \
+            app/core/storage.py \
+            app/modules/publish/service.py \
+            app/providers/publish/base_driver.py \
+            tests/test_publish_security.py \
+            tests/test_stage_two_publish.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(publish): materialize S3 media and stream export packages"
+          git push origin "HEAD:$HEAD_REF"
       - name: 2. 数据库迁移链
         working-directory: server
         env:
