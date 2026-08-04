@@ -13,16 +13,15 @@ fail() {
 require_immutable_image() {
   name=$1
   value=$2
-  case "$value" in
-    *@sha256:[0-9a-f][0-9a-f]*) ;;
-    *) fail "$name must use an immutable @sha256 digest" ;;
-  esac
+  printf '%s' "$value" | grep -Eq '@sha256:[0-9a-f]{64}$' || \
+    fail "$name must use an immutable @sha256 digest"
 }
 
 [ -f "$DEPLOY_ENV" ] || fail "deployment env not found: $DEPLOY_ENV"
 command -v docker >/dev/null 2>&1 || fail "missing command: docker"
 command -v curl >/dev/null 2>&1 || fail "missing command: curl"
 command -v python3 >/dev/null 2>&1 || fail "missing command: python3"
+command -v grep >/dev/null 2>&1 || fail "missing command: grep"
 
 set -a
 # shellcheck disable=SC1090
@@ -32,11 +31,13 @@ set +a
 : "${PREVIOUS_ORAL_SERVER_IMAGE:?PREVIOUS_ORAL_SERVER_IMAGE is required}"
 : "${PREVIOUS_ORAL_WEB_IMAGE:?PREVIOUS_ORAL_WEB_IMAGE is required}"
 : "${PREVIOUS_ORAL_ADMIN_IMAGE:?PREVIOUS_ORAL_ADMIN_IMAGE is required}"
+: "${ORAL_GATEWAY_IMAGE:?ORAL_GATEWAY_IMAGE is required}"
 : "${DEPLOY_READY_URL:?DEPLOY_READY_URL is required}"
 
 require_immutable_image PREVIOUS_ORAL_SERVER_IMAGE "$PREVIOUS_ORAL_SERVER_IMAGE"
 require_immutable_image PREVIOUS_ORAL_WEB_IMAGE "$PREVIOUS_ORAL_WEB_IMAGE"
 require_immutable_image PREVIOUS_ORAL_ADMIN_IMAGE "$PREVIOUS_ORAL_ADMIN_IMAGE"
+require_immutable_image ORAL_GATEWAY_IMAGE "$ORAL_GATEWAY_IMAGE"
 
 export ORAL_SERVER_IMAGE=$PREVIOUS_ORAL_SERVER_IMAGE
 export ORAL_WEB_IMAGE=$PREVIOUS_ORAL_WEB_IMAGE
@@ -52,6 +53,7 @@ printf '%s\n' 'Confirm the previous image is compatible with the current schema 
 
 compose config --quiet
 compose pull server worker web admin gateway
+compose stop worker server || true
 compose up -d --remove-orphans server worker web admin gateway
 
 attempt=0
