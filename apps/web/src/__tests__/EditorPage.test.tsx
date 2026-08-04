@@ -265,14 +265,13 @@ describe("EditorPage publication draft", () => {
   });
 
   it("全视频时间轴可直接选择三秒后的任意位置", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
     const timeline = await screen.findByLabelText("封面时间轴");
     fireEvent.change(timeline, { target: { value: "20000" } });
     const saveButton = screen.getByRole("button", { name: "保存草稿" });
     await waitFor(() => expect(saveButton).toBeEnabled());
-    await user.click(saveButton);
+    fireEvent.click(saveButton);
 
     await waitFor(() => {
       expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
