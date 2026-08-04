@@ -33,6 +33,14 @@ def test_cover_schemas_accept_positions_after_three_seconds():
     assert CoverPreviewIn(selectedFrameMs=15_000).selectedFrameMs == 15_000
 
 
+def test_legacy_default_beyond_short_video_is_normalized():
+    selected = cover_timeline.normalized_selected_frame(1_500, 1_000)
+
+    assert 0 <= selected < 1_000
+    assert selected == cover_timeline.candidate_timestamps(1_000)[1]
+    assert cover_timeline.normalized_selected_frame(500, 1_000) == 500
+
+
 async def test_duration_validation_rejects_eof_and_accepts_last_frame(monkeypatch):
     task = SimpleNamespace(artifacts_json=json.dumps({"duration": 12.0}))
 
