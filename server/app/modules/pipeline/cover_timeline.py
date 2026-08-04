@@ -11,7 +11,13 @@ from app.core.storage import signed_media_path
 
 from . import repository as repo
 from . import service
-from .schemas import CoverCandidateOut, CoverPreviewIn, CoverPreviewOut, PublicationContentIn
+from .schemas import (
+    CoverCandidateOut,
+    CoverPreviewIn,
+    CoverPreviewOut,
+    PublicationContentIn,
+    PublicationRevisionOut,
+)
 
 
 def duration_ms_from_artifacts(artifacts: dict) -> int:
@@ -58,6 +64,15 @@ def candidate_timestamps(duration_ms: int) -> list[int]:
     return sorted(timestamps)
 
 
+def normalized_selected_frame(selected_frame_ms: int, duration_ms: int) -> int:
+    """Keep valid selections and repair legacy defaults that point beyond EOF."""
+    duration_ms = max(1, int(duration_ms))
+    if 0 <= selected_frame_ms < duration_ms:
+        return selected_frame_ms
+    timestamps = candidate_timestamps(duration_ms)
+    return timestamps[len(timestamps) // 2]
+
+
 async def validate_selected_frame(
     db: AsyncSession,
     task_id: str,
@@ -76,6 +91,28 @@ async def validate_selected_frame(
             },
         )
     return duration_ms
+
+
+async def get_publication_draft(
+    db: AsyncSession,
+    task_id: str,
+    user_id: str,
+) -> PublicationRevisionOut:
+    """Return a draft whose selected frame is always valid for the current media."""
+    draft_out = await service.get_publication_draft(db, task_id, user_id)
+    task = await service._must_get(db, task_id, user_id)
+    artifacts = json.loads(task.artifacts_json or "{}")
+    duration_ms = duration_ms_from_artifacts(artifacts)
+    selected = normalized_selected_frame(draft_out.content.cover.selectedFrameMs, duration_ms)
+    if selected == draft_out.content.cover.selectedFrameMs:
+        return draft_out
+
+    draft_out.content.cover.selectedFrameMs = selected
+    draft = await repo.latest_draft_publication_revision(db, task_id, user_id)
+    if draft is not None:
+        draft.content_spec_json = draft_out.content.model_dump_json()
+        await db.commit()
+    return draft_out
 
 
 async def validate_latest_draft(db: AsyncSession, task_id: str, user_id: str) -> None:
