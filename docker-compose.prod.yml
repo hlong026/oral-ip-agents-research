@@ -37,6 +37,7 @@ services:
       - ./deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
     read_only: true
     tmpfs:
+      - /etc/nginx/conf.d:size=1m,mode=0777
       - /var/cache/nginx:size=64m,mode=0755
       - /var/run:size=16m,mode=0755
       - /tmp:size=16m,mode=1777
