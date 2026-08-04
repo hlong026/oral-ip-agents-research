@@ -52,8 +52,39 @@ jobs:
             -e WEB_HOST=app.example.com \
             -e ADMIN_HOST=admin.example.com \
             -v "$PWD/deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro" \
-            nginx:1.27-alpine nginx -t
+            nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 nginx -t
       - name: Build web image
         run: docker build -f deploy/Dockerfile.frontend --target web -t oral-web:ci .
       - name: Build admin image
         run: docker build -f deploy/Dockerfile.frontend --target admin -t oral-admin:ci .
+      - name: Smoke test read-only frontend containers
+        run: |
+          set -eu
+          cleanup() {
+            docker rm -f oral-web-smoke oral-admin-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name oral-web-smoke \
+            --read-only \
+            --tmpfs /var/cache/nginx:size=32m,mode=0755 \
+            --tmpfs /var/run:size=8m,mode=0755 \
+            --tmpfs /tmp:size=8m,mode=1777 \
+            -p 127.0.0.1:18081:8080 \
+            oral-web:ci
+          docker run -d --name oral-admin-smoke \
+            --read-only \
+            --tmpfs /var/cache/nginx:size=32m,mode=0755 \
+            --tmpfs /var/run:size=8m,mode=0755 \
+            --tmpfs /tmp:size=8m,mode=1777 \
+            -p 127.0.0.1:18082:8080 \
+            oral-admin:ci
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null \
+              && curl -fsS http://127.0.0.1:18082/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs oral-web-smoke
+          docker logs oral-admin-smoke
+          exit 1
