@@ -36,13 +36,17 @@ describe("deviceFingerprint", () => {
   });
 
   it("Tauri 壳：machine_code 返回 hw- 码时设备段为硬件机器码", async () => {
-    const invoke = vi.fn().mockResolvedValue("hw-0123456789abcdef0123456789abcdef");
+    const invoke = vi
+      .fn()
+      .mockResolvedValue("hw-0123456789abcdef0123456789abcdef");
     (globalThis as GlobalWithTauri).__TAURI_INTERNALS__ = { invoke };
     const deviceFingerprint = await loadFingerprint();
 
     const fingerprint = await deviceFingerprint();
     expect(invoke).toHaveBeenCalledWith("machine_code");
-    expect(fingerprint.startsWith("hw-0123456789abcdef0123456789abcdef.")).toBe(true);
+    expect(fingerprint.startsWith("hw-0123456789abcdef0123456789abcdef.")).toBe(
+      true,
+    );
   });
 
   it("Tauri invoke 失败：静默降级 localStorage 软指纹", async () => {
@@ -53,7 +57,9 @@ describe("deviceFingerprint", () => {
 
     const fingerprint = await deviceFingerprint();
     expect(fingerprint.startsWith("hw-")).toBe(false);
-    expect(fingerprint.split(".")[0]).toBe(localStorage.getItem("oral_device_id"));
+    expect(fingerprint.split(".")[0]).toBe(
+      localStorage.getItem("oral_device_id"),
+    );
   });
 
   it("Tauri 返回非 hw- 前缀等异常值：同样降级软指纹", async () => {
@@ -63,6 +69,8 @@ describe("deviceFingerprint", () => {
     const deviceFingerprint = await loadFingerprint();
 
     const fingerprint = await deviceFingerprint();
-    expect(fingerprint.split(".")[0]).toBe(localStorage.getItem("oral_device_id"));
+    expect(fingerprint.split(".")[0]).toBe(
+      localStorage.getItem("oral_device_id"),
+    );
   });
 });
