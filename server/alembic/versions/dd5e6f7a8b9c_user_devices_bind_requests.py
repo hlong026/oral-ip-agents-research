@@ -59,9 +59,7 @@ def upgrade() -> None:
 
     # 存量搬迁：users.device_fingerprint 非空值搬入 user_devices
     conn = op.get_bind()
-    rows = conn.execute(
-        sa.text("SELECT id, device_fingerprint FROM users WHERE device_fingerprint <> ''")
-    ).fetchall()
+    rows = conn.execute(sa.text("SELECT id, device_fingerprint FROM users WHERE device_fingerprint <> ''")).fetchall()
     now = datetime.now(UTC)
     for user_id, fingerprint in rows:
         device_key = fingerprint.partition(".")[0]

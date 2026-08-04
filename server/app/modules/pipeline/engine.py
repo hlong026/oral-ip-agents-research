@@ -556,9 +556,7 @@ def _apply_publication_content(ctx: dict) -> dict:
     updated["subtitle_segments"] = subtitles.get("segments") or []
     updated["subtitle_exact"] = bool(subtitles.get("segments"))
     updated["subtitle_style"] = subtitles.get("style") or {}
-    updated["cover_title"] = (
-        str(cover.get("text") or "").strip() or content.get("title") or updated.get("cover_title")
-    )
+    updated["cover_title"] = str(cover.get("text") or "").strip() or content.get("title") or updated.get("cover_title")
     updated["cover_template"] = cover.get("template") or updated.get("cover_template") or "bold-bottom"
     updated["cover_frame_ms"] = cover.get("selectedFrameMs", updated.get("cover_frame_ms", 1000))
     if updated.get("clean_video_key"):
