@@ -84,7 +84,7 @@ async def validate_selected_frame(
     duration_ms = duration_ms_from_artifacts(artifacts)
     if selected_frame_ms >= duration_ms:
         raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "COVER_FRAME_OUT_OF_RANGE",
                 "message": (f"封面时间点超出视频时长，请选择 0 至 {max(0, duration_ms - 1) / 1000:.1f} 秒之间的位置"),
