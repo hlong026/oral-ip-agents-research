@@ -2,13 +2,7 @@ import { pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type { PipelineTask, PublicationRevision } from "@oral/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -271,15 +265,14 @@ describe("EditorPage publication draft", () => {
   });
 
   it("全视频时间轴可直接选择三秒后的任意位置", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderEditor();
 
     const timeline = await screen.findByLabelText("封面时间轴");
-    await act(async () => {
-      fireEvent.change(timeline, { target: { value: "20000" } });
-    });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(750);
-    });
+    fireEvent.change(timeline, { target: { value: "20000" } });
+    const saveButton = screen.getByRole("button", { name: "保存草稿" });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    await user.click(saveButton);
 
     await waitFor(() => {
       expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
