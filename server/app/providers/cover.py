@@ -92,13 +92,14 @@ def _resolve_font_face() -> tuple[str, int] | None:
 
 
 def _font_supports_cjk(font_path: str) -> bool:
-    """字形覆盖检测（借鉴 MoneyPrinterTurbo，MIT）：缺字掩码比对，避免豆腐块"""
+    """字形覆盖检测（借鉴 MoneyPrinterTurbo，MIT）：缺字掩码比对，避免豆腐块。"""
     try:
         font = ImageFont.truetype(font_path, 30)
         missing = font.getmask("\U0010ffff")
         sample = font.getmask("测")
-        return not (missing.size == sample.size and missing.tobytes() == sample.tobytes())
-    except OSError:
+        # Pillow 11+ 的 ImagingCore 不再暴露 tobytes()，但仍实现 buffer 协议。
+        return not (missing.size == sample.size and bytes(missing) == bytes(sample))
+    except (OSError, TypeError):
         return False
 
 
