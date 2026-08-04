@@ -1,0 +1,32 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:HeadBucket",
+        "name/cos:ListMultipartUploads"
+      ],
+      "resource": [
+        "qcs::cos:${REGION}:uid/${APPID}:${BUCKET}-${APPID}"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "name/cos:GetObject",
+        "name/cos:HeadObject",
+        "name/cos:PutObject",
+        "name/cos:DeleteObject",
+        "name/cos:InitiateMultipartUpload",
+        "name/cos:UploadPart",
+        "name/cos:ListParts",
+        "name/cos:CompleteMultipartUpload",
+        "name/cos:AbortMultipartUpload"
+      ],
+      "resource": [
+        "qcs::cos:${REGION}:uid/${APPID}:${BUCKET}-${APPID}/${PREFIX}*"
+      ]
+    }
+  ]
+}
