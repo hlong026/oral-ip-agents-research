@@ -6,11 +6,12 @@ SAU PublishDriver 公共基类
 
 import asyncio
 import uuid
+from contextlib import AsyncExitStack
 from typing import Any
 
 from app.core.distributed_semaphore import SemaphoreUnavailableError
 from app.core.logging import get_logger
-from app.core.storage import local_path
+from app.core.storage import materialized_path
 from app.providers.base import StepRecoverableError
 
 from .browser_pool import BrowserSlot
@@ -131,11 +132,8 @@ class SAUPublishDriverBase:
         注意：SAU 浏览器发布无法取回平台真实作品 ID，子类返回的是哈希生成的
         内部追踪号（postIdSource=internal），绝不可当作平台作品 ID 展示/跳转。
         """
-        # 1. 视频/封面 → 本地绝对路径
+        # 1. 视频/封面由对象存储按需物化到 Worker 私有临时目录。
         import json
-
-        video_path = str(local_path(video_key))
-        cover_path = str(local_path(cover_key)) if cover_key else None
 
         # 2. 定时发布时间解析
         publish_date = self._parse_schedule(scheduled_at)
@@ -144,17 +142,24 @@ class SAUPublishDriverBase:
         session_json = json.dumps(account_session, ensure_ascii=False)
         cookie_file = session_to_file(session_json, account_id or "tmp", self.platform)
 
-        # 4. 在浏览器槽位内执行发布
+        # 4. 在浏览器槽位内执行发布；退出上下文后清理 S3 临时媒体。
         try:
-            async with BrowserSlot():
-                post_id = await self._do_publish(
-                    cookie_file=cookie_file,
-                    video_path=video_path,
-                    title=title,
-                    topics=topics,
-                    cover_path=cover_path,
-                    publish_date=publish_date,
+            async with AsyncExitStack() as media_stack:
+                video_path = await media_stack.enter_async_context(materialized_path(video_key, name="video"))
+                cover_path = (
+                    await media_stack.enter_async_context(materialized_path(cover_key, name="cover"))
+                    if cover_key
+                    else None
                 )
+                async with BrowserSlot():
+                    post_id = await self._do_publish(
+                        cookie_file=cookie_file,
+                        video_path=str(video_path),
+                        title=title,
+                        topics=topics,
+                        cover_path=str(cover_path) if cover_path else None,
+                        publish_date=publish_date,
+                    )
             # 5. 发布后回写 Cookie（SAU 发布过程中可能刷新）
             updated_session = read_session_file(cookie_file)
             if updated_session and updated_session != "{}":
