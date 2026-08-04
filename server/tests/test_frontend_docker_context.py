@@ -2,15 +2,12 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_frontend_dockerfile_has_a_dedicated_build_context() -> None:
     root_ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
-    frontend_ignore = (
-        ROOT / "deploy/Dockerfile.frontend.dockerignore"
-    ).read_text(encoding="utf-8").splitlines()
+    frontend_ignore = (ROOT / "deploy/Dockerfile.frontend.dockerignore").read_text(encoding="utf-8").splitlines()
 
     assert "apps" in root_ignore
     assert "packages" in root_ignore

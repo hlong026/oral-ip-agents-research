@@ -27,9 +27,7 @@ def test_production_compose_uses_external_data_services() -> None:
         "cos-migration",
     } <= set(services)
     assert {"postgres", "redis", "minio", "im-listener"}.isdisjoint(services)
-    assert services["gateway"]["ports"] == [
-        "${GATEWAY_BIND:-127.0.0.1:8080}:8080"
-    ]
+    assert services["gateway"]["ports"] == ["${GATEWAY_BIND:-127.0.0.1:8080}:8080"]
     for name in ("server", "worker", "web", "admin"):
         assert "ports" not in services[name]
 
@@ -42,9 +40,7 @@ def test_api_worker_and_migrations_use_the_same_server_image() -> None:
     assert services["worker"]["image"] == expected
     assert services["migration"]["image"] == expected
     assert services["cos-migration"]["image"] == expected
-    assert services["gateway"]["image"] == (
-        "${ORAL_GATEWAY_IMAGE:?ORAL_GATEWAY_IMAGE is required}"
-    )
+    assert services["gateway"]["image"] == ("${ORAL_GATEWAY_IMAGE:?ORAL_GATEWAY_IMAGE is required}")
     assert services["migration"]["command"] == ["alembic", "upgrade", "head"]
     assert services["migration"]["profiles"] == ["migration"]
     assert services["cos-migration"]["profiles"] == ["cos-migration"]
@@ -90,9 +86,7 @@ def test_production_files_contain_no_embedded_credentials() -> None:
 
 
 def test_gateway_routes_api_media_websocket_and_both_frontends() -> None:
-    config = (ROOT / "deploy/nginx-gateway.conf.template").read_text(
-        encoding="utf-8"
-    )
+    config = (ROOT / "deploy/nginx-gateway.conf.template").read_text(encoding="utf-8")
 
     assert "server_name ${WEB_HOST}" in config
     assert "server_name ${ADMIN_HOST}" in config
@@ -130,8 +124,8 @@ def test_deploy_stops_old_workers_then_migrates_before_start() -> None:
     assert "@sha256:[0-9a-f]{64}$" in script
     assert "ORAL_GATEWAY_IMAGE" in script
     assert "require_private_file ORAL_ENV_FILE" in script
-    assert "assert payload.get(\"env\") == \"prod\"" in script
-    assert "storage.get(\"driver\") == \"s3\"" in script
+    assert 'assert payload.get("env") == "prod"' in script
+    assert 'storage.get("driver") == "s3"' in script
     assert "set -x" not in script
 
 
@@ -147,15 +141,8 @@ def test_rollback_never_downgrades_database_automatically() -> None:
 
 
 def test_lifecycle_plan_is_non_executable_and_scoped() -> None:
-    plan = yaml.safe_load(
-        (ROOT / "deploy/tencent-cos/lifecycle-plan.example.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    plan = yaml.safe_load((ROOT / "deploy/tencent-cos/lifecycle-plan.example.json").read_text(encoding="utf-8"))
 
     assert plan["applyAutomatically"] is False
-    assert any(
-        rule["action"] == "abortIncompleteMultipartUpload"
-        for rule in plan["rules"]
-    )
+    assert any(rule["action"] == "abortIncompleteMultipartUpload" for rule in plan["rules"])
     assert all(rule.get("prefix", "") != "*" for rule in plan["rules"])
