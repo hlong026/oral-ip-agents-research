@@ -33,7 +33,6 @@ jobs:
           pnpm install --frozen-lockfile
           python scripts/apply_tencent_cos_adapter_p0.py
           uv run --directory server ruff format app tests
-          pnpm exec prettier --write server/.env.example server/.env.production.example
           rm scripts/apply_tencent_cos_adapter_p0.py
           rm .github/workflows/cos-adapter-bootstrap.yml
           git config user.name 'chatgpt-development'
