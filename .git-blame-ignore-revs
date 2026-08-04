@@ -1,0 +1,18 @@
+# 大规模纯格式化提交，git blame 应跳过，否则代码归属会全部指向格式化那天。
+#
+# 启用（每个克隆做一次）：
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub 网页版的 blame 会自动读取本文件，无需配置。
+#
+# 只登记经核验零语义变更的提交：判定方式是去除文件全部空白字符后逐字符
+# 比对，差异仅限尾逗号、分组括号、引号规范化、f-string 编译期拼接合并。
+
+# style: 用 prettier 格式化 EditorPage 与 ActivationPage
+3ee2d35f970070a9027594d997aeb83d2e04992e
+
+# style: 用 prettier 格式化 lint 范围内剩余文件
+bee8dd13c0b2b036621c83c1d848fb54ca788dd2
+
+# style: 用 ruff format 格式化后端
+02cce9edf16158316b82182deef3fafb493bf6ff

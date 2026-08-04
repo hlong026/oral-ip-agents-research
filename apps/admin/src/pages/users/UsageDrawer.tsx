@@ -37,7 +37,8 @@ export default function UserUsageDrawer({
 
   const { data, isLoading, error, isFetching } = useQuery({
     queryKey: ["admin-user-usage", userId, page, stepFilter],
-    queryFn: () => adminApi.getUserUsage(userId, page, 20, stepFilter || undefined),
+    queryFn: () =>
+      adminApi.getUserUsage(userId, page, 20, stepFilter || undefined),
   });
 
   const exportCsv = useMutation({
@@ -74,7 +75,10 @@ export default function UserUsageDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/40"
+      onClick={onClose}
+    >
       <aside
         className="glass h-full w-full max-w-md space-y-5 overflow-y-auto p-6"
         onClick={(event) => event.stopPropagation()}
@@ -103,7 +107,9 @@ export default function UserUsageDrawer({
             </div>
             <div>
               <span className="text-text-3">激活码:</span>{" "}
-              <span className="font-mono font-medium">{activationCodeMasked || "未激活"}</span>
+              <span className="font-mono font-medium">
+                {activationCodeMasked || "未激活"}
+              </span>
             </div>
             <div>
               <span className="text-text-3">余额:</span>{" "}
@@ -170,7 +176,10 @@ export default function UserUsageDrawer({
                   </thead>
                   <tbody>
                     {(data?.items ?? []).map((item) => (
-                      <tr key={item.id} className="border-b border-stroke/50 last:border-0">
+                      <tr
+                        key={item.id}
+                        className="border-b border-stroke/50 last:border-0"
+                      >
                         <td className="px-3 py-2 font-mono text-xs text-text-3">
                           {formatDateTime(item.createdAt)}
                         </td>
@@ -179,14 +188,18 @@ export default function UserUsageDrawer({
                             {STEP_LABEL[item.step] || item.step}
                           </span>
                         </td>
-                        <td className={`px-3 py-2 text-right font-mono ${item.points < 0 ? "text-success" : ""}`}>
+                        <td
+                          className={`px-3 py-2 text-right font-mono ${item.points < 0 ? "text-success" : ""}`}
+                        >
                           {item.points > 0
                             ? `-${item.points}`
                             : item.points === 0
                               ? "0"
                               : `+${-item.points}（退还）`}
                         </td>
-                        <td className="px-3 py-2 text-right text-text-3">{item.compute}</td>
+                        <td className="px-3 py-2 text-right text-text-3">
+                          {item.compute}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

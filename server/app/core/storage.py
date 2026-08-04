@@ -135,10 +135,21 @@ def local_path(key: str) -> Path:
     return Path(settings.local_storage_dir) / _validated_key(key)
 
 
-def exists(key: str) -> bool:
+async def exists(key: str) -> bool:
+    """媒体文件是否仍存在。S3 驱动必须真查 head_object：默认返回存在会让
+    CLEAN_MASTER_MISSING 之类的源文件校验在生产上失效。"""
+    key = _validated_key(key)
     if settings.storage_driver == "local":
         return local_path(key).exists()
-    return True
+
+    client = _s3_client()
+    try:
+        await asyncio.to_thread(client.head_object, Bucket=settings.s3_bucket, Key=key)
+        return True
+    except ClientError as exc:
+        if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
 
 
 async def read_bytes(key: str) -> bytes:

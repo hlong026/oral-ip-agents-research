@@ -55,5 +55,8 @@ client/
 .DS_Store
 Thumbs.db
 .idea/
-.vscode/
+# .vscode 仍整体忽略个人配置，只放行团队共享的格式化设置与扩展推荐
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
 *.log

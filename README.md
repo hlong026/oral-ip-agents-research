@@ -56,6 +56,27 @@ FFmpeg、Chromium 和真实平台发布驱动，并以非 root 用户运行。
 占位配置及有头浏览器。完整流程见 `docs/16-生产切换上线检查清单.md`；供应商
 密钥只保存在后端，用户端没有配置入口。
 
+## 代码格式
+
+前端走 prettier（配置见 `.prettierrc`），后端走 ruff（配置见
+`server/pyproject.toml` 的 `[tool.ruff]`），两者版本都已精确固定，避免刷新
+lockfile 时格式规则静默漂移。克隆后执行一次 `pnpm install`，husky 会装上
+预提交钩子，`lint-staged` 只格式化本次暂存的文件。
+
+全量检查（与 CI 一致）：
+
+```bash
+pnpm lint                                # 前端
+(cd server && uv run ruff format --check .)   # 后端
+```
+
+仓库有三个大规模纯格式化提交，建议让 `git blame` 跳过它们，否则代码归属会
+指向格式化那天（每个克隆配置一次；GitHub 网页版会自动读取，无需配置）：
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
 ## 桌面端构建与分发
 
 桌面端是 Web 用户端的 Tauri 壳，生产构建必须显式注入同一个正式 HTTPS API，

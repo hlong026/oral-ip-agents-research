@@ -371,7 +371,10 @@ async function adminFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function adminFetchBlob(path: string, init: RequestInit = {}): Promise<Blob> {
+async function adminFetchBlob(
+  path: string,
+  init: RequestInit = {},
+): Promise<Blob> {
   const token = getAdminToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -496,8 +499,7 @@ export const adminApi = {
       { method: "POST" },
     ),
   async getDeviceBindLimit(): Promise<number> {
-    const response =
-      await adminFetch<ProviderSettingsResponse>("/providers");
+    const response = await adminFetch<ProviderSettingsResponse>("/providers");
     const raw = response.settings.device_bind_limit || "";
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed >= 1 ? parsed : 1;
@@ -601,12 +603,7 @@ export const adminApi = {
     ),
 
   // ============ 新增：用户调用记录查询 ============
-  getUserUsage: (
-    userId: string,
-    page = 1,
-    pageSize = 20,
-    step?: string,
-  ) => {
+  getUserUsage: (userId: string, page = 1, pageSize = 20, step?: string) => {
     const params = new URLSearchParams({
       user_id: userId,
       page: String(page),
