@@ -16,13 +16,15 @@ COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen --no-dev
 
 COPY server/app ./app
+COPY server/scripts ./scripts
 COPY server/alembic.ini ./
 COPY server/alembic ./alembic
 COPY vendor/social-auto-upload /vendor/social-auto-upload
 
 RUN mkdir -p /app/storage /vendor/social-auto-upload/cookies /vendor/social-auto-upload/logs \
     && chown -R oral:oral /app/storage /vendor/social-auto-upload \
-    && python -c "from app.providers.publish.sau_conf import BASE_DIR, LOCAL_CHROME_PATH; assert BASE_DIR.is_dir(); assert LOCAL_CHROME_PATH"
+    && python -c "from app.providers.publish.sau_conf import BASE_DIR, LOCAL_CHROME_PATH; assert BASE_DIR.is_dir(); assert LOCAL_CHROME_PATH" \
+    && python -c "from scripts.migrate_storage_to_cos import build_parser; assert build_parser()"
 
 EXPOSE 8000
 USER oral
