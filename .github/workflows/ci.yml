@@ -38,6 +38,8 @@ jobs:
           cache: pnpm
       - name: 1. 依赖锁与安装
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
           uv lock --check --directory server
           uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
