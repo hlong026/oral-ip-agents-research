@@ -1,0 +1,56 @@
+name: Production deployment gate
+
+on:
+  pull_request:
+    paths:
+      - docker-compose.prod.yml
+      - deploy/**
+      - server/Dockerfile
+      - server/scripts/**
+      - .github/workflows/production-deployment.yml
+  push:
+    branches: [master]
+    paths:
+      - docker-compose.prod.yml
+      - deploy/**
+      - server/Dockerfile
+      - server/scripts/**
+      - .github/workflows/production-deployment.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - name: Validate production compose
+        run: |
+          mkdir -p .runtime/cos-migration
+          docker compose \
+            --env-file deploy/.env.prod.example \
+            -f docker-compose.prod.yml \
+            config --quiet
+      - name: Validate deployment scripts
+        run: |
+          sh -n deploy/scripts/deploy.sh
+          sh -n deploy/scripts/rollback.sh
+      - name: Validate gateway configuration
+        run: |
+          docker run --rm \
+            -e WEB_HOST=app.example.com \
+            -e ADMIN_HOST=admin.example.com \
+            -v "$PWD/deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro" \
+            nginx:1.27-alpine nginx -t
+      - name: Build web image
+        run: docker build -f deploy/Dockerfile.frontend --target web -t oral-web:ci .
+      - name: Build admin image
+        run: docker build -f deploy/Dockerfile.frontend --target admin -t oral-admin:ci .
