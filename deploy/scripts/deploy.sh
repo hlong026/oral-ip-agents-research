@@ -21,11 +21,23 @@ require_immutable_image() {
     fail "$name must use an immutable @sha256 digest"
 }
 
+require_private_file() {
+  name=$1
+  path=$2
+  [ -f "$path" ] || fail "$name not found: $path"
+  mode=$(stat -c '%a' "$path")
+  case "$mode" in
+    400|600) ;;
+    *) fail "$name must have owner-only permissions (0400 or 0600), got $mode" ;;
+  esac
+}
+
 [ -f "$DEPLOY_ENV" ] || fail "deployment env not found: $DEPLOY_ENV"
 require_command docker
 require_command curl
 require_command python3
 require_command grep
+require_command stat
 
 set -a
 # shellcheck disable=SC1090
@@ -43,25 +55,28 @@ require_immutable_image ORAL_SERVER_IMAGE "$ORAL_SERVER_IMAGE"
 require_immutable_image ORAL_WEB_IMAGE "$ORAL_WEB_IMAGE"
 require_immutable_image ORAL_ADMIN_IMAGE "$ORAL_ADMIN_IMAGE"
 require_immutable_image ORAL_GATEWAY_IMAGE "$ORAL_GATEWAY_IMAGE"
-[ -f "$ORAL_ENV_FILE" ] || fail "production application env not found: $ORAL_ENV_FILE"
+require_private_file ORAL_ENV_FILE "$ORAL_ENV_FILE"
 
 compose() {
   docker compose --env-file "$DEPLOY_ENV" -f "$COMPOSE_FILE" "$@"
 }
 
-printf '%s\n' '1/5 validating production compose...'
+printf '%s\n' '1/6 validating production compose...'
 compose config --quiet
 
-printf '%s\n' '2/5 pulling immutable images...'
+printf '%s\n' '2/6 pulling immutable images...'
 compose pull server worker web admin gateway
 
-printf '%s\n' '3/5 running database migration with the release server image...'
+printf '%s\n' '3/6 stopping old API and Worker before schema migration...'
+compose stop worker server || true
+
+printf '%s\n' '4/6 running database migration with the release server image...'
 compose --profile migration run --rm --no-deps migration
 
-printf '%s\n' '4/5 starting application services...'
+printf '%s\n' '5/6 starting application services...'
 compose up -d --remove-orphans server worker web admin gateway
 
-printf '%s\n' '5/5 waiting for /readyz...'
+printf '%s\n' '6/6 waiting for /readyz...'
 attempt=0
 while :; do
   attempt=$((attempt + 1))
