@@ -48,7 +48,7 @@ export S3_SECRET_KEY='CAM SecretKey'
 
 ```bash
 cd server
-uv run python scripts/migrate_storage_to_cos.py \
+uv run python -m scripts.migrate_storage_to_cos \
   --source-addressing-style path \
   --target-addressing-style virtual \
   --manifest /secure/cos-migration-manifest.jsonl \
@@ -62,7 +62,7 @@ Dry Run 只列举源对象并写入 `planned` 记录，不调用目标上传接�
 
 ```bash
 cd server
-uv run python scripts/migrate_storage_to_cos.py \
+uv run python -m scripts.migrate_storage_to_cos \
   --source-addressing-style path \
   --target-addressing-style virtual \
   --sample-sha256-rate 0.10 \
@@ -86,7 +86,7 @@ uv run python scripts/migrate_storage_to_cos.py \
 ## 6. 断点续传
 
 ```bash
-uv run python scripts/migrate_storage_to_cos.py \
+uv run python -m scripts.migrate_storage_to_cos \
   --resume \
   --manifest /secure/cos-migration-manifest.jsonl \
   --checkpoint /secure/cos-migration-checkpoint.json
@@ -97,7 +97,7 @@ uv run python scripts/migrate_storage_to_cos.py \
 ## 7. 只验证
 
 ```bash
-uv run python scripts/migrate_storage_to_cos.py \
+uv run python -m scripts.migrate_storage_to_cos \
   --verify-only \
   --sample-sha256-rate 0.10 \
   --manifest /secure/cos-verify-manifest.jsonl \

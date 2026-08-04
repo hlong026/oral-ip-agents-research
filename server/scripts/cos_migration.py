@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import tempfile
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
@@ -57,10 +58,14 @@ class S3Location:
             raise MigrationConfigurationError("addressing_style 仅支持 virtual/path/auto")
         if self.signature_version not in {"s3", "s3v4"}:
             raise MigrationConfigurationError("signature_version 仅支持 s3/s3v4")
-        if target and parsed.hostname.endswith(".myqcloud.com"):
+        if target:
             expected = f"cos.{self.region}.myqcloud.com"
             if parsed.hostname != expected:
-                raise MigrationConfigurationError("目标 COS Endpoint 与 Region 不一致")
+                raise MigrationConfigurationError("目标必须使用与 Region 一致的腾讯云 COS Endpoint")
+            if self.addressing_style != "virtual":
+                raise MigrationConfigurationError("目标腾讯云 COS 必须使用 virtual 寻址")
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,49}-\d{5,}", self.bucket):
+                raise MigrationConfigurationError("目标 COS Bucket 必须使用 BucketName-APPID 完整名称")
 
     def safe_identity(self) -> dict[str, str]:
         return {
@@ -200,7 +205,7 @@ class Manifest:
         return completed
 
     def append(self, record: dict[str, object]) -> None:
-        safe = dict(record)
+        safe = {"schemaVersion": 1, **record}
         for forbidden in ("accessKey", "secretKey", "access_key", "secret_key"):
             safe.pop(forbidden, None)
         with self.path.open("a", encoding="utf-8") as stream:
@@ -304,9 +309,7 @@ class S3Migration:
 
     def _verify_metadata(self, source: ObjectMeta, target: ObjectMeta) -> None:
         if source.size != target.size:
-            raise MigrationVerificationError(
-                f"size mismatch for {source.key}: {source.size} != {target.size}"
-            )
+            raise MigrationVerificationError(f"size mismatch for {source.key}: {source.size} != {target.size}")
         if etags_are_comparable(source.etag, target.etag) and source.etag != target.etag:
             raise MigrationVerificationError(f"etag mismatch for {source.key}")
 
@@ -398,9 +401,7 @@ class S3Migration:
                                 source_path,
                             )
                             if source_path.stat().st_size != source_meta.size:
-                                raise MigrationVerificationError(
-                                    f"source download size mismatch for {source_meta.key}"
-                                )
+                                raise MigrationVerificationError(f"source download size mismatch for {source_meta.key}")
                             source_sha = sha256_file(source_path) if sampled else ""
                             self._upload(source_path, source_meta.key)
                             target_meta = self._head_target(source_meta.key)
@@ -409,15 +410,9 @@ class S3Migration:
                                     f"target object missing after upload: {source_meta.key}"
                                 )
                             self._verify_metadata(source_meta, target_meta)
-                            target_sha = (
-                                self._target_sha256(source_meta.key, temp_dir)
-                                if sampled
-                                else ""
-                            )
+                            target_sha = self._target_sha256(source_meta.key, temp_dir) if sampled else ""
                             if sampled and source_sha != target_sha:
-                                raise MigrationVerificationError(
-                                    f"sha256 mismatch for {source_meta.key}"
-                                )
+                                raise MigrationVerificationError(f"sha256 mismatch for {source_meta.key}")
                         self.stats.copied += 1
                         self.stats.bytes_copied += source_meta.size
                         self.manifest.append(

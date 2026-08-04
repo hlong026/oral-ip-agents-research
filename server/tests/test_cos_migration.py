@@ -84,11 +84,7 @@ class _FakeS3:
 
 def _location(name: str) -> S3Location:
     return S3Location(
-        endpoint_url=(
-            "http://minio.internal:9000"
-            if name == "source"
-            else "https://cos.ap-guangzhou.myqcloud.com"
-        ),
+        endpoint_url=("http://minio.internal:9000" if name == "source" else "https://cos.ap-guangzhou.myqcloud.com"),
         region="us-east-1" if name == "source" else "ap-guangzhou",
         bucket="oral-media" if name == "source" else "oral-media-1250000000",
         access_key=f"{name}-access-secret-value",
@@ -149,9 +145,7 @@ def test_copy_preserves_key_and_writes_secret_free_manifest(tmp_path: Path) -> N
     assert stats.copied == 1
     assert target.uploaded_keys == ["nested/path/video.mp4"]
     assert target.objects["nested/path/video.mp4"] == b"video-bytes"
-    combined = (tmp_path / "manifest.jsonl").read_text() + (
-        tmp_path / "checkpoint.json"
-    ).read_text()
+    combined = (tmp_path / "manifest.jsonl").read_text() + (tmp_path / "checkpoint.json").read_text()
     assert "source-access-secret-value" not in combined
     assert "target-secret-key-value-that-must-not-leak" not in combined
     assert json.loads((tmp_path / "manifest.jsonl").read_text())["sourceSha256"]
@@ -204,6 +198,25 @@ def test_sha256_sampling_is_deterministic() -> None:
     assert not all(first)
 
 
+def test_target_requires_official_cos_endpoint_virtual_addressing_and_full_bucket() -> None:
+    base = _location("target")
+
+    with pytest.raises(Exception, match="腾讯云 COS Endpoint"):
+        S3Location(**{**base.__dict__, "endpoint_url": "https://s3.example.com"}).validate(target=True)
+    with pytest.raises(Exception, match="virtual"):
+        S3Location(**{**base.__dict__, "addressing_style": "path"}).validate(target=True)
+    with pytest.raises(Exception, match="BucketName-APPID"):
+        S3Location(**{**base.__dict__, "bucket": "oral-media"}).validate(target=True)
+
+
+def test_manifest_records_include_schema_version(tmp_path: Path) -> None:
+    manifest = Manifest(tmp_path / "manifest.jsonl")
+    manifest.append({"key": "a.mp4", "status": "copied"})
+
+    record = json.loads((tmp_path / "manifest.jsonl").read_text())
+    assert record["schemaVersion"] == 1
+
+
 def test_cli_does_not_accept_secret_command_line_arguments() -> None:
     parser = build_parser()
 
@@ -213,12 +226,8 @@ def test_cli_does_not_accept_secret_command_line_arguments() -> None:
 
 def test_cam_templates_are_scoped_and_have_required_actions() -> None:
     root = Path(__file__).resolve().parents[2]
-    runtime = json.loads(
-        (root / "deploy/tencent-cos/cam-runtime-policy.template.json").read_text()
-    )
-    source = json.loads(
-        (root / "deploy/tencent-cos/cam-migration-source-policy.template.json").read_text()
-    )
+    runtime = json.loads((root / "deploy/tencent-cos/cam-runtime-policy.template.json").read_text())
+    source = json.loads((root / "deploy/tencent-cos/cam-migration-source-policy.template.json").read_text())
 
     for policy in (runtime, source):
         for statement in policy["statement"]:
@@ -227,11 +236,7 @@ def test_cam_templates_are_scoped_and_have_required_actions() -> None:
             assert all(resource != "*" for resource in statement["resource"])
             assert all("${BUCKET}-${APPID}" in resource for resource in statement["resource"])
 
-    runtime_actions = {
-        action
-        for statement in runtime["statement"]
-        for action in statement["action"]
-    }
+    runtime_actions = {action for statement in runtime["statement"] for action in statement["action"]}
     assert {
         "name/cos:HeadBucket",
         "name/cos:GetObject",
