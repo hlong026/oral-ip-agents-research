@@ -1,0 +1,154 @@
+# Production application orchestration.
+# PostgreSQL, Redis and Tencent COS are external managed dependencies and are not
+# created by this file. TLS terminates at Tencent Cloud CLB or another trusted
+# HTTPS load balancer before traffic reaches gateway:8080.
+name: oral-ip-production
+
+x-server-common: &server-common
+  image: ${ORAL_SERVER_IMAGE:?ORAL_SERVER_IMAGE is required}
+  env_file:
+    - ${ORAL_ENV_FILE:?ORAL_ENV_FILE is required}
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 60s
+  tmpfs:
+    - /tmp:size=1g,mode=1777
+  volumes:
+    - runtime-storage:/app/storage
+    - publish-runtime:/vendor/social-auto-upload/cookies
+  shm_size: 1gb
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "5"
+
+services:
+  gateway:
+    image: ${ORAL_GATEWAY_IMAGE:-nginx:1.27-alpine}
+    restart: unless-stopped
+    init: true
+    environment:
+      WEB_HOST: ${WEB_HOST:?WEB_HOST is required}
+      ADMIN_HOST: ${ADMIN_HOST:?ADMIN_HOST is required}
+    ports:
+      - ${GATEWAY_BIND:-127.0.0.1:8080}:8080
+    volumes:
+      - ./deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=64m,mode=0755
+      - /var/run:size=16m,mode=0755
+      - /tmp:size=16m,mode=1777
+    depends_on:
+      server:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway-healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 20m
+        max-file: "5"
+
+  web:
+    image: ${ORAL_WEB_IMAGE:?ORAL_WEB_IMAGE is required}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,mode=0755
+      - /var/run:size=8m,mode=0755
+      - /tmp:size=8m,mode=1777
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  admin:
+    image: ${ORAL_ADMIN_IMAGE:?ORAL_ADMIN_IMAGE is required}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m,mode=0755
+      - /var/run:size=8m,mode=0755
+      - /tmp:size=8m,mode=1777
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+  server:
+    <<: *server-common
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+    expose:
+      - "8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 6s
+      retries: 8
+      start_period: 30s
+
+  worker:
+    <<: *server-common
+    command:
+      [
+        "sh",
+        "-c",
+        "exec dramatiq app.workers.tasks --processes $${WORKER_PROCESSES:-2} --threads $${WORKER_THREADS:-1}",
+      ]
+    depends_on:
+      server:
+        condition: service_healthy
+
+  migration:
+    image: ${ORAL_SERVER_IMAGE:?ORAL_SERVER_IMAGE is required}
+    env_file:
+      - ${ORAL_ENV_FILE:?ORAL_ENV_FILE is required}
+    command: ["alembic", "upgrade", "head"]
+    profiles: ["migration"]
+    restart: "no"
+
+  cos-migration:
+    image: ${ORAL_SERVER_IMAGE:?ORAL_SERVER_IMAGE is required}
+    env_file:
+      - ${ORAL_ENV_FILE:?ORAL_ENV_FILE is required}
+      - ${COS_MIGRATION_ENV_FILE:?COS_MIGRATION_ENV_FILE is required}
+    command:
+      [
+        "python",
+        "-m",
+        "scripts.migrate_storage_to_cos",
+        "--resume",
+        "--manifest",
+        "/migration-state/manifest.jsonl",
+        "--checkpoint",
+        "/migration-state/checkpoint.json",
+      ]
+    profiles: ["cos-migration"]
+    restart: "no"
+    volumes:
+      - ${COS_MIGRATION_STATE_DIR:?COS_MIGRATION_STATE_DIR is required}:/migration-state
+
+volumes:
+  runtime-storage:
+  publish-runtime:
