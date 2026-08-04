@@ -139,7 +139,6 @@ async def list_publication_revisions(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[PublicationRevisionOut]:
-    await _ = user_id
     return await service.list_publication_revisions(db, task_id, user_id)
 
 
