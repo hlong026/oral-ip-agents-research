@@ -1,0 +1,42 @@
+name: Tencent COS test double fix
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'feat/tencent-cos-adapter-p0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: astral-sh/setup-uv@v5
+      - name: Align S3 test doubles with boto3 transfer API
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          targets = [
+              Path('server/tests/test_publish_security.py'),
+              Path('server/tests/test_storage_materialized_permissions.py'),
+          ]
+          for path in targets:
+              text = path.read_text(encoding='utf-8')
+              text = text.replace(
+                  'def download_file(self, bucket: str, key: str, filename: str) -> None:',
+                  'def download_file(self, bucket: str, key: str, filename: str, **_kwargs: object) -> None:',
+              )
+              path.write_text(text, encoding='utf-8')
+          PY
+          uv sync --directory server --extra dev --frozen
+          uv run --directory server ruff format tests/test_publish_security.py tests/test_storage_materialized_permissions.py
+          rm .github/workflows/cos-test-double-fix.yml
+          git config user.name 'chatgpt-development'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'test(storage): align COS transfer test doubles'
+          git push origin HEAD:${{ github.head_ref }}
