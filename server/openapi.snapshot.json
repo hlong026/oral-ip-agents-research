@@ -7482,7 +7482,6 @@
         "properties": {
           "selectedFrameMs": {
             "type": "integer",
-            "maximum": 3000,
             "minimum": 0,
             "title": "Selectedframems",
             "default": 1500
@@ -9678,7 +9677,6 @@
         "properties": {
           "selectedFrameMs": {
             "type": "integer",
-            "maximum": 3000,
             "minimum": 0,
             "title": "Selectedframems",
             "default": 1500

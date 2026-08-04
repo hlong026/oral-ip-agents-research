@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_db
 from app.core.deps import get_current_user_id
 
-from . import service
+from . import cover_timeline, service
 from .schemas import (
     CoverCandidateOut,
     CoverPreviewIn,
@@ -90,6 +90,7 @@ async def put_publication_draft(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> PublicationRevisionOut:
+    await cover_timeline.validate_selected_frame(db, task_id, user_id, inp.content.cover.selectedFrameMs)
     return await service.put_publication_draft(db, task_id, user_id, inp)
 
 
@@ -108,7 +109,7 @@ async def cover_candidates(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[CoverCandidateOut]:
-    return await service.cover_candidates(db, task_id, user_id)
+    return await cover_timeline.cover_candidates(db, task_id, user_id)
 
 
 @router.post("/{task_id}/cover-preview", response_model=CoverPreviewOut)
@@ -118,7 +119,7 @@ async def cover_preview(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> CoverPreviewOut:
-    return await service.cover_preview(db, task_id, user_id, inp)
+    return await cover_timeline.cover_preview(db, task_id, user_id, inp)
 
 
 @router.post("/{task_id}/finalize", response_model=PublicationRevisionOut)
@@ -128,6 +129,7 @@ async def finalize_publication(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ) -> PublicationRevisionOut:
+    await cover_timeline.validate_latest_draft(db, task_id, user_id)
     return await service.finalize_publication(db, task_id, user_id, inp)
 
 

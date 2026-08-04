@@ -59,6 +59,7 @@ const task: PipelineTask = {
   artifacts: {
     final_video_url: "/media/compose/v1.mp4?exp=1&sig=test",
     script: "第一句。第二句。",
+    duration: 30,
   },
   activeRenderVersion: 1,
   createdAt: "2026-07-27T00:00:00Z",
@@ -153,10 +154,12 @@ describe("EditorPage publication draft", () => {
       ],
     });
     vi.mocked(pipelineApi.coverCandidates).mockResolvedValue([
-      { timestampMs: 0, imageUrl: "/covers/0.jpg" },
-      { timestampMs: 1000, imageUrl: "/covers/1.jpg" },
-      { timestampMs: 2000, imageUrl: "/covers/2.jpg" },
-      { timestampMs: 3000, imageUrl: "/covers/3.jpg" },
+      { timestampMs: 1500, imageUrl: "/covers/1.jpg" },
+      { timestampMs: 6900, imageUrl: "/covers/2.jpg" },
+      { timestampMs: 12300, imageUrl: "/covers/3.jpg" },
+      { timestampMs: 17700, imageUrl: "/covers/4.jpg" },
+      { timestampMs: 23100, imageUrl: "/covers/5.jpg" },
+      { timestampMs: 28500, imageUrl: "/covers/6.jpg" },
     ]);
     vi.mocked(pipelineApi.coverPreview).mockResolvedValue({
       imageUrl: "/covers/preview.jpg",
@@ -240,7 +243,7 @@ describe("EditorPage publication draft", () => {
     await user.click(
       await screen.findByRole("button", { name: "采用第 2 组" }),
     );
-    await user.click(screen.getByRole("button", { name: /选择 2\.0s 封面/ }));
+    await user.click(screen.getByRole("button", { name: /选择 17\.7s 封面/ }));
 
     await vi.advanceTimersByTimeAsync(750);
 
@@ -252,9 +255,28 @@ describe("EditorPage publication draft", () => {
             title: "爆款标题 B",
             topics: ["成交", "增长"],
             cover: expect.objectContaining({
-              selectedFrameMs: 2000,
+              selectedFrameMs: 17700,
               text: "【爆点】B",
             }),
+          }),
+        }),
+      );
+    });
+  });
+
+  it("全视频时间轴可直接选择三秒后的任意位置", async () => {
+    renderEditor();
+
+    const timeline = await screen.findByLabelText("封面时间轴");
+    fireEvent.change(timeline, { target: { value: "20000" } });
+    await vi.advanceTimersByTimeAsync(750);
+
+    await waitFor(() => {
+      expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
+        task.id,
+        expect.objectContaining({
+          content: expect.objectContaining({
+            cover: expect.objectContaining({ selectedFrameMs: 20000 }),
           }),
         }),
       );
