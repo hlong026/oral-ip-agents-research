@@ -1,7 +1,7 @@
 """全局配置（pydantic-settings，.env 驱动）"""
 
-from functools import lru_cache
 import re
+from functools import lru_cache
 from ipaddress import ip_address
 from urllib.parse import urlparse
 
