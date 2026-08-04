@@ -572,10 +572,14 @@ export default function EditorPage() {
     (latest, candidate) => Math.max(latest, candidate.timestampMs),
     0,
   );
-  const coverTimelineMaxMs = Math.max(
-    0,
-    artifactDurationMs > 0 ? artifactDurationMs - 1 : latestCandidateMs,
-  );
+  const coverTimelineReady =
+    artifactDurationMs > 0 || allCoverCandidates.length > 0;
+  const coverTimelineMaxMs = coverTimelineReady
+    ? Math.max(
+        0,
+        artifactDurationMs > 0 ? artifactDurationMs - 1 : latestCandidateMs,
+      )
+    : 0;
   const selectCoverFrame = (timestampMs: number) => {
     const selectedFrameMs = Math.min(
       coverTimelineMaxMs,
@@ -1114,6 +1118,7 @@ export default function EditorPage() {
                         min={0}
                         max={coverTimelineMaxMs}
                         step={100}
+                        disabled={!coverTimelineReady}
                         value={Math.min(
                           coverTimelineMaxMs,
                           content.cover.selectedFrameMs,
@@ -1130,6 +1135,7 @@ export default function EditorPage() {
                         <button
                           type="button"
                           className="btn-ghost px-3 py-1 text-xs"
+                          disabled={!coverTimelineReady}
                           onClick={() => selectCoverFrame(currentTimeMs)}
                         >
                           使用当前播放位置
