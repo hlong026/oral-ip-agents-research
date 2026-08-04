@@ -1,0 +1,30 @@
+name: Release manifest test fix
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'feat/tencent-production-deployment-p0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: astral-sh/setup-uv@v5
+      - name: Normalize release manifest contract test
+        run: |
+          uv sync --directory server --extra dev --frozen
+          uv run --directory server ruff check tests/test_release_manifest_contract.py --fix
+          uv run --directory server ruff format tests/test_release_manifest_contract.py
+          uv run --directory server ruff check tests/test_release_manifest_contract.py
+          rm .github/workflows/release-manifest-test-fix.yml
+          git config user.name 'chatgpt-development'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'style(deploy): normalize release manifest test'
+          git push origin HEAD:${{ github.head_ref }}
