@@ -36,6 +36,8 @@ def test_invalid_or_missing_duration_uses_legacy_three_second_fallback():
     assert cover_timeline.duration_ms_from_artifacts({}) == 3_000
     assert cover_timeline.duration_ms_from_artifacts({"duration": "bad"}) == 3_000
     assert cover_timeline.duration_ms_from_artifacts({"duration": 0}) == 3_000
+    assert cover_timeline.duration_ms_from_artifacts({"duration": "nan"}) == 3_000
+    assert cover_timeline.duration_ms_from_artifacts({"duration": "inf"}) == 3_000
 
 
 def test_cover_schemas_accept_positions_after_three_seconds():
