@@ -4,8 +4,19 @@ root = Path(__file__).resolve().parents[1]
 test_path = root / "apps/web/src/__tests__/EditorPage.test.tsx"
 content = test_path.read_text(encoding="utf-8")
 
-old_import = 'import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";'
-new_import = 'import { fireEvent, render, screen, waitFor } from "@testing-library/react";'
+old_import = '''import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";'''
+new_import = '''import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";'''
 if content.count(old_import) != 1:
     raise RuntimeError("testing-library import did not match exactly once")
 content = content.replace(old_import, new_import, 1)
