@@ -33,8 +33,6 @@ services:
       ADMIN_HOST: ${ADMIN_HOST:?ADMIN_HOST is required}
     ports:
       - "${GATEWAY_BIND:-127.0.0.1:8080}:8080"
-    volumes:
-      - ./deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro
     read_only: true
     tmpfs:
       - /etc/nginx/conf.d:size=1m,mode=0777
