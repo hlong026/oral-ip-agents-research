@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "applyAutomatically": false,
+  "notes": "Review retention obligations and apply equivalent rules in the Tencent COS console. This file is an operational plan, not an API request payload.",
+  "rules": [
+    {
+      "id": "abort-incomplete-multipart",
+      "prefix": "",
+      "action": "abortIncompleteMultipartUpload",
+      "daysAfterInitiation": 7
+    },
+    {
+      "id": "expire-publish-packages",
+      "prefix": "publish-packages/",
+      "action": "expireCurrentVersion",
+      "days": 30
+    },
+    {
+      "id": "transition-intermediate-assets",
+      "prefixes": [
+        "asr/",
+        "voice/",
+        "avatar/"
+      ],
+      "action": "transitionStorageClass",
+      "storageClass": "STANDARD_IA",
+      "days": 30
+    },
+    {
+      "id": "retain-final-assets",
+      "prefixes": [
+        "compose/",
+        "covers/"
+      ],
+      "action": "manualRetentionReview",
+      "minimumDays": 180
+    }
+  ]
+}

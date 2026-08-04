@@ -1,0 +1,91 @@
+name: Production deployment gate
+
+on:
+  pull_request:
+    paths:
+      - docker-compose.prod.yml
+      - deploy/**
+      - server/Dockerfile
+      - server/scripts/**
+      - .github/workflows/production-deployment.yml
+  push:
+    branches: [master]
+    paths:
+      - docker-compose.prod.yml
+      - deploy/**
+      - server/Dockerfile
+      - server/scripts/**
+      - .github/workflows/production-deployment.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: pnpm
+      - name: Validate production compose
+        run: |
+          mkdir -p .runtime/cos-migration
+          docker compose \
+            --env-file deploy/.env.prod.example \
+            -f docker-compose.prod.yml \
+            config --quiet
+      - name: Validate deployment scripts
+        run: |
+          sh -n deploy/scripts/deploy.sh
+          sh -n deploy/scripts/rollback.sh
+      - name: Build gateway image
+        run: docker build -f deploy/Dockerfile.gateway -t oral-gateway:ci .
+      - name: Validate gateway configuration
+        run: |
+          docker run --rm \
+            --add-host server:127.0.0.1 \
+            --add-host web:127.0.0.1 \
+            --add-host admin:127.0.0.1 \
+            -e WEB_HOST=app.example.com \
+            -e ADMIN_HOST=admin.example.com \
+            oral-gateway:ci nginx -t
+      - name: Build web image
+        run: docker build -f deploy/Dockerfile.frontend --target web -t oral-web:ci .
+      - name: Build admin image
+        run: docker build -f deploy/Dockerfile.frontend --target admin -t oral-admin:ci .
+      - name: Smoke test read-only frontend containers
+        run: |
+          set -eu
+          cleanup() {
+            docker rm -f oral-web-smoke oral-admin-smoke >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --name oral-web-smoke \
+            --read-only \
+            --tmpfs /var/cache/nginx:size=32m,mode=0755 \
+            --tmpfs /var/run:size=8m,mode=0755 \
+            --tmpfs /tmp:size=8m,mode=1777 \
+            -p 127.0.0.1:18081:8080 \
+            oral-web:ci
+          docker run -d --name oral-admin-smoke \
+            --read-only \
+            --tmpfs /var/cache/nginx:size=32m,mode=0755 \
+            --tmpfs /var/run:size=8m,mode=0755 \
+            --tmpfs /tmp:size=8m,mode=1777 \
+            -p 127.0.0.1:18082:8080 \
+            oral-admin:ci
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:18081/healthz >/dev/null \
+              && curl -fsS http://127.0.0.1:18082/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs oral-web-smoke
+          docker logs oral-admin-smoke
+          exit 1

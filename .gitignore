@@ -29,6 +29,9 @@ storage/
 !server/storage/seed/
 !server/storage/seed/**
 minio-data/
+.runtime/
+cos-migration-manifest*.jsonl
+cos-migration-checkpoint*.json
 
 # tauri
 apps/desktop/src-tauri/target/

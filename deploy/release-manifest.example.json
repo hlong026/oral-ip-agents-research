@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "releaseId": "2026-08-04T12:00:00Z-abcdef123456",
+  "gitCommit": "abcdef1234567890abcdef1234567890abcdef12",
+  "images": {
+    "server": "registry.example.com/oral/server@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "gateway": "registry.example.com/oral/gateway@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "web": "registry.example.com/oral/web@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "admin": "registry.example.com/oral/admin@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "database": {
+    "alembicRevision": "REPLACE_ALEMBIC_REVISION",
+    "backupId": "REPLACE_DATABASE_BACKUP_ID"
+  },
+  "storage": {
+    "driver": "s3",
+    "endpointHost": "cos.ap-guangzhou.myqcloud.com",
+    "region": "ap-guangzhou",
+    "bucket": "oral-media-1250000000",
+    "migrationManifestSha256": "REPLACE_MIGRATION_MANIFEST_SHA256"
+  },
+  "domains": {
+    "web": "app.example.com",
+    "admin": "admin.example.com",
+    "api": "app.example.com"
+  },
+  "approvedBy": "REPLACE_RELEASE_APPROVER",
+  "createdAt": "2026-08-04T12:00:00Z"
+}
