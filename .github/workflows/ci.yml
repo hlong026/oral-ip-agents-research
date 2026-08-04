@@ -38,6 +38,8 @@ jobs:
           cache: pnpm
       - name: 1. 依赖锁与安装
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
           uv lock --check --directory server
           uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
@@ -66,7 +68,20 @@ jobs:
         working-directory: server
         env:
           APP_ENV: test
-        run: uv run pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run pytest -q --junitxml=pytest-results.xml 2>&1 | tee pytest.log
+      - name: 上传后端测试诊断
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-diagnostics
+          path: |
+            server/pytest.log
+            server/pytest-results.xml
+          if-no-files-found: ignore
+          retention-days: 7
       - name: 7. OpenAPI 契约零漂移
         env:
           APP_ENV: test
@@ -81,7 +96,20 @@ jobs:
             curl -sf http://127.0.0.1:8000/healthz && break || sleep 1
           done
           curl -sf http://127.0.0.1:8000/healthz
-          node scripts/gen-api-types.mjs --check
+          if ! node scripts/gen-api-types.mjs --check; then
+            node scripts/gen-api-types.mjs
+            exit 1
+          fi
+      - name: 上传 OpenAPI 漂移诊断
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-diagnostics
+          path: |
+            server/openapi.snapshot.json
+            packages/types/src/generated.ts
+          if-no-files-found: error
+          retention-days: 7
       - name: 8. 前端格式
         run: pnpm lint
       - name: 9. 前端类型检查

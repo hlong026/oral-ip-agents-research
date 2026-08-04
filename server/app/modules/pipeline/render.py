@@ -8,12 +8,12 @@ from app.core.db import SessionLocal
 from app.core.logging import get_logger
 from app.core.white_label import public_error_message
 from app.modules.billing.models import CreditReservation
+from app.providers.base import is_mock_provider
 
 from . import repository as repo
 from .engine import _compose_with_ctx
 from .models import PipelineRenderVersion, PublicationRevision
 from .schemas import EditConfigIn
-from app.providers.base import is_mock_provider
 
 logger = get_logger("oral.pipeline.render")
 

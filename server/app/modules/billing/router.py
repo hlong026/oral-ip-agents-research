@@ -133,44 +133,42 @@ async def admin_get_user_usage(
     target_user = await db.get(UserModel, user_id)
     if target_user is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "USER_NOT_FOUND", "message": "用户不存在"}
+            status_code=status.HTTP_404_NOT_FOUND, detail={"code": "USER_NOT_FOUND", "message": "用户不存在"}
         )
-    
+
     # 构建查询
     query = select(QuotaUsage).where(QuotaUsage.user_id == user_id)
-    
+
     # 可选过滤
     if step:
         query = query.where(QuotaUsage.step == step)
-    
+
     # 总数
     total_result = await db.execute(select(func.count()).select_from(query.subquery()))
     total = total_result.scalar() or 0
-    
+
     # 分页
     offset = (page - 1) * pageSize
-    res = await db.execute(
-        query.order_by(QuotaUsage.created_at.desc())
-             .offset(offset)
-             .limit(pageSize)
-    )
+    res = await db.execute(query.order_by(QuotaUsage.created_at.desc()).offset(offset).limit(pageSize))
     items = list(res.scalars().all())
-    
+
     # 序列化
     return {
-        "items": [AdminUsageItemOut(
-            id=u.id,
-            step=u.step,
-            resolution=u.resolution,
-            points=u.points,
-            compute=u.compute,
-            createdAt=u.created_at.astimezone(UTC).isoformat()
-        ).model_dump() for u in items],
+        "items": [
+            AdminUsageItemOut(
+                id=u.id,
+                step=u.step,
+                resolution=u.resolution,
+                points=u.points,
+                compute=u.compute,
+                createdAt=u.created_at.astimezone(UTC).isoformat(),
+            ).model_dump()
+            for u in items
+        ],
         "total": total,
         "page": page,
         "pageSize": pageSize,
-        "hasMore": (page * pageSize) < total
+        "hasMore": (page * pageSize) < total,
     }
 
 
@@ -186,34 +184,28 @@ async def admin_export_user_usage_csv(
     target_user = await db.get(UserModel, user_id)
     if target_user is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "USER_NOT_FOUND", "message": "用户不存在"}
+            status_code=status.HTTP_404_NOT_FOUND, detail={"code": "USER_NOT_FOUND", "message": "用户不存在"}
         )
-    
+
     # 基础查询
     query = select(QuotaUsage).where(QuotaUsage.user_id == user_id)
     if step:
         query = query.where(QuotaUsage.step == step)
-    
+
     rows = (await db.execute(query.order_by(QuotaUsage.created_at.desc()))).scalars().all()
-    
+
     # 生成 CSV
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["时间", "步骤", "分辨率", "点数", "通道", "trace_id"])
     for u in rows:
-        writer.writerow([
-            u.created_at.astimezone(UTC).isoformat(),
-            u.step,
-            u.resolution,
-            u.points,
-            u.compute,
-            u.trace_id
-        ])
+        writer.writerow(
+            [u.created_at.astimezone(UTC).isoformat(), u.step, u.resolution, u.points, u.compute, u.trace_id]
+        )
     buf.seek(0)
-    
+
     return StreamingResponse(
         iter([buf.getvalue().encode("utf-8-sig")]),
         media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=usage_{user_id}.csv"}
+        headers={"Content-Disposition": f"attachment; filename=usage_{user_id}.csv"},
     )

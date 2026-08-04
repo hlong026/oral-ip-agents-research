@@ -121,7 +121,9 @@ async def api_clone_video(
         )
         if video_stream is None or video_stream.get("codec_name") not in AVATAR_VIDEO_CODECS:
             detected = (video_stream or {}).get("codec_name") if video_stream else None
-            logger.warning("avatar_clone_rejected", user_id=user_id, reason="UNSUPPORTED_CODEC", codec=detected or "missing")
+            logger.warning(
+                "avatar_clone_rejected", user_id=user_id, reason="UNSUPPORTED_CODEC", codec=detected or "missing"
+            )
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "INVALID_VIDEO", "message": "训练视频必须是可识别的 H264 / HEVC 视频"},

@@ -573,7 +573,7 @@ async def put_publication_draft(
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={"code": "PUBLICATION_DRAFT_CONFLICT", "message": "草稿已被更新，请刷新后再保存"},
-    )
+        )
     await db.commit()
     await db.refresh(draft)
     return publication_revision_to_out(draft)
@@ -601,8 +601,7 @@ def _normalize_suggestion_groups(raw_groups: list) -> list[MetadataSuggestionGro
             continue
         tags_raw = raw.get("tags")
         tags = [
-            _clean_suggestion_text(item, 20).lstrip("#")
-            for item in (tags_raw if isinstance(tags_raw, list) else [])
+            _clean_suggestion_text(item, 20).lstrip("#") for item in (tags_raw if isinstance(tags_raw, list) else [])
         ]
         tags = [item for item in tags if item][:6]
         cover_text = _clean_suggestion_text(raw.get("coverText"), 20)
@@ -679,7 +678,7 @@ async def cover_candidates(
             status.HTTP_409_CONFLICT,
             detail={"code": "CLEAN_MASTER_REQUIRED", "message": "无可用于提取封面的 clean 视频源"},
         )
-    if not storage_exists(clean_key):
+    if not await storage_exists(clean_key):
         # 源文件已丢失（如本地存储被清理），明确告知而非误导“稍后重试”
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -695,7 +694,7 @@ async def cover_candidates(
     candidates: list[CoverCandidateOut] = []
     for timestamp in timestamps:
         key = str(cache.get(str(timestamp)) or "")
-        if not key or not storage_exists(key):
+        if not key or not await storage_exists(key):
             key = await _extract_cover_candidate_frame(clean_key, timestamp)
             cache[str(timestamp)] = key
             changed = True
@@ -722,7 +721,7 @@ async def cover_preview(
             status.HTTP_409_CONFLICT,
             detail={"code": "CLEAN_MASTER_REQUIRED", "message": "无可用于提取封面的 clean 视频源"},
         )
-    if not storage_exists(clean_key):
+    if not await storage_exists(clean_key):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail={

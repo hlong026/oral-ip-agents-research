@@ -112,7 +112,7 @@ async def inspect_media(
 async def _materialize(media_key: str, directory: Path) -> str:
     if media_key.startswith(("http://", "https://")):
         return media_key
-    if settings.storage_driver == "local" and exists(media_key):
+    if settings.storage_driver == "local" and await exists(media_key):
         return str(local_path(media_key))
     try:
         data = await read_bytes(media_key)

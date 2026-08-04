@@ -78,7 +78,7 @@ def _resolve_font_face() -> tuple[str, int] | None:
                 face = ImageFont.truetype(str(path), 24, index=index)
             except OSError:
                 break
-            name = " ".join(face.getname()).lower()
+            name = " ".join(part for part in face.getname() if part).lower()
             if name.startswith("."):
                 continue  # 跳过系统隐藏 Interface 字体
             for rank, hint in enumerate(_BOLD_HINTS):
@@ -92,13 +92,14 @@ def _resolve_font_face() -> tuple[str, int] | None:
 
 
 def _font_supports_cjk(font_path: str) -> bool:
-    """字形覆盖检测（借鉴 MoneyPrinterTurbo，MIT）：缺字掩码比对，避免豆腐块"""
+    """字形覆盖检测（借鉴 MoneyPrinterTurbo，MIT）：缺字掩码比对，避免豆腐块。"""
     try:
         font = ImageFont.truetype(font_path, 30)
         missing = font.getmask("\U0010ffff")
         sample = font.getmask("测")
-        return not (missing.size == sample.size and missing.tobytes() == sample.tobytes())
-    except OSError:
+        # Pillow 11+ 的 ImagingCore 不再暴露 tobytes()，但仍实现 buffer 协议。
+        return not (missing.size == sample.size and bytes(missing) == bytes(sample))
+    except (OSError, TypeError):
         return False
 
 
@@ -255,10 +256,10 @@ def render_cover(
     stroke = max(2, font_size // 16)
 
     # 真实行高：用字体度量而非字号，避免行间叠压/基线偏移
-    try:
+    if isinstance(font, ImageFont.FreeTypeFont):
         ascent, descent = font.getmetrics()
         line_height = ascent + descent
-    except AttributeError:
+    else:
         line_height = round(font_size * 1.3)
     line_gap = round(font_size * 0.14)
     total_h = len(lines) * line_height + (len(lines) - 1) * line_gap

@@ -302,9 +302,7 @@ async def approve_device_request(
     if req is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "REQUEST_NOT_FOUND", "message": "申请不存在"})
     if req.status != "pending":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"}
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"})
     if body.unbindDeviceId:
         device = await db.get(UserDevice, body.unbindDeviceId)
         if device is None or device.user_id != req.user_id:
@@ -341,9 +339,7 @@ async def reject_device_request(
     if req is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail={"code": "REQUEST_NOT_FOUND", "message": "申请不存在"})
     if req.status != "pending":
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"}
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "REQUEST_RESOLVED", "message": "该申请已处理"})
     req.status = "rejected"
     req.resolved_at = datetime.now(UTC)
     req.resolved_by = admin_id

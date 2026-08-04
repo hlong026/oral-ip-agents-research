@@ -83,6 +83,11 @@ extend-immutable-calls = [
 python_version = "3.11"
 strict = false
 ignore_missing_imports = true
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

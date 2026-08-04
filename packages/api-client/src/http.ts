@@ -6,7 +6,10 @@
  */
 import type { ApiError, AuthTokens } from "@oral/types";
 import { deviceFingerprint } from "./fingerprint";
-import { loadPersistedRefreshToken, persistRefreshToken } from "./session-store";
+import {
+  loadPersistedRefreshToken,
+  persistRefreshToken,
+} from "./session-store";
 
 type ImportMetaWithEnv = ImportMeta & { env?: { VITE_API_BASE?: string } };
 
@@ -20,7 +23,9 @@ export function buildApiUrl(path: string, base = API_BASE): string {
 
 // API_BASE 为绝对地址（桌面壳等跨源部署）时，后端返回的 /media/ 相对路径
 // 会被错误解析到页面 origin（如 tauri.localhost），需统一换算到 API 同源
-const API_ORIGIN = /^https?:\/\//.test(API_BASE) ? new URL(API_BASE).origin : "";
+const API_ORIGIN = /^https?:\/\//.test(API_BASE)
+  ? new URL(API_BASE).origin
+  : "";
 
 /** 将后端下发的 /media/ 相对路径换算为 API 同源绝对地址（同源部署时原样返回） */
 export function absolutizeMediaUrl(value: string): string {

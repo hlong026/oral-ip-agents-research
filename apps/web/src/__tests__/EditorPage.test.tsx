@@ -22,6 +22,7 @@ vi.mock("@oral/api-client", async (importOriginal) => {
       savePublicationDraft: vi.fn(),
       metadataSuggestions: vi.fn(),
       coverCandidates: vi.fn(),
+      coverPreview: vi.fn(),
       finalizePublication: vi.fn(),
       publicationRevisions: vi.fn(),
     },
@@ -99,6 +100,16 @@ const draft: PublicationRevision = {
   updatedAt: "2026-07-27T00:00:00Z",
 };
 
+/** jsdom 不会真的播放，直接改 currentTime 再派发 timeupdate 模拟播放进度 */
+function seekTo(video: HTMLElement, seconds: number) {
+  Object.defineProperty(video, "currentTime", {
+    value: seconds,
+    writable: true,
+    configurable: true,
+  });
+  fireEvent.timeUpdate(video);
+}
+
 function renderEditor() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -147,6 +158,9 @@ describe("EditorPage publication draft", () => {
       { timestampMs: 2000, imageUrl: "/covers/2.jpg" },
       { timestampMs: 3000, imageUrl: "/covers/3.jpg" },
     ]);
+    vi.mocked(pipelineApi.coverPreview).mockResolvedValue({
+      imageUrl: "/covers/preview.jpg",
+    });
     vi.mocked(pipelineApi.finalizePublication).mockResolvedValue({
       ...draft,
       status: "finalized",
@@ -329,5 +343,54 @@ describe("EditorPage publication draft", () => {
       );
     });
     expect(screen.getByLabelText("标题")).toHaveValue("第二次编辑");
+  });
+
+  it("overlay 字幕严格跟随 [startMs, endMs)，句间停顿留空", async () => {
+    vi.mocked(pipelineApi.publicationDraft).mockResolvedValue({
+      ...draft,
+      content: {
+        ...draft.content,
+        subtitles: {
+          ...draft.content.subtitles,
+          // 两段之间留 500ms 真实停顿：成片在停顿处不显示字幕，预览必须一致
+          segments: [
+            { id: "s1", startMs: 0, endMs: 1000, text: "第一句" },
+            { id: "s2", startMs: 1500, endMs: 2500, text: "第二句" },
+          ],
+        },
+      },
+    });
+    renderEditor();
+
+    const overlay = await screen.findByTestId("subtitle-overlay");
+    const video = screen.getByLabelText("剪辑成片预览");
+
+    expect(overlay).toHaveTextContent("第一句");
+
+    seekTo(video, 1.2);
+    await waitFor(() => expect(overlay.textContent).toBe(""));
+
+    seekTo(video, 1.6);
+    await waitFor(() => expect(overlay).toHaveTextContent("第二句"));
+
+    seekTo(video, 3);
+    await waitFor(() => expect(overlay.textContent).toBe(""));
+  });
+
+  it("成片已烧录字幕时 overlay 只标位置，不再叠第二层文字", async () => {
+    vi.mocked(pipelineApi.publicationRevisions).mockResolvedValue([
+      {
+        ...draft,
+        id: "pub-final-9",
+        status: "finalized",
+        renderVersionId: "render-v2",
+      },
+    ]);
+    renderEditor();
+
+    const overlay = await screen.findByTestId("subtitle-overlay");
+    await waitFor(() => expect(overlay).toHaveAttribute("data-burned", "true"));
+    expect(overlay).toHaveTextContent("字幕位置");
+    expect(overlay).not.toHaveTextContent("第一句");
   });
 });
