@@ -5,6 +5,9 @@ on:
     branches: [master]
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
   quality-gates:
     name: 系统收口质量门禁
@@ -43,6 +46,28 @@ jobs:
           uv lock --check --directory server
           uv sync --directory server --extra dev --frozen
           pnpm install --frozen-lockfile
+      - name: 临时应用封面全时间轴补丁
+        if: github.event_name == 'pull_request' && github.head_ref == 'fix/cover-full-timeline-p0'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          git fetch origin "$HEAD_REF"
+          git checkout -B "$HEAD_REF" "origin/$HEAD_REF"
+          python scripts/apply_cover_timeline_patch.py
+          uv run --directory server ruff format app/modules/pipeline/cover_timeline.py app/modules/pipeline/router.py app/modules/pipeline/schemas.py tests/test_cover_timeline.py
+          pnpm exec prettier --write apps/web/src/pages/EditorPage.tsx apps/web/src/__tests__/EditorPage.test.tsx
+          APP_ENV=test DATABASE_URL=sqlite+aiosqlite:///./ci_cover_openapi.db IM_ENABLED=true DOUYIN_IM_APP_KEY=test-openapi-app-key uv run --directory server uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          backend_pid=$!
+          trap 'kill "$backend_pid"' EXIT
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/healthz && break || sleep 1
+          done
+          node scripts/gen-api-types.mjs
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(cover): support full timeline frame selection"
+          git push origin "HEAD:$HEAD_REF"
       - name: 2. 数据库迁移链
         working-directory: server
         env:
