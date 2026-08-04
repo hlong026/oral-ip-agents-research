@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 DIGEST_PATTERN = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 
