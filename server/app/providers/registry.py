@@ -25,6 +25,7 @@ from .base import (
     VoiceProvider,
     is_mock_provider,
 )
+from .compose_guard import FailClosedFFmpegCompose
 from .douyidou import DouyidouParser
 from .hifly import HiFlyAvatar, HiFlyVoice
 from .im.base import IMProvider
@@ -33,7 +34,7 @@ from .mock import MockASR, MockAvatar, MockCompose, MockLLM, MockParser, MockPub
 from .publish.douyin import DouyinPublishDriver
 from .publish.tencent import TencentPublishDriver
 from .publish.xiaohongshu import XiaohongshuPublishDriver
-from .real import DeepSeekLLM, FFmpegCompose, ThirdPartyParser
+from .real import DeepSeekLLM, ThirdPartyParser
 
 logger = get_logger("oral.providers.registry")
 
@@ -51,7 +52,7 @@ class ProviderRegistry:
         self.asr_chain: list[ASRProvider] = [AliyunASR()]
         self.voice_chain: list[VoiceProvider] = [HiFlyVoice()]
         self.avatar_chain: list[AvatarProvider] = [HiFlyAvatar()]
-        self.compose_chain: list[ComposeEngine] = [FFmpegCompose()]
+        self.compose_chain: list[ComposeEngine] = [FailClosedFFmpegCompose()]
         if allow_mock:
             self.llm_chain.append(MockLLM())
             self.parse_chain.append(MockParser())
