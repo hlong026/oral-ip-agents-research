@@ -2,7 +2,13 @@ import { pipelineApi } from "@oral/api-client";
 import { useTasks } from "@oral/stores";
 import type { PipelineTask, PublicationRevision } from "@oral/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -268,8 +274,12 @@ describe("EditorPage publication draft", () => {
     renderEditor();
 
     const timeline = await screen.findByLabelText("封面时间轴");
-    fireEvent.change(timeline, { target: { value: "20000" } });
-    await vi.advanceTimersByTimeAsync(750);
+    await act(async () => {
+      fireEvent.change(timeline, { target: { value: "20000" } });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
 
     await waitFor(() => {
       expect(pipelineApi.savePublicationDraft).toHaveBeenLastCalledWith(
