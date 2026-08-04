@@ -43,6 +43,8 @@ jobs:
         run: |
           sh -n deploy/scripts/deploy.sh
           sh -n deploy/scripts/rollback.sh
+      - name: Build gateway image
+        run: docker build -f deploy/Dockerfile.gateway -t oral-gateway:ci .
       - name: Validate gateway configuration
         run: |
           docker run --rm \
@@ -51,8 +53,7 @@ jobs:
             --add-host admin:127.0.0.1 \
             -e WEB_HOST=app.example.com \
             -e ADMIN_HOST=admin.example.com \
-            -v "$PWD/deploy/nginx-gateway.conf.template:/etc/nginx/templates/default.conf.template:ro" \
-            nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10 nginx -t
+            oral-gateway:ci nginx -t
       - name: Build web image
         run: docker build -f deploy/Dockerfile.frontend --target web -t oral-web:ci .
       - name: Build admin image
