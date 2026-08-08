@@ -1,0 +1,33 @@
+name: Staging preflight format fix
+
+on:
+  push:
+    branches:
+      - feat/staging-config-preflight-p0
+    paths:
+      - .github/workflows/staging-preflight-format-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/staging-config-preflight-p0
+      - uses: astral-sh/setup-uv@v5
+      - name: Format and remove temporary workflow
+        run: |
+          set -eu
+          cd server
+          uv sync --extra dev --frozen
+          uv run ruff format tests/test_staging_preflight_contract.py
+          cd ..
+          rm .github/workflows/staging-preflight-format-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add server/tests/test_staging_preflight_contract.py .github/workflows/staging-preflight-format-fix.yml
+          git commit -m "style(staging): format preflight contract test"
+          git push origin HEAD:feat/staging-config-preflight-p0
