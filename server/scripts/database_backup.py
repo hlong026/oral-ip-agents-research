@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import hashlib
 import json
 import os
 import re
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy.engine import URL, make_url
@@ -51,7 +51,13 @@ def _sha256(path: Path) -> str:
 
 def _alembic_revisions(pg_env: dict[str, str]) -> list[str]:
     result = subprocess.run(
-        ["psql", "--no-align", "--tuples-only", "--command", "SELECT version_num FROM alembic_version ORDER BY version_num"],
+        [
+            "psql",
+            "--no-align",
+            "--tuples-only",
+            "--command",
+            "SELECT version_num FROM alembic_version ORDER BY version_num",
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -83,7 +89,7 @@ def main() -> None:
     output_dir.chmod(0o700)
     os.umask(0o077)
 
-    timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     stem = f"db-{args.git_commit[:12]}-{timestamp}"
     dump_path = output_dir / f"{stem}.dump"
     metadata_path = output_dir / f"{stem}.json"
@@ -112,7 +118,7 @@ def main() -> None:
         "ok": True,
         "environment": settings.app_env,
         "gitCommit": args.git_commit,
-        "createdAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "createdAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "database": {
             "host": url.host,
             "port": url.port or 5432,
@@ -123,7 +129,10 @@ def main() -> None:
         "bytes": dump_path.stat().st_size,
         "sha256": digest,
     }
-    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     metadata_path.chmod(0o600)
 
     print(
