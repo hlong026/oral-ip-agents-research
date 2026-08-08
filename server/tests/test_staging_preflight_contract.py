@@ -28,6 +28,7 @@ def _expected(*, allow_verified_publish: bool = False) -> ExpectedIdentity:
     return ExpectedIdentity(
         bucket="oral-staging-media-1250000000",
         database_host="staging-postgres.internal.example",
+        database_name="oral_staging",
         redis_host="staging-redis.internal.example",
         media_host="staging-app.example.com",
         allow_verified_publish=allow_verified_publish,
@@ -52,10 +53,19 @@ def test_staging_identity_rejects_environment_or_resource_drift() -> None:
     assert "APP_ENV must be exactly staging" in errors
     assert "S3_BUCKET does not match the Staging allow-list" in errors
     assert "DATABASE_URL host does not match the Staging allow-list" in errors
+    assert "DATABASE_URL database does not match the Staging allow-list" in errors
     assert "REDIS_URL host does not match the Staging allow-list" in errors
     assert "MEDIA_PUBLIC_BASE_URL host does not match the Staging allow-list" in errors
     assert "IM_ENABLED must remain false during Staging infrastructure bring-up" in errors
     assert "PUBLISH_VERIFIED_PLATFORMS must stay empty unless explicitly allowed for acceptance" in errors
+
+
+def test_staging_identity_rejects_wrong_database_on_right_host() -> None:
+    settings = _settings(
+        database_url="postgresql+asyncpg://oral:secret@staging-postgres.internal.example:5432/oral_prod"
+    )
+    errors = staging_identity_errors(settings, _expected())
+    assert errors == ["DATABASE_URL database does not match the Staging allow-list"]
 
 
 def test_staging_identity_allows_verified_publish_only_with_explicit_gate() -> None:
@@ -73,6 +83,7 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
 
     assert "DEPLOY_ENVIRONMENT=staging" in deploy_env
     assert "STAGING_EXPECTED_COS_BUCKET=" in deploy_env
+    assert "STAGING_EXPECTED_DATABASE_NAME=oral_staging" in deploy_env
     assert "STAGING_MIN_FREE_DISK_MB=10240" in deploy_env
     assert "STAGING_MIN_AVAILABLE_MEMORY_MB=2048" in deploy_env
     assert "STAGING_MIN_FREE_INODES=10000" in deploy_env
@@ -83,6 +94,7 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
     assert "IM_ENABLED=false" in runtime_env
     assert "REPLACE_WITH_" in runtime_env
     assert "DEPLOY_ENVIRONMENT must be exactly staging" in preflight
+    assert "--expected-database-name" in preflight
     assert "docker compose version" in preflight
     assert "MemAvailable:" in preflight
     assert "df -Pm" in preflight
