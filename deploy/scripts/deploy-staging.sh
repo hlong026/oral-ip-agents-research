@@ -18,6 +18,7 @@ require_command() {
 require_command curl
 require_command docker
 require_command git
+require_command grep
 require_command python3
 
 set -a
@@ -114,7 +115,7 @@ payload = {
     },
     "smokeEvidence": os.path.join(
         os.environ["STAGING_EVIDENCE_DIR"],
-        f"smoke-{os.environ['RELEASE_GIT_COMMIT']}.json",
+        "smoke-{}.json".format(os.environ["RELEASE_GIT_COMMIT"]),
     ),
 }
 with open(os.environ["STAGING_DEPLOY_EVIDENCE_PATH"], "w", encoding="utf-8") as handle:
