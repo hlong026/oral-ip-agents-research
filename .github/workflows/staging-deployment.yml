@@ -1,0 +1,157 @@
+name: Staging deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_commit:
+        description: "40-character commit already merged into master"
+        required: true
+        type: string
+      run_acceptance:
+        description: "Run fail-closed Production Go/No-Go after deploy and backup"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oral-staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Deploy merged master commit to Staging
+    environment: staging
+    runs-on: [self-hosted, linux, oral-staging]
+    timeout-minutes: 180
+    env:
+      STAGING_DEPLOY_ENV: /etc/oral/staging-deploy.env
+      EVIDENCE_EXPORT_DIR: ${{ runner.temp }}/oral-staging-evidence
+    steps:
+      - name: Checkout requested release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.git_commit }}
+          fetch-depth: 0
+
+      - name: Verify requested commit is merged into master
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.git_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "git_commit must be a 40-character lowercase SHA" >&2
+            exit 2
+          }
+          actual=$(git rev-parse HEAD)
+          [[ "$actual" == "$REQUESTED_COMMIT" ]] || {
+            echo "checkout does not match requested commit" >&2
+            exit 2
+          }
+          git fetch --no-tags origin +refs/heads/master:refs/remotes/origin/master
+          git merge-base --is-ancestor "$actual" refs/remotes/origin/master || {
+            echo "requested commit is not merged into master" >&2
+            exit 2
+          }
+
+      - name: Validate private Staging control files
+        shell: bash
+        env:
+          REQUESTED_COMMIT: ${{ inputs.git_commit }}
+          RUN_ACCEPTANCE: ${{ inputs.run_acceptance }}
+        run: |
+          set -euo pipefail
+          require_private_file() {
+            local path=$1
+            [[ -f "$path" ]] || { echo "missing private file: $path" >&2; exit 2; }
+            local mode
+            mode=$(stat -c '%a' "$path")
+            [[ "$mode" == "400" || "$mode" == "600" ]] || {
+              echo "private file must be 0400/0600: $path" >&2
+              exit 2
+            }
+          }
+          require_private_file "$STAGING_DEPLOY_ENV"
+          set -a
+          # shellcheck disable=SC1090
+          source "$STAGING_DEPLOY_ENV"
+          set +a
+          [[ "${DEPLOY_ENVIRONMENT:-}" == "staging" ]] || {
+            echo "DEPLOY_ENVIRONMENT must be staging" >&2
+            exit 2
+          }
+          [[ "${RELEASE_GIT_COMMIT:-}" == "$REQUESTED_COMMIT" ]] || {
+            echo "RELEASE_GIT_COMMIT does not match requested commit" >&2
+            exit 2
+          }
+          for path in "${ORAL_ENV_FILE:-}" "${STAGING_SMOKE_ENV_FILE:-}"; do
+            [[ "$path" == /etc/oral/* ]] || {
+              echo "runtime and smoke files must live under /etc/oral" >&2
+              exit 2
+            }
+            require_private_file "$path"
+          done
+          if [[ "$RUN_ACCEPTANCE" == "true" ]]; then
+            [[ "${STAGING_MANUAL_ACCEPTANCE_RESULTS:-}" == /etc/oral/* ]] || {
+              echo "manual acceptance results must live under /etc/oral" >&2
+              exit 2
+            }
+            require_private_file "$STAGING_MANUAL_ACCEPTANCE_RESULTS"
+          fi
+
+      - name: Run Preflight, deploy and authenticated Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh deploy/scripts/deploy-staging.sh "$STAGING_DEPLOY_ENV"
+
+      - name: Create private database backup evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh deploy/scripts/backup-database.sh "$STAGING_DEPLOY_ENV"
+
+      - name: Run Production Go-No-Go acceptance
+        if: ${{ inputs.run_acceptance }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh deploy/scripts/production-acceptance.sh "$STAGING_DEPLOY_ENV"
+
+      - name: Collect non-secret JSON evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$EVIDENCE_EXPORT_DIR"
+          mkdir -p "$EVIDENCE_EXPORT_DIR/backups"
+          chmod 700 "$EVIDENCE_EXPORT_DIR" "$EVIDENCE_EXPORT_DIR/backups"
+          if [[ ! -f "$STAGING_DEPLOY_ENV" ]]; then
+            exit 0
+          fi
+          set -a
+          # shellcheck disable=SC1090
+          source "$STAGING_DEPLOY_ENV"
+          set +a
+          if [[ -d "${STAGING_EVIDENCE_DIR:-}" ]]; then
+            find "$STAGING_EVIDENCE_DIR" -maxdepth 1 -type f \
+              \( -name 'deploy-*.json' -o -name 'smoke-*.json' -o -name 'acceptance-*.json' \) \
+              -exec cp {} "$EVIDENCE_EXPORT_DIR/" \;
+          fi
+          if [[ -d "${STAGING_BACKUP_DIR:-}" ]]; then
+            find "$STAGING_BACKUP_DIR" -maxdepth 1 -type f -name 'db-*.json' \
+              -exec cp {} "$EVIDENCE_EXPORT_DIR/backups/" \;
+          fi
+          find "$EVIDENCE_EXPORT_DIR" -type f -exec chmod 600 {} \;
+
+      - name: Upload Staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-evidence-${{ inputs.git_commit }}
+          path: ${{ runner.temp }}/oral-staging-evidence
+          if-no-files-found: warn
+          retention-days: 14
