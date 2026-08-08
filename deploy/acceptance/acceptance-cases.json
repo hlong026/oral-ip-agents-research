@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {"id":"STG_DEPLOY","gate":"G0","mode":"automated","source":"deploy","required":true,"description":"Staging deployment evidence matches the release commit."},
+    {"id":"STG_SMOKE","gate":"G4","mode":"automated","source":"smoke","required":true,"description":"Staging Web/Admin/API/auth/Worker smoke passed."},
+    {"id":"DB_BACKUP","gate":"G2","mode":"automated","source":"backup","required":true,"description":"A private PostgreSQL backup exists and its SHA-256 is valid."},
+    {"id":"COS_MIGRATION_VERIFY","gate":"G3","mode":"manual","required":true,"description":"COS dry-run, migration/resume and verify-only evidence has no unresolved critical error."},
+    {"id":"REAL_MEDIA_INPUT_A_X3","gate":"G4","mode":"manual","required":true,"description":"First real input type completed end-to-end three consecutive times."},
+    {"id":"REAL_MEDIA_INPUT_B_X3","gate":"G4","mode":"manual","required":true,"description":"Second real input type completed end-to-end three consecutive times."},
+    {"id":"BILLING_CONSISTENCY","gate":"G4","mode":"manual","required":true,"description":"Freeze, settlement, failure release and retry billing are consistent."},
+    {"id":"API_RESTART_RECOVERY","gate":"G5","mode":"manual","required":true,"description":"API restart does not lose or duplicate task state."},
+    {"id":"WORKER_RESTART_RECOVERY","gate":"G5","mode":"manual","required":true,"description":"Worker restart recovers safely without duplicate billing or publish."},
+    {"id":"REDIS_FAILURE_RECOVERY","gate":"G5","mode":"manual","required":true,"description":"Redis interruption and recovery do not cause uncontrolled duplicate consumption."},
+    {"id":"COS_FAILURE_RECOVERY","gate":"G5","mode":"manual","required":true,"description":"COS 403/404 failure closes safely and recovers after credentials/permission repair."},
+    {"id":"DATABASE_RESTORE_DRILL","gate":"G2","mode":"manual","required":true,"description":"Staging database restore drill completed and Smoke passed after restore."},
+    {"id":"PUBLISH_OR_EXPORT","gate":"G6","mode":"manual","required":true,"description":"One verified platform publishes with a test account, or export-only launch is explicitly approved."},
+    {"id":"SECURITY_GATE","gate":"G7","mode":"manual","required":true,"description":"Secret, CAM least privilege, network exposure and account-isolation checks passed."},
+    {"id":"OBSERVABILITY_GATE","gate":"G8","mode":"manual","required":true,"description":"Logs, alerts, backup evidence and release manifest are available for launch."}
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "results": {
+    "COS_MIGRATION_VERIFY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "REAL_MEDIA_INPUT_A_X3": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "REAL_MEDIA_INPUT_B_X3": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "BILLING_CONSISTENCY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "API_RESTART_RECOVERY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "WORKER_RESTART_RECOVERY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "REDIS_FAILURE_RECOVERY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "COS_FAILURE_RECOVERY": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "DATABASE_RESTORE_DRILL": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "PUBLISH_OR_EXPORT": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "SECURITY_GATE": {
+      "status": "manual_pending",
+      "evidence": []
+    },
+    "OBSERVABILITY_GATE": {
+      "status": "manual_pending",
+      "evidence": []
+    }
+  }
+}

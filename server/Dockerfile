@@ -3,9 +3,10 @@ FROM python:3.12.13-slim-trixie@sha256:57cd7c3a7a273101a6485ba99423ee56815788280
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
 
-# Chromium 供真实平台发布；字体供封面绘制与 libass 中文字幕渲染。
+# Chromium 供真实平台发布；字体供封面绘制与 libass 中文字幕渲染；
+# PostgreSQL client 供受控备份/恢复演练，不在宿主机依赖 pg_dump/pg_restore。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium ffmpeg fonts-noto-cjk \
+    && apt-get install -y --no-install-recommends chromium ffmpeg fonts-noto-cjk postgresql-client \
     && useradd --create-home --uid 10001 oral \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,13 +20,19 @@ COPY server/app ./app
 COPY server/scripts ./scripts
 COPY server/alembic.ini ./
 COPY server/alembic ./alembic
+COPY deploy/acceptance ./acceptance
 COPY vendor/social-auto-upload /vendor/social-auto-upload
 
 RUN mkdir -p /app/storage /vendor/social-auto-upload/cookies /vendor/social-auto-upload/logs \
     && chown -R oral:oral /app/storage /vendor/social-auto-upload \
     && python -c "from app.providers.publish.sau_conf import BASE_DIR, LOCAL_CHROME_PATH; assert BASE_DIR.is_dir(); assert LOCAL_CHROME_PATH" \
     && python -m scripts.migrate_storage_to_cos --help >/dev/null \
-    && python -m scripts.staging_preflight --help >/dev/null
+    && python -m scripts.staging_preflight --help >/dev/null \
+    && python -m scripts.database_backup --help >/dev/null \
+    && python -m scripts.database_restore_staging --help >/dev/null \
+    && python -m scripts.acceptance_report --help >/dev/null \
+    && pg_dump --version >/dev/null \
+    && pg_restore --version >/dev/null
 
 EXPOSE 8000
 USER oral

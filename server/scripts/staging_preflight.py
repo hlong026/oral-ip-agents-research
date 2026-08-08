@@ -11,7 +11,7 @@ import argparse
 import asyncio
 import json
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from app.core import storage
 from app.core.config import Settings, get_settings, validate_runtime_security
@@ -23,6 +23,7 @@ from app.core.events import init_redis, redis_ready
 class ExpectedIdentity:
     bucket: str
     database_host: str
+    database_name: str
     redis_host: str
     media_host: str
     allow_verified_publish: bool = False
@@ -30,6 +31,10 @@ class ExpectedIdentity:
 
 def _url_host(value: str) -> str:
     return (urlparse(value).hostname or "").strip().lower().rstrip(".")
+
+
+def _url_database(value: str) -> str:
+    return unquote(urlparse(value).path.lstrip("/"))
 
 
 def staging_identity_errors(settings: Settings, expected: ExpectedIdentity) -> list[str]:
@@ -43,6 +48,8 @@ def staging_identity_errors(settings: Settings, expected: ExpectedIdentity) -> l
         errors.append("S3_BUCKET does not match the Staging allow-list")
     if _url_host(settings.database_url) != expected.database_host.lower().rstrip("."):
         errors.append("DATABASE_URL host does not match the Staging allow-list")
+    if _url_database(settings.database_url) != expected.database_name:
+        errors.append("DATABASE_URL database does not match the Staging allow-list")
     if _url_host(settings.redis_url) != expected.redis_host.lower().rstrip("."):
         errors.append("REDIS_URL host does not match the Staging allow-list")
     if _url_host(settings.media_public_base_url) != expected.media_host.lower().rstrip("."):
@@ -112,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Validate the real Tencent Cloud Staging runtime before deployment")
     parser.add_argument("--expected-bucket", required=True)
     parser.add_argument("--expected-database-host", required=True)
+    parser.add_argument("--expected-database-name", required=True)
     parser.add_argument("--expected-redis-host", required=True)
     parser.add_argument("--expected-media-host", required=True)
     parser.add_argument("--allow-verified-publish", action="store_true")
@@ -124,6 +132,7 @@ async def async_main() -> int:
     expected = ExpectedIdentity(
         bucket=args.expected_bucket,
         database_host=args.expected_database_host,
+        database_name=args.expected_database_name,
         redis_host=args.expected_redis_host,
         media_host=args.expected_media_host,
         allow_verified_publish=args.allow_verified_publish,
@@ -144,6 +153,7 @@ async def async_main() -> int:
             "region": settings.s3_region,
             "endpointHost": _url_host(settings.s3_endpoint),
             "databaseHost": _url_host(settings.database_url),
+            "databaseName": _url_database(settings.database_url),
             "redisHost": _url_host(settings.redis_url),
             "mediaHost": _url_host(settings.media_public_base_url),
         },
