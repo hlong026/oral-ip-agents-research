@@ -34,6 +34,7 @@ require_immutable_image() {
 [ "$CONFIRM" = "RESTORE_STAGING_ONLY" ] || fail "explicit RESTORE_STAGING_ONLY confirmation is required"
 command -v docker >/dev/null 2>&1 || fail "missing command: docker"
 command -v grep >/dev/null 2>&1 || fail "missing command: grep"
+command -v id >/dev/null 2>&1 || fail "missing command: id"
 command -v python3 >/dev/null 2>&1 || fail "missing command: python3"
 command -v stat >/dev/null 2>&1 || fail "missing command: stat"
 require_private_file DEPLOY_ENV "$DEPLOY_ENV"
@@ -75,7 +76,7 @@ printf '%s\n' '1/5 stopping Staging API and Worker before destructive restore...
 compose stop worker server || true
 
 printf '%s\n' '2/5 restoring verified Staging backup...'
-set -- docker run --rm
+set -- docker run --rm --user "$(id -u):$(id -g)"
 if [ -n "${STAGING_DOCKER_NETWORK:-}" ]; then
   set -- "$@" --network "$STAGING_DOCKER_NETWORK"
 fi
