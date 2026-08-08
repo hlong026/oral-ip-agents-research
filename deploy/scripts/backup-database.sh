@@ -29,6 +29,7 @@ require_immutable_image() {
 [ -f "$DEPLOY_ENV" ] || fail "deployment env not found: $DEPLOY_ENV"
 command -v docker >/dev/null 2>&1 || fail "missing command: docker"
 command -v grep >/dev/null 2>&1 || fail "missing command: grep"
+command -v id >/dev/null 2>&1 || fail "missing command: id"
 command -v stat >/dev/null 2>&1 || fail "missing command: stat"
 require_private_file DEPLOY_ENV "$DEPLOY_ENV"
 
@@ -64,7 +65,7 @@ chmod 700 "$backup_dir"
 backup_dir=$(CDPATH= cd -- "$backup_dir" && pwd)
 docker pull "$ORAL_SERVER_IMAGE" >/dev/null
 
-set -- docker run --rm
+set -- docker run --rm --user "$(id -u):$(id -g)"
 if [ -n "$docker_network" ]; then
   set -- "$@" --network "$docker_network"
 fi
