@@ -46,6 +46,9 @@ jobs:
           sh -n deploy/scripts/preflight-staging.sh
           sh -n deploy/scripts/deploy-staging.sh
           sh -n deploy/scripts/staging-smoke.sh
+          sh -n deploy/scripts/backup-database.sh
+          sh -n deploy/scripts/restore-database-staging.sh
+          sh -n deploy/scripts/production-acceptance.sh
       - name: Build gateway image
         run: docker build -f deploy/Dockerfile.gateway -t oral-gateway:ci .
       - name: Validate gateway configuration
