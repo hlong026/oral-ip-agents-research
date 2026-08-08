@@ -73,6 +73,9 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
 
     assert "DEPLOY_ENVIRONMENT=staging" in deploy_env
     assert "STAGING_EXPECTED_COS_BUCKET=" in deploy_env
+    assert "STAGING_MIN_FREE_DISK_MB=10240" in deploy_env
+    assert "STAGING_MIN_AVAILABLE_MEMORY_MB=2048" in deploy_env
+    assert "STAGING_MIN_FREE_INODES=10000" in deploy_env
     assert "APP_ENV=staging" in runtime_env
     assert "STORAGE_DRIVER=s3" in runtime_env
     assert "PROVIDER_MOCK_FALLBACK_ENABLED=false" in runtime_env
@@ -80,6 +83,16 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
     assert "IM_ENABLED=false" in runtime_env
     assert "REPLACE_WITH_" in runtime_env
     assert "DEPLOY_ENVIRONMENT must be exactly staging" in preflight
+    assert "docker compose version" in preflight
+    assert "MemAvailable:" in preflight
+    assert "df -Pm" in preflight
+    assert "df -Pi" in preflight
+    assert "getent ahosts" in preflight
+    assert "ORAL_GATEWAY_IMAGE" in preflight
+    assert "ORAL_WEB_IMAGE" in preflight
+    assert "ORAL_ADMIN_IMAGE" in preflight
+    assert "ffmpeg -hide_banner -filters" in preflight
+    assert "command -v chromium" in preflight
     assert "@sha256:[0-9a-f]{64}" in preflight
     assert "python -m scripts.staging_preflight" in preflight
     assert 'probe_key = "ops/preflight/staging-runtime-v1.txt"' in preflight_python
