@@ -31,3 +31,15 @@ def test_manual_results_template_defaults_every_manual_gate_to_pending() -> None
     assert set(manual) == manual_ids
     assert all(entry["status"] == "manual_pending" for entry in manual.values())
     assert all(entry["evidence"] == [] for entry in manual.values())
+
+
+def test_server_image_packages_recovery_and_acceptance_tooling() -> None:
+    dockerfile = (ROOT / "server/Dockerfile").read_text(encoding="utf-8")
+
+    assert "postgresql-client" in dockerfile
+    assert "COPY deploy/acceptance ./acceptance" in dockerfile
+    assert "python -m scripts.database_backup --help" in dockerfile
+    assert "python -m scripts.database_restore_staging --help" in dockerfile
+    assert "python -m scripts.acceptance_report --help" in dockerfile
+    assert "pg_dump --version" in dockerfile
+    assert "pg_restore --version" in dockerfile
