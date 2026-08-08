@@ -65,6 +65,7 @@ set +a
 : "${DEPLOY_READY_URL:?DEPLOY_READY_URL is required}"
 : "${STAGING_EXPECTED_COS_BUCKET:?STAGING_EXPECTED_COS_BUCKET is required}"
 : "${STAGING_EXPECTED_DATABASE_HOST:?STAGING_EXPECTED_DATABASE_HOST is required}"
+: "${STAGING_EXPECTED_DATABASE_NAME:?STAGING_EXPECTED_DATABASE_NAME is required}"
 : "${STAGING_EXPECTED_REDIS_HOST:?STAGING_EXPECTED_REDIS_HOST is required}"
 : "${STAGING_EXPECTED_MEDIA_HOST:?STAGING_EXPECTED_MEDIA_HOST is required}"
 
@@ -123,6 +124,7 @@ set -- "$@" \
   python -m scripts.staging_preflight \
   --expected-bucket "$STAGING_EXPECTED_COS_BUCKET" \
   --expected-database-host "$STAGING_EXPECTED_DATABASE_HOST" \
+  --expected-database-name "$STAGING_EXPECTED_DATABASE_NAME" \
   --expected-redis-host "$STAGING_EXPECTED_REDIS_HOST" \
   --expected-media-host "$STAGING_EXPECTED_MEDIA_HOST"
 
