@@ -10,8 +10,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _MANUAL_STATUSES = {"manual_pending", "manual_pass", "manual_fail"}
 
@@ -84,10 +82,12 @@ def build_report(
 ) -> dict[str, Any]:
     if not _GIT_SHA_RE.fullmatch(git_commit):
         raise ValueError("git commit must be a 40-character lowercase SHA")
-    cases_doc = yaml.safe_load(cases_path.read_text(encoding="utf-8"))
+    cases_doc = _read_json(cases_path)
     manual_doc = _read_json(manual_results_path)
-    if not isinstance(cases_doc, dict) or not isinstance(cases_doc.get("cases"), list):
+    if cases_doc.get("schemaVersion") != 1 or not isinstance(cases_doc.get("cases"), list):
         raise ValueError("acceptance cases document is invalid")
+    if manual_doc.get("schemaVersion") != 1:
+        raise ValueError("manual results schemaVersion is invalid")
     manual_results = manual_doc.get("results")
     if not isinstance(manual_results, dict):
         raise ValueError("manual results document is invalid")
@@ -124,7 +124,8 @@ def build_report(
                 if status not in _MANUAL_STATUSES:
                     raise ValueError(f"invalid manual status for {case_id}: {status}")
                 evidence_raw = entry.get("evidence")
-                evidence = [str(item) for item in evidence_raw] if isinstance(evidence_raw, list) else []
+                evidence = [str(item).strip() for item in evidence_raw] if isinstance(evidence_raw, list) else []
+                evidence = [item for item in evidence if item]
                 ok = status == "manual_pass" and bool(evidence)
                 reason = None if ok else "manual case has not passed with evidence"
         else:
@@ -146,7 +147,8 @@ def build_report(
             }
         )
 
-    unknown_manual_ids = sorted(set(manual_results) - {item["id"] for item in results if item["mode"] == "manual"})
+    expected_manual_ids = {item["id"] for item in results if item["mode"] == "manual"}
+    unknown_manual_ids = sorted(set(manual_results) - expected_manual_ids)
     if unknown_manual_ids:
         raise ValueError(f"manual results contain unknown case ids: {unknown_manual_ids}")
 
@@ -163,7 +165,7 @@ def build_report(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build a fail-closed Production Go/No-Go acceptance report")
-    parser.add_argument("--cases", default="/app/acceptance/acceptance-cases.yaml")
+    parser.add_argument("--cases", default="/app/acceptance/acceptance-cases.json")
     parser.add_argument("--evidence-dir", required=True)
     parser.add_argument("--manual-results", required=True)
     parser.add_argument("--git-commit", required=True)
@@ -181,9 +183,17 @@ def main() -> None:
         git_commit=args.git_commit,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
     output_path.chmod(0o600)
-    print(json.dumps({"ok": report["ok"], "decision": report["decision"], "output": str(output_path)}, sort_keys=True))
+    print(
+        json.dumps(
+            {"ok": report["ok"], "decision": report["decision"], "output": str(output_path)},
+            sort_keys=True,
+        )
+    )
     raise SystemExit(0 if report["ok"] else 3)
 
 
