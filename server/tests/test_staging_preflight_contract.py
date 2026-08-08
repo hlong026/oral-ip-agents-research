@@ -68,6 +68,7 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
     deploy_env = (ROOT / "deploy/.env.staging.example").read_text(encoding="utf-8")
     runtime_env = (ROOT / "server/.env.staging.example").read_text(encoding="utf-8")
     preflight = (ROOT / "deploy/scripts/preflight-staging.sh").read_text(encoding="utf-8")
+    preflight_python = (ROOT / "server/scripts/staging_preflight.py").read_text(encoding="utf-8")
     dockerfile = (ROOT / "server/Dockerfile").read_text(encoding="utf-8")
 
     assert "DEPLOY_ENVIRONMENT=staging" in deploy_env
@@ -81,4 +82,6 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
     assert "DEPLOY_ENVIRONMENT must be exactly staging" in preflight
     assert "@sha256:[0-9a-f]{64}" in preflight
     assert "python -m scripts.staging_preflight" in preflight
+    assert 'probe_key = "ops/preflight/staging-runtime-v1.txt"' in preflight_python
+    assert "delete_object" not in preflight_python
     assert "python -m scripts.staging_preflight --help" in dockerfile
