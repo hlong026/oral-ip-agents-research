@@ -58,12 +58,7 @@ def _automated_evidence(
         metadata_path = candidates[-1]
         metadata = _read_json(metadata_path)
         dump_name = metadata.get("dumpFile")
-        if (
-            not isinstance(dump_name, str)
-            or not dump_name
-            or "/" in dump_name
-            or "\\" in dump_name
-        ):
+        if not isinstance(dump_name, str) or not dump_name or "/" in dump_name or "\\" in dump_name:
             return False, [str(metadata_path)], "invalid dump filename in backup metadata"
         dump_path = backup_dir / dump_name
         if not dump_path.is_file():
@@ -133,11 +128,7 @@ def build_report(
                 if status not in _MANUAL_STATUSES:
                     raise ValueError(f"invalid manual status for {case_id}: {status}")
                 evidence_raw = entry.get("evidence")
-                evidence = (
-                    [str(item).strip() for item in evidence_raw]
-                    if isinstance(evidence_raw, list)
-                    else []
-                )
+                evidence = [str(item).strip() for item in evidence_raw] if isinstance(evidence_raw, list) else []
                 evidence = [item for item in evidence if item]
                 ok = status == "manual_pass" and bool(evidence)
                 reason = None if ok else "manual case has not passed with evidence"
@@ -160,9 +151,7 @@ def build_report(
             }
         )
 
-    expected_manual_ids = {
-        item["id"] for item in results if item["mode"] == "manual"
-    }
+    expected_manual_ids = {item["id"] for item in results if item["mode"] == "manual"}
     unknown_manual_ids = sorted(set(manual_results) - expected_manual_ids)
     if unknown_manual_ids:
         raise ValueError(f"manual results contain unknown case ids: {unknown_manual_ids}")
@@ -179,9 +168,7 @@ def build_report(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Build a fail-closed Production Go/No-Go acceptance report"
-    )
+    parser = argparse.ArgumentParser(description="Build a fail-closed Production Go/No-Go acceptance report")
     parser.add_argument("--cases", default="/app/acceptance/acceptance-cases.json")
     parser.add_argument("--evidence-dir", required=True)
     parser.add_argument("--manual-results", required=True)

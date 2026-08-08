@@ -20,9 +20,9 @@ def test_acceptance_runner_uses_private_manual_results_and_propagates_no_go() ->
 
 
 def test_manual_results_template_defaults_every_manual_gate_to_pending() -> None:
-    cases = __import__("json").loads(
-        (ROOT / "deploy/acceptance/acceptance-cases.json").read_text(encoding="utf-8")
-    )["cases"]
+    cases = __import__("json").loads((ROOT / "deploy/acceptance/acceptance-cases.json").read_text(encoding="utf-8"))[
+        "cases"
+    ]
     manual = __import__("json").loads(
         (ROOT / "deploy/acceptance/manual-results.example.json").read_text(encoding="utf-8")
     )["results"]
