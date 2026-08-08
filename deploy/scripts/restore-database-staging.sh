@@ -99,5 +99,5 @@ printf '%s\n' '4/5 restarting Staging API and Worker...'
 compose up -d server worker
 
 printf '%s\n' '5/5 validating restored environment through the authenticated Smoke gate...'
-"$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
+sh "$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
 printf '%s\n' 'Staging database restore drill passed'
