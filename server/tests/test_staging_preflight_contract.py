@@ -78,7 +78,7 @@ def test_checked_in_staging_templates_are_fail_closed_placeholders() -> None:
     assert "PUBLISH_VERIFIED_PLATFORMS=\n" in runtime_env
     assert "IM_ENABLED=false" in runtime_env
     assert "REPLACE_WITH_" in runtime_env
-    assert 'DEPLOY_ENVIRONMENT must be exactly staging' in preflight
+    assert "DEPLOY_ENVIRONMENT must be exactly staging" in preflight
     assert "@sha256:[0-9a-f]{64}" in preflight
     assert "python -m scripts.staging_preflight" in preflight
     assert "python -m scripts.staging_preflight --help" in dockerfile
