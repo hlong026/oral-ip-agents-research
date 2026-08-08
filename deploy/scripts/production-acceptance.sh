@@ -48,7 +48,7 @@ chmod 700 "$STAGING_EVIDENCE_DIR"
 output="$STAGING_EVIDENCE_DIR/acceptance-${RELEASE_GIT_COMMIT}.json"
 
 printf '%s\n' 'refreshing authenticated Staging smoke before Go/No-Go evaluation...'
-"$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
+sh "$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
 
 printf '%s\n' 'building fail-closed Production acceptance report...'
 set +e
