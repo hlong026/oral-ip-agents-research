@@ -45,7 +45,7 @@ compose() {
 }
 
 printf '%s\n' '1/7 running fail-closed Staging preflight...'
-"$ROOT_DIR/deploy/scripts/preflight-staging.sh" "$DEPLOY_ENV"
+sh "$ROOT_DIR/deploy/scripts/preflight-staging.sh" "$DEPLOY_ENV"
 
 printf '%s\n' '2/7 validating Staging compose...'
 compose config --quiet
@@ -84,7 +84,7 @@ assert storage.get("driver") == "s3", storage
 done
 
 printf '%s\n' '7/7 running authenticated Staging smoke...'
-"$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
+sh "$ROOT_DIR/deploy/scripts/staging-smoke.sh" "$DEPLOY_ENV"
 
 mkdir -p "$STAGING_EVIDENCE_DIR"
 chmod 700 "$STAGING_EVIDENCE_DIR"
