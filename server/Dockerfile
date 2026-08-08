@@ -28,6 +28,9 @@ RUN mkdir -p /app/storage /vendor/social-auto-upload/cookies /vendor/social-auto
     && python -c "from app.providers.publish.sau_conf import BASE_DIR, LOCAL_CHROME_PATH; assert BASE_DIR.is_dir(); assert LOCAL_CHROME_PATH" \
     && python -m scripts.migrate_storage_to_cos --help >/dev/null \
     && python -m scripts.staging_preflight --help >/dev/null \
+    && python -m scripts.database_backup --help >/dev/null \
+    && python -m scripts.database_restore_staging --help >/dev/null \
+    && python -m scripts.acceptance_report --help >/dev/null \
     && pg_dump --version >/dev/null \
     && pg_restore --version >/dev/null
 
