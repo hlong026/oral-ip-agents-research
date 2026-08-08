@@ -23,10 +23,17 @@ require_private_file() {
   esac
 }
 
+require_immutable_image() {
+  name=$1
+  value=$2
+  printf '%s' "$value" | grep -Eq '@sha256:[0-9a-f]{64}$' || fail "$name must use an immutable @sha256 digest"
+}
+
 [ -f "$DEPLOY_ENV" ] || fail "deployment env not found: $DEPLOY_ENV"
 [ -n "$METADATA_FILE" ] || fail "usage: restore-database-staging.sh <deploy-env> <backup-metadata.json> RESTORE_STAGING_ONLY"
 [ "$CONFIRM" = "RESTORE_STAGING_ONLY" ] || fail "explicit RESTORE_STAGING_ONLY confirmation is required"
 command -v docker >/dev/null 2>&1 || fail "missing command: docker"
+command -v grep >/dev/null 2>&1 || fail "missing command: grep"
 command -v python3 >/dev/null 2>&1 || fail "missing command: python3"
 command -v stat >/dev/null 2>&1 || fail "missing command: stat"
 require_private_file DEPLOY_ENV "$DEPLOY_ENV"
@@ -43,7 +50,9 @@ set +a
 : "${STAGING_EXPECTED_DATABASE_HOST:?STAGING_EXPECTED_DATABASE_HOST is required}"
 : "${STAGING_EXPECTED_DATABASE_NAME:?STAGING_EXPECTED_DATABASE_NAME is required}"
 : "${DEPLOY_READY_URL:?DEPLOY_READY_URL is required}"
+require_immutable_image ORAL_SERVER_IMAGE "$ORAL_SERVER_IMAGE"
 require_private_file ORAL_ENV_FILE "$ORAL_ENV_FILE"
+docker pull "$ORAL_SERVER_IMAGE" >/dev/null
 
 metadata_dir=$(CDPATH= cd -- "$(dirname -- "$METADATA_FILE")" && pwd)
 metadata_name=$(basename -- "$METADATA_FILE")
